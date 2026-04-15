@@ -1,0 +1,248 @@
+// InvoiceFlow Database Schema
+generator client {
+    provider = "prisma-client-js"
+}
+
+datasource db {
+    provider = "postgresql"
+    url      = env("DATABASE_URL")
+}
+
+// NextAuth tables
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// Application tables
+model User {
+  id            String       @id @default(cuid())
+  email         String       @unique
+  password_hash String
+  name          String
+  created_at    DateTime     @default(now())
+  updated_at    DateTime     @updatedAt
+  
+  accounts       Account[]
+  sessions       Session[]
+  memberships    Membership[]
+  documents      Document[]
+  audit_logs     AuditLog[]
+  telegram_links TelegramLink[]
+
+  @@index([email])
+}
+
+model Company {
+  id                       String         @id @default(cuid())
+  name                     String
+  tax_id                   String
+  address                  String?
+  country                  String         @default("GB")
+  fiscal_year_start        Int            @default(1)  // Month (1-12)
+  export_email             String
+  telegram_bot_token       String?
+  telegram_webhook_secret  String?        // Secret for webhook verification
+  email_forwarding_address String?
+  ai_provider              String         @default("external") // local, external
+  ai_api_key               String?
+  ai_api_endpoint          String?
+  created_at               DateTime       @default(now())
+  updated_at               DateTime       @updatedAt
+  
+  memberships    Membership[]
+  subscriptions  Subscription[]
+  documents      Document[]
+  invoices       Invoice[]
+  exports        Export[]
+  audit_logs     AuditLog[]
+  telegram_links TelegramLink[]
+
+  @@index([tax_id])
+}
+
+model Membership {
+  id         String   @id @default(cuid())
+  user_id    String
+  company_id String
+  role       String   @default("admin") // admin, member, viewer
+  created_at DateTime @default(now())
+  
+  user    User    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [company_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, company_id])
+  @@index([user_id])
+  @@index([company_id])
+}
+
+model Subscription {
+  id                     String    @id @default(cuid())
+  company_id             String
+  stripe_customer_id     String?   @unique
+  stripe_subscription_id String?   @unique
+  plan_name              String    @default("starter") // starter, professional, enterprise
+  status                 String    @default("active") // active, inactive, cancelled, past_due
+  current_period_start   DateTime?
+  current_period_end     DateTime?
+  created_at             DateTime  @default(now())
+  updated_at             DateTime  @updatedAt
+  
+  company Company @relation(fields: [company_id], references: [id], onDelete: Cascade)
+
+  @@index([company_id])
+  @@index([stripe_customer_id])
+  @@index([stripe_subscription_id])
+}
+
+model Document {
+  id                   String   @id @default(cuid())
+  company_id           String
+  user_id              String?
+  source_channel       String   // web, telegram, email
+  original_filename    String
+  mime_type            String
+  upload_timestamp     DateTime @default(now())
+  processing_status    String   @default("processing") // processing, completed, needs_review, failed
+  confidence_score     Float?
+  cloud_storage_path   String   // S3 key
+  is_public            Boolean  @default(false)
+  telegram_chat_id     String?  // For sending status updates via Telegram
+  telegram_message_id  Int?     // Message ID for editing status messages
+  created_at           DateTime @default(now())
+  updated_at           DateTime @updatedAt
+  
+  company Company   @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  user    User?     @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  invoice Invoice?
+
+  @@index([company_id])
+  @@index([processing_status])
+  @@index([source_channel])
+  @@index([upload_timestamp])
+}
+
+model TelegramLink {
+  id          String   @id @default(cuid())
+  telegram_id String   // Telegram user ID (as string)
+  user_id     String
+  company_id  String
+  username    String?  // Telegram username
+  first_name  String?
+  created_at  DateTime @default(now())
+  
+  user    User    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [company_id], references: [id], onDelete: Cascade)
+
+  @@unique([telegram_id, company_id])
+  @@index([telegram_id])
+  @@index([user_id])
+  @@index([company_id])
+}
+
+model Invoice {
+  id                     String   @id @default(cuid())
+  document_id            String   @unique
+  company_id             String
+  invoice_type           String   // received, issued
+  invoice_number         String
+  issue_date             DateTime
+  due_date               DateTime?
+  supplier_name          String
+  supplier_tax_id        String?
+  customer_name          String
+  customer_tax_id        String?
+  subtotal               Float
+  tax_amount             Float
+  total_amount           Float
+  currency               String   @default("EUR")
+  tax_rate               Float?
+  payment_method         String?
+  category               String?
+  notes                  String?  @db.Text
+  extraction_confidence  Float
+  review_status          String   @default("pending") // pending, approved, rejected
+  created_at             DateTime @default(now())
+  updated_at             DateTime @updatedAt
+  
+  document Document @relation(fields: [document_id], references: [id], onDelete: Cascade)
+  company  Company  @relation(fields: [company_id], references: [id], onDelete: Cascade)
+
+  @@index([company_id])
+  @@index([invoice_type])
+  @@index([issue_date])
+  @@index([review_status])
+  @@index([invoice_number, supplier_name, issue_date]) // For duplicate detection
+}
+
+model Export {
+  id            String    @id @default(cuid())
+  company_id    String
+  export_type   String    // monthly, quarterly
+  period_start  DateTime
+  period_end    DateTime
+  record_count  Int
+  cloud_storage_path String  // S3 key for CSV file
+  is_public     Boolean   @default(false)
+  email_sent    Boolean   @default(false)
+  email_sent_at DateTime?
+  created_at    DateTime  @default(now())
+  
+  company Company @relation(fields: [company_id], references: [id], onDelete: Cascade)
+
+  @@index([company_id])
+  @@index([export_type])
+  @@index([created_at])
+}
+
+model AuditLog {
+  id          String    @id @default(cuid())
+  company_id  String
+  user_id     String?
+  entity_type String    // invoice, document, company, export
+  entity_id   String
+  action      String    // create, update, delete, review
+  old_values  String?   @db.Text // JSON string
+  new_values  String?   @db.Text // JSON string
+  created_at  DateTime  @default(now())
+  
+  company Company @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [user_id], references: [id], onDelete: SetNull)
+
+  @@index([company_id])
+  @@index([entity_type, entity_id])
+  @@index([created_at])
+}
