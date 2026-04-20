@@ -24,7 +24,7 @@ export interface InvoiceExtraction {
 }
 
 export interface AIProviderConfig {
-  provider: 'local' | 'external';
+  provider: 'local' | 'external' | 'gemini';
   apiKey?: string | null;
   apiEndpoint?: string | null;
 }
@@ -62,15 +62,23 @@ Respond with raw JSON only (no markdown, no code blocks). Use this exact structu
   "needs_review": false
 }`;
 
+function isGeminiProvider(config?: AIProviderConfig): boolean {
+  // Gemini is the default when API key is configured, unless forced local
+  const forceLocal = process.env.FORCE_LOCAL_AI === 'true' || process.env.AI_FORCE_LOCAL === '1';
+  if (forceLocal) return false;
+  if (config?.provider === 'gemini') return true;
+  if (config?.provider === 'local' || config?.provider === 'external') return false;
+  // Default: use Gemini if key is available
+  return !!process.env.GEMINI_API_KEY;
+}
+
 function getProviderConfig(config?: AIProviderConfig): { apiUrl: string; apiKey: string; model: string } {
-  // Hard override option: force all extraction through local Ollama
   const forceLocal = process.env.FORCE_LOCAL_AI === 'true' || process.env.AI_FORCE_LOCAL === '1';
   if (forceLocal) {
     const base = (process.env.OLLAMA_BASE_URL || 'http://10.6.0.5:11434/v1').replace(/\/$/, '');
     return {
       apiUrl: base + '/chat/completions',
       apiKey: process.env.OLLAMA_API_KEY || 'ollama',
-      // Best balance for extraction quality/speed from installed local models
       model: process.env.OLLAMA_MODEL || 'qwen2.5:14b',
     };
   }
@@ -79,17 +87,65 @@ function getProviderConfig(config?: AIProviderConfig): { apiUrl: string; apiKey:
     return {
       apiUrl: config.apiEndpoint.replace(/\/$/, '') + '/chat/completions',
       apiKey: config.apiKey,
-      // Local-first default model for OpenAI-compatible endpoints (Ollama / OpenRouter)
       model: process.env.EXTERNAL_AI_MODEL || 'qwen2.5:14b',
     };
   }
 
-  const base = (process.env.OLLAMA_BASE_URL || 'http://10.6.0.5:11434/v1').replace(/\/$/, '' );
+  const base = (process.env.OLLAMA_BASE_URL || 'http://10.6.0.5:11434/v1').replace(/\/$/, '');
   return {
     apiUrl: base + '/chat/completions',
     apiKey: process.env.OLLAMA_API_KEY || 'ollama',
     model: process.env.OLLAMA_MODEL || 'qwen2.5:14b',
   };
+}
+
+async function extractWithGemini(
+  fileBase64: string,
+  mimeType: string,
+): Promise<InvoiceExtraction> {
+  const apiKey = process.env.GEMINI_API_KEY!;
+  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash-preview-04-17';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+  const body = {
+    contents: [{
+      parts: [
+        { inlineData: { mimeType, data: fileBase64 } },
+        { text: EXTRACTION_PROMPT },
+      ],
+    }],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      maxOutputTokens: 2000,
+    },
+  };
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => response.statusText);
+    throw new Error(`Gemini API error (${response.status}): ${errorText}`);
+  }
+
+  const data = await response.json();
+  const content = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+  if (!content) {
+    throw new Error('No content in Gemini response');
+  }
+
+  let rawJson: any;
+  try {
+    rawJson = JSON.parse(content);
+  } catch {
+    throw new Error('Gemini response is not valid JSON');
+  }
+
+  return validateExtraction(rawJson);
 }
 
 /**
@@ -186,35 +242,22 @@ export async function extractInvoiceData(
   filename: string,
   providerConfig?: AIProviderConfig
 ): Promise<InvoiceExtraction> {
+  // Use Gemini when available (default provider)
+  if (isGeminiProvider(providerConfig)) {
+    return extractWithGemini(fileBase64, mimeType);
+  }
+
+  // Fallback: OpenAI-compatible (Ollama or external)
   const { apiUrl, apiKey, model } = getProviderConfig(providerConfig);
 
   if (!apiKey) {
     throw new Error('No AI API key configured');
   }
 
-  const isAbacus = false;
-
-  // Build the file content for the AI
-  const userContent: any[] = [];
-
-  if (isAbacus) {
-    userContent.push({
-      type: 'file',
-      file: {
-        filename: filename,
-        file_data: `data:${mimeType};base64,${fileBase64}`,
-      },
-    });
-  } else {
-    userContent.push({
-      type: 'image_url',
-      image_url: {
-        url: `data:${mimeType};base64,${fileBase64}`,
-      },
-    });
-  }
-
-  userContent.push({ type: 'text', text: EXTRACTION_PROMPT });
+  const userContent: any[] = [
+    { type: 'image_url', image_url: { url: `data:${mimeType};base64,${fileBase64}` } },
+    { type: 'text', text: EXTRACTION_PROMPT },
+  ];
 
   const response = await fetch(apiUrl, {
     method: 'POST',
@@ -245,10 +288,9 @@ export async function extractInvoiceData(
   let rawJson: any;
   try {
     rawJson = JSON.parse(content);
-  } catch (e) {
+  } catch {
     throw new Error('AI response is not valid JSON');
   }
 
-  // Validate and sanitize through our strict validation layer
   return validateExtraction(rawJson);
 }
