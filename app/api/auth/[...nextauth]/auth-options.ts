@@ -54,11 +54,22 @@ export const authOptions: NextAuthOptions = {
       if (user) {
         token.id = user.id;
       }
+      // Refresh company_type on every token refresh
+      if (token.id) {
+        const membership = await prisma.membership.findFirst({
+          where: { user_id: token.id as string },
+          include: { company: { select: { id: true, company_type: true } } },
+        });
+        token.companyId = membership?.company.id ?? null;
+        token.companyType = membership?.company.company_type ?? 'individual';
+      }
       return token;
     },
     async session({ session, token }: any) {
       if (session?.user) {
         session.user.id = token.id;
+        session.user.companyId = token.companyId;
+        session.user.companyType = token.companyType;
       }
       return session;
     },

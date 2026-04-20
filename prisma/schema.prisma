@@ -80,18 +80,22 @@ model Company {
   ai_provider              String         @default("external") // local, external
   ai_api_key               String?
   ai_api_endpoint          String?
+  company_type             String         @default("individual") // individual | gestoria
   created_at               DateTime       @default(now())
   updated_at               DateTime       @updatedAt
-  
-  memberships    Membership[]
-  subscriptions  Subscription[]
-  documents      Document[]
-  invoices       Invoice[]
-  exports        Export[]
-  audit_logs     AuditLog[]
-  telegram_links TelegramLink[]
+
+  memberships         Membership[]
+  subscriptions       Subscription[]
+  documents           Document[]
+  invoices            Invoice[]
+  exports             Export[]
+  audit_logs          AuditLog[]
+  telegram_links      TelegramLink[]
+  license_packs       LicensePack[]       // gestoria only
+  assigned_licenses   License[]           // licenses assigned to this company (client side)
 
   @@index([tax_id])
+  @@index([company_type])
 }
 
 model Membership {
@@ -238,11 +242,69 @@ model AuditLog {
   old_values  String? // JSON string
   new_values  String? // JSON string
   created_at  DateTime  @default(now())
-  
+
   company Company @relation(fields: [company_id], references: [id], onDelete: Cascade)
   user    User?   @relation(fields: [user_id], references: [id], onDelete: SetNull)
 
   @@index([company_id])
   @@index([entity_type, entity_id])
   @@index([created_at])
+}
+
+// --- Gestoria license management ---
+
+model LicensePack {
+  id                     String    @id @default(cuid())
+  gestoria_company_id    String
+  pack_size              Int       // 10, 20, 50
+  licenses_used          Int       @default(0)
+  stripe_subscription_id String?
+  status                 String    @default("active") // active, cancelled, expired
+  period_start           DateTime  @default(now())
+  period_end             DateTime?
+  created_at             DateTime  @default(now())
+  updated_at             DateTime  @updatedAt
+
+  gestoria_company Company   @relation(fields: [gestoria_company_id], references: [id], onDelete: Cascade)
+  licenses         License[]
+
+  @@index([gestoria_company_id])
+  @@index([status])
+}
+
+model License {
+  id                String    @id @default(cuid())
+  pack_id           String
+  client_company_id String?   // null = available
+  status            String    @default("available") // available, assigned, revoked
+  assigned_at       DateTime?
+  revoked_at        DateTime?
+  created_at        DateTime  @default(now())
+
+  pack           LicensePack        @relation(fields: [pack_id], references: [id], onDelete: Cascade)
+  client_company Company?           @relation(fields: [client_company_id], references: [id], onDelete: SetNull)
+  invitation     LicenseInvitation?
+
+  @@index([pack_id])
+  @@index([client_company_id])
+  @@index([status])
+}
+
+model LicenseInvitation {
+  id                  String    @id @default(cuid())
+  gestoria_company_id String
+  license_id          String    @unique
+  email               String
+  token               String    @unique
+  status              String    @default("pending") // pending, accepted, expired, revoked
+  expires_at          DateTime
+  accepted_at         DateTime?
+  created_at          DateTime  @default(now())
+
+  license License @relation(fields: [license_id], references: [id], onDelete: Cascade)
+
+  @@index([gestoria_company_id])
+  @@index([token])
+  @@index([email])
+  @@index([status])
 }

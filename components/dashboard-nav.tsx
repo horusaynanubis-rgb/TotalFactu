@@ -2,19 +2,21 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { signOut } from 'next-auth/react';
+import { signOut, useSession } from 'next-auth/react';
 import { Button } from '@/components/ui/button';
-import { 
-  LayoutDashboard, 
-  FileText, 
-  Receipt, 
+import { Badge } from '@/components/ui/badge';
+import {
+  LayoutDashboard,
+  FileText,
+  Receipt,
   ListChecks,
-  Download, 
-  Settings, 
+  Download,
+  Settings,
   CreditCard,
   LogOut,
   Menu,
-  X
+  X,
+  Building2
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useState } from 'react';
@@ -25,6 +27,8 @@ export function DashboardNav() {
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { t } = useTranslation();
+  const { data: session } = useSession();
+  const isGestoria = (session?.user as any)?.companyType === 'gestoria';
 
   const navigation = [
     { name: t.nav.dashboard, href: '/dashboard', icon: LayoutDashboard },
@@ -32,6 +36,7 @@ export function DashboardNav() {
     { name: t.nav.invoices, href: '/dashboard/invoices', icon: Receipt },
     { name: 'Cola de Revisión', href: '/dashboard/review', icon: ListChecks },
     { name: t.nav.exports, href: '/dashboard/exports', icon: Download },
+    ...(isGestoria ? [{ name: 'Portal Gestoría', href: '/dashboard/gestoria', icon: Building2, badge: true }] : []),
     { name: t.nav.settings, href: '/dashboard/settings', icon: Settings },
     { name: t.nav.billing, href: '/dashboard/billing', icon: CreditCard },
   ];
@@ -70,7 +75,12 @@ export function DashboardNav() {
                         isActive ? 'text-white' : 'text-gray-400 group-hover:text-gray-500'
                       )}
                     />
-                    {item?.name}
+                    <span className="flex-1">{item?.name}</span>
+                    {item?.badge && (
+                      <Badge variant="secondary" className="ml-2 text-xs px-1.5 py-0">
+                        PRO
+                      </Badge>
+                    )}
                   </Link>
                 );
               })}
@@ -142,7 +152,12 @@ export function DashboardNav() {
                         isActive ? 'text-white' : 'text-gray-400 group-hover:text-gray-500'
                       )}
                     />
-                    {item?.name}
+                    <span className="flex-1">{item?.name}</span>
+                    {item?.badge && (
+                      <Badge variant="secondary" className="ml-2 text-xs px-1.5 py-0">
+                        PRO
+                      </Badge>
+                    )}
                   </Link>
                 );
               })}

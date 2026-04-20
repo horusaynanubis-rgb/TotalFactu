@@ -1,13 +1,40 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useSession } from 'next-auth/react';
+import { useRouter } from 'next/navigation';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { CreditCard, CheckCircle } from 'lucide-react';
+import { CreditCard, CheckCircle, Building2, Users, Package } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import toast from 'react-hot-toast';
 import { useTranslation } from '@/lib/i18n/context';
+
+const GESTORIA_PACKS = [
+  {
+    size: 10,
+    price: 89,
+    label: 'Pack Básico',
+    description: 'Ideal para gestorías pequeñas',
+    features: ['10 licencias de cliente', 'Portal de gestión incluido', 'Invitaciones por enlace', 'Soporte prioritario'],
+  },
+  {
+    size: 20,
+    price: 159,
+    label: 'Pack Profesional',
+    description: 'Para gestorías en crecimiento',
+    features: ['20 licencias de cliente', 'Portal de gestión incluido', 'Invitaciones por enlace', 'Soporte prioritario', 'Ahorro vs. Pack Básico'],
+    popular: true,
+  },
+  {
+    size: 50,
+    price: 349,
+    label: 'Pack Business',
+    description: 'Para grandes despachos',
+    features: ['50 licencias de cliente', 'Portal de gestión incluido', 'Invitaciones por enlace', 'Gestor de cuenta dedicado', 'Mayor ahorro por licencia'],
+  },
+];
 
 const PLAN_KEYS = ['starter', 'professional', 'enterprise'] as const;
 const PLAN_PRICES: Record<string, number> = {
@@ -24,7 +51,11 @@ const PLAN_NAMES: Record<string, string> = {
 export default function BillingPage() {
   const [subscription, setSubscription] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [purchasingPack, setPurchasingPack] = useState<number | null>(null);
   const { t } = useTranslation();
+  const { data: session } = useSession();
+  const router = useRouter();
+  const isGestoria = (session?.user as any)?.companyType === 'gestoria';
 
   useEffect(() => {
     fetchSubscription();
@@ -149,6 +180,89 @@ export default function BillingPage() {
               </Card>
             );
           })}
+        </div>
+      </div>
+
+      {/* Gestoria Packs Section */}
+      <div className="pt-4 border-t">
+        <div className="flex items-center gap-3 mb-2">
+          <Building2 className="h-6 w-6 text-primary" />
+          <div>
+            <h2 className="text-xl font-bold text-gray-900">Packs para Gestorías</h2>
+            <p className="text-sm text-gray-500">Compra licencias en bloque y asígnalas a tus clientes</p>
+          </div>
+          {isGestoria && (
+            <Badge className="ml-auto" variant="secondary">Gestoría activa</Badge>
+          )}
+        </div>
+
+        <div className="grid md:grid-cols-3 gap-6 mt-4">
+          {GESTORIA_PACKS.map((pack) => (
+            <Card key={pack.size} className={`border-2 relative ${pack.popular ? 'border-primary' : ''}`}>
+              {pack.popular && (
+                <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+                  <Badge className="bg-primary text-white px-3">Más popular</Badge>
+                </div>
+              )}
+              <CardHeader className="text-center pb-2">
+                <CardTitle className="text-lg">{pack.label}</CardTitle>
+                <CardDescription>{pack.description}</CardDescription>
+                <div className="mt-3">
+                  <span className="text-3xl font-bold">€{pack.price}</span>
+                  <span className="text-gray-500 text-sm">/mes</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {(pack.price / pack.size).toFixed(0)}€ por licencia/mes
+                </p>
+              </CardHeader>
+              <CardContent>
+                <ul className="space-y-2 mb-5">
+                  {pack.features.map((f, i) => (
+                    <li key={i} className="flex items-start gap-2">
+                      <CheckCircle className="h-4 w-4 text-green-500 flex-shrink-0 mt-0.5" />
+                      <span className="text-xs text-gray-600">{f}</span>
+                    </li>
+                  ))}
+                </ul>
+                <Button
+                  className="w-full"
+                  variant={pack.popular ? 'default' : 'outline'}
+                  disabled={!!purchasingPack}
+                  onClick={async () => {
+                    setPurchasingPack(pack.size);
+                    try {
+                      const res = await fetch('/api/gestoria/packs/purchase', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ pack_size: pack.size }),
+                      });
+                      const data = await res.json();
+                      if (!res.ok) {
+                        toast.error(data.error || 'Error al procesar la compra');
+                        return;
+                      }
+                      toast.success(`Pack de ${pack.size} licencias activado`);
+                      router.push('/dashboard/gestoria');
+                    } catch {
+                      toast.error('Error inesperado');
+                    } finally {
+                      setPurchasingPack(null);
+                    }
+                  }}
+                >
+                  {purchasingPack === pack.size ? (
+                    <span className="flex items-center gap-2">
+                      <Package className="h-4 w-4 animate-pulse" /> Procesando...
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-2">
+                      <Users className="h-4 w-4" /> Comprar pack
+                    </span>
+                  )}
+                </Button>
+              </CardContent>
+            </Card>
+          ))}
         </div>
       </div>
 

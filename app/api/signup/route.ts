@@ -5,84 +5,77 @@ import * as bcrypt from 'bcryptjs';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { name, email, password, companyName, taxId } = body;
+    const { name, email, password, companyName, taxId, activationToken } = body;
 
-    // Validate required fields
     if (!name || !email || !password || !companyName || !taxId) {
-      return NextResponse.json(
-        { message: 'All fields are required' },
-        { status: 400 }
-      );
+      return NextResponse.json({ message: 'All fields are required' }, { status: 400 });
     }
 
-    // Check if user already exists
-    const existingUser = await prisma.user.findUnique({
-      where: { email },
-    });
-
+    const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {
-      return NextResponse.json(
-        { message: 'User with this email already exists' },
-        { status: 400 }
-      );
+      return NextResponse.json({ message: 'User with this email already exists' }, { status: 400 });
     }
 
-    // Hash password
-    const password_hash = await bcrypt.hash(password, 10);
-
-    // Create user, company, membership, and subscription in a transaction
-    const result = await prisma.$transaction(async (tx: any) => {
-      // Create user
-      const user = await tx.user.create({
-        data: {
-          name,
-          email,
-          password_hash,
-        },
+    // Validate activation token if provided
+    let invitation: { id: string; email: string; license_id: string; expires_at: Date; status: string; license: any } | null = null;
+    if (activationToken) {
+      invitation = await prisma.licenseInvitation.findUnique({
+        where: { token: activationToken },
+        include: { license: { include: { pack: true } } },
       });
 
-      // Create company
+      if (!invitation || invitation.status !== 'pending' || invitation.expires_at < new Date()) {
+        return NextResponse.json({ message: 'Invalid or expired activation link' }, { status: 400 });
+      }
+
+      if (invitation.email.toLowerCase() !== email.toLowerCase()) {
+        return NextResponse.json({ message: 'Email does not match the invitation' }, { status: 400 });
+      }
+    }
+
+    const password_hash = await bcrypt.hash(password, 10);
+
+    const result = await prisma.$transaction(async (tx: any) => {
+      const user = await tx.user.create({ data: { name, email, password_hash } });
+
       const company = await tx.company.create({
         data: {
           name: companyName,
           tax_id: taxId,
-          export_email: email, // Use user email as default export email
+          export_email: email,
         },
       });
 
-      // Create membership
       await tx.membership.create({
-        data: {
-          user_id: user.id,
-          company_id: company.id,
-          role: 'admin',
-        },
+        data: { user_id: user.id, company_id: company.id, role: 'admin' },
       });
 
-      // Create subscription
       await tx.subscription.create({
-        data: {
-          company_id: company.id,
-          plan_name: 'starter',
-          status: 'active',
-        },
+        data: { company_id: company.id, plan_name: 'starter', status: 'active' },
       });
+
+      // Link the gestoria license to this new company
+      if (invitation) {
+        await tx.license.update({
+          where: { id: invitation.license_id },
+          data: { client_company_id: company.id, assigned_at: new Date() },
+        });
+
+        await tx.licenseInvitation.update({
+          where: { id: invitation.id },
+          data: { status: 'accepted', accepted_at: new Date() },
+        });
+      }
 
       return { user, company };
     });
 
     return NextResponse.json(
-      {
-        message: 'Account created successfully',
-        user: { id: result?.user?.id, email: result?.user?.email, name: result?.user?.name },
-      },
+      { message: 'Account created successfully', user: { id: result?.user?.id, email: result?.user?.email, name: result?.user?.name } },
       { status: 201 }
     );
   } catch (error: any) {
     console.error('Signup error:', error);
-    return NextResponse.json(
-      { message: 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ message: 'Internal server error' }, { status: 500 });
   }
 }
