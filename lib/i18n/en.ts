@@ -366,10 +366,6 @@ export const en: Translations = {
       'Dedicated management portal',
       'Custom export schedules',
       '24/7 priority support',
-      'Unlimited users per license',
-      'All integrations',
-      'Custom API access',
-      'Dedicated account manager',
     ],
   },
 };

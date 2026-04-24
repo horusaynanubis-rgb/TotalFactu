@@ -366,10 +366,6 @@ export const es: Translations = {
       'Portal de gestión dedicado',
       'Programación de exportaciones personalizada',
       'Soporte prioritario 24/7',
-      'Usuarios ilimitados por licencia',
-      'Todas las integraciones',
-      'Acceso a API personalizado',
-      'Gestor de cuenta dedicado',
     ],
   },
 };
