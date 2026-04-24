@@ -5,11 +5,14 @@ import * as bcrypt from 'bcryptjs';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { name, email, password, companyName, taxId, activationToken } = body;
+    const { name, email, password, companyName, taxId, activationToken, plan } = body;
 
     if (!name || !email || !password || !companyName || !taxId) {
       return NextResponse.json({ message: 'All fields are required' }, { status: 400 });
     }
+
+    const VALID_PLANS = ['demo', 'profesional', 'gestoria'];
+    const planName = VALID_PLANS.includes(plan) ? plan : 'demo';
 
     const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {
@@ -51,7 +54,11 @@ export async function POST(request: NextRequest) {
       });
 
       await tx.subscription.create({
-        data: { company_id: company.id, plan_name: 'starter', status: 'active' },
+        data: {
+          company_id: company.id,
+          plan_name: planName,
+          status: planName === 'demo' ? 'active' : 'inactive',
+        },
       });
 
       // Link the gestoria license to this new company

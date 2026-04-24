@@ -18,14 +18,14 @@ async function getDashboardData(userId: string) {
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-  const [totalInvoices, pendingReview, documentsThisMonth, recentDocs, totalVAT] = await Promise.all([
+  const [totalInvoices, pendingReview, documentsThisMonth, recentDocs, totalVAT, subscription] = await Promise.all([
     prisma.invoice.count({ where: { company_id: companyId } }),
     prisma.invoice.count({ where: { company_id: companyId, review_status: 'pending' } }),
-    prisma.document.count({ 
-      where: { 
+    prisma.document.count({
+      where: {
         company_id: companyId,
         upload_timestamp: { gte: startOfMonth }
-      } 
+      }
     }),
     prisma.document.findMany({
       where: { company_id: companyId },
@@ -34,12 +34,13 @@ async function getDashboardData(userId: string) {
       take: 5,
     }),
     prisma.invoice.aggregate({
-      where: { 
+      where: {
         company_id: companyId,
         issue_date: { gte: startOfMonth }
       },
       _sum: { tax_amount: true },
     }),
+    prisma.subscription.findFirst({ where: { company_id: companyId } }),
   ]);
 
   const exportsGenerated = await prisma.export.count({
@@ -48,6 +49,7 @@ async function getDashboardData(userId: string) {
 
   return {
     company: membership.company,
+    subscription: { plan_name: subscription?.plan_name ?? 'demo' },
     stats: {
       totalInvoices,
       pendingReview,
@@ -77,6 +79,7 @@ export default async function DashboardPage() {
       company={data.company}
       stats={data.stats}
       recentDocs={data.recentDocs}
+      subscription={data.subscription}
     />
   );
 }

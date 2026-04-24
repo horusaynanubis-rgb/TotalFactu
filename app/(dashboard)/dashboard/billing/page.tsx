@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { CreditCard, CheckCircle, Building2, Users, Package } from 'lucide-react';
+import { CreditCard, CheckCircle, Building2, Users, Package, Zap } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import toast from 'react-hot-toast';
 import { useTranslation } from '@/lib/i18n/context';
@@ -36,16 +36,15 @@ const GESTORIA_PACKS = [
   },
 ];
 
-const PLAN_KEYS = ['starter', 'professional', 'enterprise'] as const;
+const PLAN_KEYS = ['demo', 'profesional'] as const;
 const PLAN_PRICES: Record<string, number> = {
-  starter: 29,
-  professional: 79,
-  enterprise: 199,
+  demo: 0,
+  profesional: 14.99,
 };
 const PLAN_NAMES: Record<string, string> = {
-  starter: 'Starter',
-  professional: 'Professional',
-  enterprise: 'Enterprise',
+  demo: 'Demo',
+  profesional: 'Profesional',
+  gestoria: 'Gestoría',
 };
 
 export default function BillingPage() {
@@ -82,8 +81,8 @@ export default function BillingPage() {
     );
   }
 
-  const currentPlanKey = (subscription?.plan_name || 'starter') as keyof typeof PLAN_PRICES;
-  const currentPlanFeatures = t.planFeatures[currentPlanKey as keyof typeof t.planFeatures] || t.planFeatures.starter;
+  const currentPlanKey = (subscription?.plan_name || 'demo') as keyof typeof PLAN_PRICES;
+  const currentPlanFeatures = t.planFeatures[currentPlanKey as keyof typeof t.planFeatures] || t.planFeatures.demo;
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
@@ -106,14 +105,27 @@ export default function BillingPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
-              <h3 className="text-2xl font-bold mb-2">{PLAN_NAMES[currentPlanKey] || 'Starter'}</h3>
+              <h3 className="text-2xl font-bold mb-2">{PLAN_NAMES[currentPlanKey] || 'Demo'}</h3>
               <p className="text-3xl font-bold text-primary">
-                {formatCurrency(PLAN_PRICES[currentPlanKey] ?? 29, 'EUR')}
-                <span className="text-lg font-normal text-gray-600">{t.common.perMonth}</span>
+                {currentPlanKey === 'gestoria'
+                  ? 'Packs de licencias'
+                  : currentPlanKey === 'demo'
+                  ? 'Gratis'
+                  : `${formatCurrency(PLAN_PRICES[currentPlanKey] ?? 0, 'EUR')}`}
+                {currentPlanKey === 'profesional' && (
+                  <span className="text-lg font-normal text-gray-600">{t.common.perMonth}</span>
+                )}
               </p>
             </div>
+            {currentPlanKey === 'demo' && (
+              <a href="/signup?plan=profesional">
+                <Button size="sm">
+                  <Zap className="h-4 w-4 mr-1.5" /> Pasar a Profesional — €14,99/mes
+                </Button>
+              </a>
+            )}
           </div>
           <div className="mt-6">
             <p className="text-sm font-medium text-gray-700 mb-3">{t.billing.planFeatures}</p>
@@ -132,14 +144,14 @@ export default function BillingPage() {
       {/* Available Plans */}
       <div>
         <h2 className="text-xl font-bold text-gray-900 mb-4">{t.billing.availablePlans}</h2>
-        <div className="grid md:grid-cols-3 gap-6">
+        <div className="grid md:grid-cols-2 gap-6 max-w-2xl">
           {PLAN_KEYS.map((key) => {
             const isCurrent = key === subscription?.plan_name;
             const features = t.planFeatures[key];
             return (
               <Card
                 key={key}
-                className={`border-2 ${isCurrent ? 'border-primary' : ''}`}
+                className={`border-2 ${isCurrent ? 'border-primary' : ''} ${key === 'profesional' ? 'shadow-md' : ''}`}
               >
                 <CardHeader>
                   <CardTitle className="text-center">
@@ -151,8 +163,14 @@ export default function BillingPage() {
                     )}
                   </CardTitle>
                   <div className="text-center mt-4">
-                    <span className="text-3xl font-bold">€{PLAN_PRICES[key]}</span>
-                    <span className="text-gray-600">{t.common.perMonth}</span>
+                    {key === 'demo' ? (
+                      <span className="text-3xl font-bold">Gratis</span>
+                    ) : (
+                      <>
+                        <span className="text-3xl font-bold">€{PLAN_PRICES[key]}</span>
+                        <span className="text-gray-600">{t.common.perMonth}</span>
+                      </>
+                    )}
                   </div>
                 </CardHeader>
                 <CardContent>
@@ -164,18 +182,35 @@ export default function BillingPage() {
                       </li>
                     ))}
                   </ul>
-                  <Button
-                    className="w-full"
-                    variant={isCurrent ? 'outline' : 'default'}
-                    disabled={isCurrent}
-                    onClick={() => {
-                      if (!isCurrent) {
-                        toast.error(t.billing.stripeKeysRequired);
-                      }
-                    }}
-                  >
-                    {isCurrent ? t.common.currentPlan : t.common.upgrade}
-                  </Button>
+                  {!isCurrent && key === 'profesional' && (
+                    <Button
+                      className="w-full"
+                      onClick={async () => {
+                        try {
+                          const res = await fetch('/api/stripe/checkout', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ type: 'plan', plan: 'profesional' }),
+                          });
+                          const data = await res.json();
+                          if (data.url) {
+                            window.location.href = data.url;
+                          } else {
+                            toast.error(data.error || t.billing.stripeKeysRequired);
+                          }
+                        } catch {
+                          toast.error(t.billing.stripeKeysRequired);
+                        }
+                      }}
+                    >
+                      <Zap className="h-4 w-4 mr-1.5" /> {t.common.upgrade}
+                    </Button>
+                  )}
+                  {isCurrent && (
+                    <Button className="w-full" variant="outline" disabled>
+                      {t.common.currentPlan}
+                    </Button>
+                  )}
                 </CardContent>
               </Card>
             );
@@ -184,7 +219,7 @@ export default function BillingPage() {
       </div>
 
       {/* Gestoria Packs Section */}
-      <div className="pt-4 border-t">
+      <div id="gestoria-packs" className="pt-4 border-t">
         <div className="flex items-center gap-3 mb-2">
           <Building2 className="h-6 w-6 text-primary" />
           <div>

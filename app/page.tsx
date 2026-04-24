@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -16,25 +17,15 @@ import {
   Search,
   ClipboardList,
   Download,
+  Building2,
 } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n/context';
 import { LanguageSelector } from '@/components/language-selector';
-
-const PLAN_KEYS = ['starter', 'professional', 'enterprise'] as const;
-const PLAN_PRICES: Record<string, number> = {
-  starter: 29,
-  professional: 79,
-  enterprise: 199,
-};
+import { GestoriaContactPopup } from '@/components/gestoria-contact-popup';
 
 export default function LandingPage() {
   const { t } = useTranslation();
-
-  const planNames: Record<string, string> = {
-    starter: 'Starter',
-    professional: 'Professional',
-    enterprise: 'Enterprise',
-  };
+  const [gestoriaPopupOpen, setGestoriaPopupOpen] = useState(false);
 
   const steps = [
     { num: '1', icon: Send, title: t.landing.step1Title, desc: t.landing.step1Description },
@@ -200,54 +191,107 @@ export default function LandingPage() {
             <p className="text-lg text-gray-600">{t.landing.pricingSubtitle}</p>
           </div>
 
-          <div className="grid md:grid-cols-3 gap-8 max-w-6xl mx-auto">
-            {PLAN_KEYS.map((key) => {
-              const planFeatures = t.planFeatures[key];
-              return (
-                <Card
-                  key={key}
-                  className={`relative border-2 hover:shadow-xl transition-all ${
-                    key === 'professional' ? 'border-primary scale-105' : ''
-                  }`}
+          <div className="grid md:grid-cols-3 gap-8 max-w-6xl mx-auto items-start">
+
+            {/* Demo / Prueba */}
+            <Card className="relative border-2 border-border hover:shadow-lg transition-all">
+              <CardHeader className="text-center pb-6">
+                <div className="inline-flex items-center justify-center bg-gray-100 text-gray-600 text-xs font-medium px-3 py-1 rounded-full mb-3 mx-auto">
+                  {t.landing.demoPlanLabel}
+                </div>
+                <CardTitle className="text-2xl mb-1">Demo</CardTitle>
+                <CardDescription className="text-sm">Autónomos y PYMEs que quieren probar</CardDescription>
+                <div className="mt-4">
+                  <span className="text-4xl font-bold">Gratis</span>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <ul className="space-y-3 mb-8">
+                  {t.planFeatures.demo.map((feature: string, idx: number) => (
+                    <li key={idx} className="flex items-start">
+                      <CheckCircle className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
+                      <span className="text-gray-700">{feature}</span>
+                    </li>
+                  ))}
+                </ul>
+                <Link href="/signup?plan=demo">
+                  <Button className="w-full" variant="outline">
+                    {t.common.getStarted}
+                  </Button>
+                </Link>
+              </CardContent>
+            </Card>
+
+            {/* Profesional — destacado en el centro */}
+            <Card className="relative border-2 border-primary shadow-xl scale-105 hover:shadow-2xl transition-all">
+              <div className="absolute -top-4 left-1/2 transform -translate-x-1/2">
+                <span className="bg-primary text-white px-4 py-1 rounded-full text-sm font-semibold">
+                  {t.landing.mostPopular}
+                </span>
+              </div>
+              <CardHeader className="text-center pb-6">
+                <CardTitle className="text-2xl mb-1">Profesional</CardTitle>
+                <CardDescription className="text-sm">Para autónomos y PYMEs</CardDescription>
+                <div className="mt-4">
+                  <span className="text-4xl font-bold">€14,99</span>
+                  <span className="text-gray-600">{t.common.perMonth}</span>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <ul className="space-y-3 mb-8">
+                  {t.planFeatures.profesional.map((feature: string, idx: number) => (
+                    <li key={idx} className="flex items-start">
+                      <CheckCircle className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
+                      <span className="text-gray-700">{feature}</span>
+                    </li>
+                  ))}
+                </ul>
+                <Link href="/signup?plan=profesional">
+                  <Button className="w-full">
+                    {t.common.getStarted}
+                  </Button>
+                </Link>
+              </CardContent>
+            </Card>
+
+            {/* Gestoria */}
+            <Card className="relative border-2 border-border hover:shadow-lg transition-all">
+              <CardHeader className="text-center pb-6">
+                <div className="inline-flex items-center justify-center bg-blue-50 text-primary text-xs font-medium px-3 py-1 rounded-full mb-3 mx-auto gap-1.5">
+                  <Building2 className="h-3.5 w-3.5" /> Gestorías
+                </div>
+                <CardTitle className="text-2xl mb-1">Gestoría</CardTitle>
+                <CardDescription className="text-sm">Para despachos y gestorías con múltiples clientes</CardDescription>
+                <div className="mt-4">
+                  <span className="text-2xl font-bold text-primary">Packs de licencias</span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">10 · 30 · 50 clientes</p>
+              </CardHeader>
+              <CardContent>
+                <ul className="space-y-3 mb-8">
+                  {t.planFeatures.gestoria.map((feature: string, idx: number) => (
+                    <li key={idx} className="flex items-start">
+                      <CheckCircle className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
+                      <span className="text-gray-700">{feature}</span>
+                    </li>
+                  ))}
+                </ul>
+                <Button
+                  className="w-full"
+                  variant="outline"
+                  onClick={() => setGestoriaPopupOpen(true)}
                 >
-                  {key === 'professional' && (
-                    <div className="absolute -top-4 left-1/2 transform -translate-x-1/2">
-                      <span className="bg-primary text-white px-4 py-1 rounded-full text-sm font-semibold">
-                        {t.landing.mostPopular}
-                      </span>
-                    </div>
-                  )}
-                  <CardHeader className="text-center pb-8">
-                    <CardTitle className="text-2xl mb-2">{planNames[key]}</CardTitle>
-                    <div className="mt-4">
-                      <span className="text-4xl font-bold">€{PLAN_PRICES[key]}</span>
-                      <span className="text-gray-600">{t.common.perMonth}</span>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <ul className="space-y-3 mb-8">
-                      {planFeatures.map((feature: string, idx: number) => (
-                        <li key={idx} className="flex items-start">
-                          <CheckCircle className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
-                          <span className="text-gray-700">{feature}</span>
-                        </li>
-                      ))}
-                    </ul>
-                    <Link href="/signup">
-                      <Button
-                        className="w-full"
-                        variant={key === 'professional' ? 'default' : 'outline'}
-                      >
-                        {t.common.getStarted}
-                      </Button>
-                    </Link>
-                  </CardContent>
-                </Card>
-              );
-            })}
+                  <Building2 className="h-4 w-4 mr-2" />
+                  Ver packs y precios
+                </Button>
+              </CardContent>
+            </Card>
+
           </div>
         </div>
       </section>
+
+      <GestoriaContactPopup open={gestoriaPopupOpen} onClose={() => setGestoriaPopupOpen(false)} />
 
       {/* CTA Section */}
       <section className="bg-primary text-white py-20">

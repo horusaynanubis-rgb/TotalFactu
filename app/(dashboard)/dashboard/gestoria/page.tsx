@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Users, Package, Mail, CheckCircle, Clock, XCircle, Loader2, Plus } from 'lucide-react';
+import { Users, Package, Mail, CheckCircle, Clock, XCircle, Loader2, Plus, ShoppingCart } from 'lucide-react';
 import { InviteClientModal } from '@/components/gestoria/invite-client-modal';
 import { ClientsTable } from '@/components/gestoria/clients-table';
 import { InvitationsTable } from '@/components/gestoria/invitations-table';
@@ -80,15 +80,21 @@ export default function GestoriaPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Portal Gestoría</h1>
           <p className="text-muted-foreground">Gestiona las licencias de tus clientes</p>
         </div>
-        <Button onClick={() => setShowInviteModal(true)} disabled={availableLicenses === 0}>
-          <Plus className="mr-2 h-4 w-4" />
-          Invitar cliente
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => router.push('/dashboard/billing#gestoria-packs')}>
+            <ShoppingCart className="mr-2 h-4 w-4" />
+            Comprar más licencias
+          </Button>
+          <Button onClick={() => setShowInviteModal(true)} disabled={availableLicenses === 0}>
+            <Plus className="mr-2 h-4 w-4" />
+            Invitar cliente
+          </Button>
+        </div>
       </div>
 
       {/* Stats */}

@@ -32,6 +32,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Enforce Demo plan invoice limit
+    const subscription = await prisma.subscription.findFirst({
+      where: { company_id: membership.company_id },
+    });
+    if (subscription?.plan_name === 'demo') {
+      const invoiceCount = await prisma.invoice.count({
+        where: { company_id: membership.company_id },
+      });
+      if (invoiceCount >= 5) {
+        return NextResponse.json(
+          { message: 'Demo plan limit reached. Upgrade to Profesional to upload more invoices.', code: 'DEMO_LIMIT_REACHED' },
+          { status: 403 }
+        );
+      }
+    }
+
     // Create document record
     const document = await prisma.document.create({
       data: {

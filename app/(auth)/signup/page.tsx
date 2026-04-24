@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { signIn } from 'next-auth/react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -9,12 +9,15 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import toast from 'react-hot-toast';
-import { FileText } from 'lucide-react';
+import { FileText, Zap } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n/context';
 import { LanguageSelector } from '@/components/language-selector';
 
 export default function SignupPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const plan = searchParams.get('plan') || 'demo';
+  const activationToken = searchParams.get('token') || '';
   const [loading, setLoading] = useState(false);
   const { t } = useTranslation();
   const [formData, setFormData] = useState({
@@ -46,6 +49,8 @@ export default function SignupPage() {
           password: formData.password,
           companyName: formData.companyName,
           taxId: formData.taxId,
+          plan,
+          activationToken: activationToken || undefined,
         }),
       });
 
@@ -67,6 +72,26 @@ export default function SignupPage() {
       if (signInResult?.error) {
         toast.error(t.auth.signInManually);
         router.push('/login');
+        return;
+      }
+
+      if (plan === 'profesional') {
+        // Redirect to Stripe checkout for Profesional plan
+        try {
+          const checkoutRes = await fetch('/api/stripe/checkout', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'plan', plan: 'profesional' }),
+          });
+          const checkoutData = await checkoutRes.json();
+          if (checkoutData.url) {
+            window.location.href = checkoutData.url;
+            return;
+          }
+        } catch {
+          // If Stripe fails, go to billing page so they can retry
+        }
+        router.push('/dashboard/billing?checkout=true');
       } else {
         router.push('/dashboard');
       }
@@ -91,6 +116,12 @@ export default function SignupPage() {
           </div>
           <CardTitle className="text-2xl font-bold">{t.auth.createAccount}</CardTitle>
           <CardDescription>{t.auth.createAccountSubtitle}</CardDescription>
+          {plan === 'profesional' && (
+            <div className="mt-3 flex items-center gap-2 bg-primary/10 text-primary rounded-lg px-3 py-2 text-sm font-medium">
+              <Zap className="h-4 w-4 flex-shrink-0" />
+              Plan Profesional — €14,99/mes · Se requiere pago tras el registro
+            </div>
+          )}
         </CardHeader>
         <form onSubmit={handleSubmit}>
           <CardContent className="space-y-4">

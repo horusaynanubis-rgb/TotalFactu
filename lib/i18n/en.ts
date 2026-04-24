@@ -83,6 +83,28 @@ export const en: Translations = {
     ctaTitle: 'Stop wasting time on invoices',
     ctaSubtitle: 'Send them via Telegram. Let AI do the rest.',
     allRightsReserved: 'All rights reserved.',
+    // Gestoria popup
+    gestoriaPopupTitle: 'Gestoria Plans',
+    gestoriaPopupSubtitle: 'Choose a license pack and start managing your clients\' invoices with AI. Pay per pack — assign licenses as needed.',
+    gestoriaPackBasic: 'Basic Pack',
+    gestoriaPackPro: 'Pro Pack',
+    gestoriaPackBusiness: 'Business Pack',
+    gestoriaPackLicenses: 'licenses',
+    gestoriaPackPerLicense: '€/license/mo',
+    gestoriaPackPayNow: 'Pay now with Stripe',
+    gestoriaContactQuestion: 'Have a question? (optional)',
+    gestoriaContactPlaceholder: 'Tell us about your needs or ask anything...',
+    gestoriaContactName: 'Full name',
+    gestoriaContactEmail: 'Email',
+    gestoriaContactCompany: 'Company name',
+    // Demo plan
+    demoPlanLabel: 'Try it free',
+    demoUpgradeBannerTitle: 'You\'re on the Demo plan',
+    demoUpgradeBannerDesc: 'You can upload up to 5 invoices. Upgrade to Profesional to unlock unlimited invoices.',
+    demoUpgradeBannerButton: 'Upgrade to Profesional — €14.99/mo',
+    demoInvoiceLimit: 'Invoice limit reached',
+    demoInvoiceLimitDesc: 'The Demo plan allows a maximum of 5 invoices. Upgrade to continue.',
+    demoInvoiceLimitButton: 'Upgrade now',
   },
 
   auth: {
@@ -324,27 +346,27 @@ export const en: Translations = {
   },
 
   planFeatures: {
-    starter: [
-      'Up to 50 invoices/month',
+    demo: [
+      'Up to 5 invoices total',
       'Basic AI extraction',
-      'Monthly CSV exports',
+      'Monthly CSV export',
       'Email support',
       '1 user',
     ],
-    professional: [
-      'Up to 200 invoices/month',
+    profesional: [
+      'Unlimited invoices',
       'Advanced AI extraction',
       'Monthly & Quarterly exports',
       'Priority email support',
-      'Up to 5 users',
+      '1 user',
       'Telegram & Email integration',
     ],
-    enterprise: [
-      'Unlimited invoices',
-      'Premium AI extraction',
+    gestoria: [
+      'License packs: 10, 30 or 50 clients',
+      'Dedicated management portal',
       'Custom export schedules',
       '24/7 priority support',
-      'Unlimited users',
+      'Unlimited users per license',
       'All integrations',
       'Custom API access',
       'Dedicated account manager',

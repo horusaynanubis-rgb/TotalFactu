@@ -83,6 +83,28 @@ export const es: Translations = {
     ctaTitle: 'Deja de perder tiempo con facturas',
     ctaSubtitle: 'Envíalas por Telegram. La IA hace el resto.',
     allRightsReserved: 'Todos los derechos reservados.',
+    // Gestoria popup
+    gestoriaPopupTitle: 'Planes para Gestorías',
+    gestoriaPopupSubtitle: 'Elige un pack de licencias y empieza a gestionar las facturas de tus clientes con IA. Pagas por pack y asignas licencias según necesites.',
+    gestoriaPackBasic: 'Pack Básico',
+    gestoriaPackPro: 'Pack Profesional',
+    gestoriaPackBusiness: 'Pack Business',
+    gestoriaPackLicenses: 'licencias',
+    gestoriaPackPerLicense: '€/licencia/mes',
+    gestoriaPackPayNow: 'Pagar ahora con Stripe',
+    gestoriaContactQuestion: '¿Tienes alguna pregunta? (opcional)',
+    gestoriaContactPlaceholder: 'Cuéntanos tus necesidades o pregunta lo que quieras...',
+    gestoriaContactName: 'Nombre completo',
+    gestoriaContactEmail: 'Correo electrónico',
+    gestoriaContactCompany: 'Nombre de la empresa',
+    // Demo plan
+    demoPlanLabel: 'Pruébalo gratis',
+    demoUpgradeBannerTitle: 'Estás en el plan Demo',
+    demoUpgradeBannerDesc: 'Puedes subir hasta 5 facturas. Pasa al plan Profesional para desbloquear facturas ilimitadas.',
+    demoUpgradeBannerButton: 'Pasar a Profesional — 14,99€/mes',
+    demoInvoiceLimit: 'Límite de facturas alcanzado',
+    demoInvoiceLimitDesc: 'El plan Demo permite un máximo de 5 facturas. Actualiza tu plan para continuar.',
+    demoInvoiceLimitButton: 'Actualizar ahora',
   },
 
   auth: {
@@ -324,27 +346,27 @@ export const es: Translations = {
   },
 
   planFeatures: {
-    starter: [
-      'Hasta 50 facturas/mes',
+    demo: [
+      'Hasta 5 facturas en total',
       'Extracción con IA básica',
-      'Exportaciones CSV mensuales',
+      'Exportación CSV mensual',
       'Soporte por correo electrónico',
       '1 usuario',
     ],
-    professional: [
-      'Hasta 200 facturas/mes',
+    profesional: [
+      'Facturas ilimitadas',
       'Extracción con IA avanzada',
       'Exportaciones mensuales y trimestrales',
       'Soporte prioritario por correo',
-      'Hasta 5 usuarios',
+      '1 usuario',
       'Integración con Telegram y correo',
     ],
-    enterprise: [
-      'Facturas ilimitadas',
-      'Extracción con IA premium',
+    gestoria: [
+      'Packs de licencias: 10, 30 o 50 clientes',
+      'Portal de gestión dedicado',
       'Programación de exportaciones personalizada',
       'Soporte prioritario 24/7',
-      'Usuarios ilimitados',
+      'Usuarios ilimitados por licencia',
       'Todas las integraciones',
       'Acceso a API personalizado',
       'Gestor de cuenta dedicado',

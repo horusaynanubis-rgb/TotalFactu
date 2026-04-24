@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { FileText, AlertCircle, TrendingUp, Download, Upload, Calendar } from 'lucide-react';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { useTranslation } from '@/lib/i18n/context';
+import { DemoUpgradeBanner, DEMO_INVOICE_LIMIT } from '@/components/demo-upgrade-banner';
 
 interface DashboardContentProps {
   company: any;
@@ -17,10 +18,12 @@ interface DashboardContentProps {
     exportsGenerated: number;
   };
   recentDocs: any[];
+  subscription?: { plan_name: string };
 }
 
-export function DashboardContent({ company, stats, recentDocs }: DashboardContentProps) {
+export function DashboardContent({ company, stats, recentDocs, subscription }: DashboardContentProps) {
   const { t } = useTranslation();
+  const isDemo = subscription?.plan_name === 'demo';
 
   const statusLabels: Record<string, string> = {
     processing: t.statusBadges.processing,
@@ -36,6 +39,14 @@ export function DashboardContent({ company, stats, recentDocs }: DashboardConten
         <h1 className="text-3xl font-bold text-gray-900">{t.dashboard.title}</h1>
         <p className="text-gray-600 mt-1">{t.dashboard.welcomeBack} {company?.name}.</p>
       </div>
+
+      {/* Demo upgrade banner */}
+      {isDemo && (
+        <DemoUpgradeBanner
+          invoiceCount={stats?.totalInvoices ?? 0}
+          variant={stats?.totalInvoices >= DEMO_INVOICE_LIMIT ? 'blocked' : 'banner'}
+        />
+      )}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">

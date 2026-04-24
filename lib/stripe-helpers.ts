@@ -14,47 +14,38 @@ export function isStripeConfigured(): boolean {
 }
 
 export const SUBSCRIPTION_PLANS = {
-  starter: {
-    name: 'Starter',
-    price: 29,
+  demo: {
+    name: 'Demo',
+    price: 0,
     currency: 'EUR',
     interval: 'month',
     features: [
-      'Up to 50 invoices/month',
+      'Up to 5 invoices total',
       'Basic AI extraction',
-      'Monthly CSV exports',
+      'Monthly CSV export',
       'Email support',
-      '1 user'
-    ]
+      '1 user',
+    ],
   },
-  professional: {
-    name: 'Professional',
-    price: 79,
+  profesional: {
+    name: 'Profesional',
+    price: 14.99,
     currency: 'EUR',
     interval: 'month',
+    stripePriceId: process.env.STRIPE_PRICE_PROFESIONAL || '',
     features: [
-      'Up to 200 invoices/month',
+      'Unlimited invoices',
       'Advanced AI extraction',
       'Monthly & Quarterly exports',
       'Priority email support',
-      'Up to 5 users',
-      'Telegram & Email integration'
-    ]
+      '1 user',
+      'Telegram & Email integration',
+    ],
   },
-  enterprise: {
-    name: 'Enterprise',
-    price: 199,
-    currency: 'EUR',
-    interval: 'month',
-    features: [
-      'Unlimited invoices',
-      'Premium AI extraction',
-      'Custom export schedules',
-      '24/7 priority support',
-      'Unlimited users',
-      'All integrations',
-      'Custom API access',
-      'Dedicated account manager'
-    ]
-  }
+};
+
+export const GESTORIA_PACKS = {
+  10: { name: 'Pack Básico', price: 89, stripePriceId: process.env.STRIPE_PRICE_GESTORIA_10 || '' },
+  30: { name: 'Pack Profesional', price: 229, stripePriceId: process.env.STRIPE_PRICE_GESTORIA_30 || '' },
+  50: { name: 'Pack Business', price: 349, stripePriceId: process.env.STRIPE_PRICE_GESTORIA_50 || '' },
 };

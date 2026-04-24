@@ -85,6 +85,28 @@ export interface Translations {
     ctaTitle: string;
     ctaSubtitle: string;
     allRightsReserved: string;
+    // Gestoria popup
+    gestoriaPopupTitle: string;
+    gestoriaPopupSubtitle: string;
+    gestoriaPackBasic: string;
+    gestoriaPackPro: string;
+    gestoriaPackBusiness: string;
+    gestoriaPackLicenses: string;
+    gestoriaPackPerLicense: string;
+    gestoriaPackPayNow: string;
+    gestoriaContactQuestion: string;
+    gestoriaContactPlaceholder: string;
+    gestoriaContactName: string;
+    gestoriaContactEmail: string;
+    gestoriaContactCompany: string;
+    // Demo plan
+    demoPlanLabel: string;
+    demoUpgradeBannerTitle: string;
+    demoUpgradeBannerDesc: string;
+    demoUpgradeBannerButton: string;
+    demoInvoiceLimit: string;
+    demoInvoiceLimitDesc: string;
+    demoInvoiceLimitButton: string;
   };
 
   // Auth
@@ -337,8 +359,8 @@ export interface Translations {
 
   // Subscription plan features
   planFeatures: {
-    starter: string[];
-    professional: string[];
-    enterprise: string[];
+    demo: string[];
+    profesional: string[];
+    gestoria: string[];
   };
 }
