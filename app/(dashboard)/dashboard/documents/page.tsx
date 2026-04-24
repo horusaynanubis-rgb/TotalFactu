@@ -98,6 +98,22 @@ export default function DocumentsPage() {
       });
 
       if (!completeResponse.ok) {
+        const errorData = await completeResponse.json().catch(() => ({}));
+        if (errorData.code === 'DEMO_LIMIT_REACHED') {
+          // Redirect to Stripe upgrade flow
+          const checkoutRes = await fetch('/api/stripe/checkout', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'plan', plan: 'profesional' }),
+          });
+          const checkoutData = await checkoutRes.json();
+          if (checkoutData.url) {
+            window.location.href = checkoutData.url;
+          } else {
+            toast.error('Has alcanzado el límite de 5 facturas del plan Demo. Ve a Facturación para actualizar tu plan.');
+          }
+          return;
+        }
         throw new Error(t.documents.uploadFailed);
       }
 

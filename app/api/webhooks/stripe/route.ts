@@ -57,6 +57,26 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({ received: true });
 }
 
+// ─── Email confirmation ───────────────────────────────────────────────────────
+// TODO: replace with real email provider (Resend, SMTP, etc.)
+
+async function sendConfirmationEmail(to: string, plan: string, packSize?: number) {
+  try {
+    const subject = plan === 'gestoria'
+      ? `TotalFactu — Pack de ${packSize} licencias activado`
+      : 'TotalFactu — Plan Profesional activado';
+    const body = plan === 'gestoria'
+      ? `Tu pack de ${packSize} licencias está activo. Accede a tu portal en https://totalfactu.com/dashboard/gestoria`
+      : 'Tu plan Profesional está activo. Ya puedes subir facturas ilimitadas en https://totalfactu.com/dashboard';
+
+    // When an email provider is configured, send here.
+    // Example with Resend: await resend.emails.send({ from: 'noreply@totalfactu.com', to, subject, text: body });
+    console.log(`[Email confirmation] To: ${to} | Subject: ${subject} | Body: ${body}`);
+  } catch (err) {
+    console.error('Failed to send confirmation email:', err);
+  }
+}
+
 // ─── checkout.session.completed ──────────────────────────────────────────────
 
 async function handleCheckoutCompleted(session: Stripe.Checkout.Session, stripe: Stripe) {
@@ -133,6 +153,7 @@ async function activateProfesionalPlan(
   }
 
   console.log(`Profesional plan activated for company ${membership.company_id}`);
+  await sendConfirmationEmail(email, 'profesional');
 }
 
 async function activateGestoriaPack(
@@ -204,6 +225,7 @@ async function activateGestoriaPack(
   });
 
   console.log(`Gestoria pack of ${packSize} licenses activated for company ${membership.company_id}`);
+  await sendConfirmationEmail(email, 'gestoria', packSize);
 }
 
 // ─── customer.subscription.updated ───────────────────────────────────────────

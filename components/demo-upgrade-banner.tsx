@@ -1,9 +1,10 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Zap, AlertTriangle } from 'lucide-react';
+import { Zap, AlertTriangle, Loader2 } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n/context';
+import toast from 'react-hot-toast';
 
 export const DEMO_INVOICE_LIMIT = 5;
 
@@ -14,12 +15,29 @@ interface Props {
 
 export function DemoUpgradeBanner({ invoiceCount, variant = 'banner' }: Props) {
   const { t } = useTranslation();
-  const router = useRouter();
+  const [loading, setLoading] = useState(false);
   const remaining = Math.max(0, DEMO_INVOICE_LIMIT - invoiceCount);
   const isBlocked = variant === 'blocked' || remaining === 0;
 
-  const handleUpgrade = () => {
-    router.push('/signup?plan=profesional');
+  const handleUpgrade = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/stripe/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'plan', plan: 'profesional' }),
+      });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        toast.error(data.error || 'Error al iniciar el pago. Inténtalo de nuevo.');
+        setLoading(false);
+      }
+    } catch {
+      toast.error('Error inesperado. Inténtalo de nuevo.');
+      setLoading(false);
+    }
   };
 
   if (isBlocked) {
@@ -32,8 +50,8 @@ export function DemoUpgradeBanner({ invoiceCount, variant = 'banner' }: Props) {
             <p className="text-sm text-muted-foreground mt-0.5">{t.landing.demoInvoiceLimitDesc}</p>
           </div>
         </div>
-        <Button size="sm" onClick={handleUpgrade} className="flex-shrink-0">
-          <Zap className="h-4 w-4 mr-1.5" />
+        <Button size="sm" onClick={handleUpgrade} disabled={loading} className="flex-shrink-0">
+          {loading ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Zap className="h-4 w-4 mr-1.5" />}
           {t.landing.demoInvoiceLimitButton}
         </Button>
       </div>
@@ -54,8 +72,8 @@ export function DemoUpgradeBanner({ invoiceCount, variant = 'banner' }: Props) {
           </p>
         </div>
       </div>
-      <Button size="sm" onClick={handleUpgrade} className="flex-shrink-0">
-        <Zap className="h-4 w-4 mr-1.5" />
+      <Button size="sm" onClick={handleUpgrade} disabled={loading} className="flex-shrink-0">
+        {loading ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Zap className="h-4 w-4 mr-1.5" />}
         {t.landing.demoUpgradeBannerButton}
       </Button>
     </div>

@@ -266,18 +266,17 @@ export default function BillingPage() {
                   onClick={async () => {
                     setPurchasingPack(pack.size);
                     try {
-                      const res = await fetch('/api/gestoria/packs/purchase', {
+                      const res = await fetch('/api/stripe/checkout', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ pack_size: pack.size }),
+                        body: JSON.stringify({ type: 'gestoria_pack', pack_size: pack.size }),
                       });
                       const data = await res.json();
-                      if (!res.ok) {
-                        toast.error(data.error || 'Error al procesar la compra');
+                      if (!res.ok || !data.url) {
+                        toast.error(data.error || 'Error al iniciar el pago');
                         return;
                       }
-                      toast.success(`Pack de ${pack.size} licencias activado`);
-                      router.push('/dashboard/gestoria');
+                      window.location.href = data.url;
                     } catch {
                       toast.error('Error inesperado');
                     } finally {
