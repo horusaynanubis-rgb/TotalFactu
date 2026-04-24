@@ -91,7 +91,7 @@ export const es: Translations = {
     gestoriaPackBusiness: 'Pack Business',
     gestoriaPackLicenses: 'licencias',
     gestoriaPackPerLicense: '€/licencia/mes',
-    gestoriaPackPayNow: 'Pagar ahora con Stripe',
+    gestoriaPackPayNow: 'Contratar',
     gestoriaContactQuestion: '¿Tienes alguna pregunta? (opcional)',
     gestoriaContactPlaceholder: 'Cuéntanos tus necesidades o pregunta lo que quieras...',
     gestoriaContactName: 'Nombre completo',
