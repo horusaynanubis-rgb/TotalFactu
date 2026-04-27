@@ -16,7 +16,8 @@ import {
   LogOut,
   Menu,
   X,
-  Building2
+  Building2,
+  ShieldCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useState } from 'react';
@@ -29,6 +30,8 @@ export function DashboardNav() {
   const { t } = useTranslation();
   const { data: session } = useSession();
   const isGestoria = (session?.user as any)?.companyType === 'gestoria';
+  const adminEmails = (process.env.NEXT_PUBLIC_ADMIN_EMAILS ?? '').split(',').map((e) => e.trim()).filter(Boolean);
+  const isAdmin = adminEmails.includes(session?.user?.email ?? '');
 
   const navigation = [
     { name: t.nav.dashboard, href: '/dashboard', icon: LayoutDashboard },
@@ -37,6 +40,7 @@ export function DashboardNav() {
     { name: 'Cola de Revisión', href: '/dashboard/review', icon: ListChecks },
     { name: t.nav.exports, href: '/dashboard/exports', icon: Download },
     ...(isGestoria ? [{ name: 'Portal Gestoría', href: '/dashboard/gestoria', icon: Building2, badge: true }] : []),
+    ...(isAdmin ? [{ name: 'Admin Demo', href: '/dashboard/admin/demo', icon: ShieldCheck, adminBadge: true }] : []),
     { name: t.nav.settings, href: '/dashboard/settings', icon: Settings },
     { name: t.nav.billing, href: '/dashboard/billing', icon: CreditCard },
   ];
@@ -79,6 +83,11 @@ export function DashboardNav() {
                     {item?.badge && (
                       <Badge variant="secondary" className="ml-2 text-xs px-1.5 py-0">
                         PRO
+                      </Badge>
+                    )}
+                    {(item as any)?.adminBadge && (
+                      <Badge variant="outline" className="ml-2 text-xs px-1.5 py-0 border-orange-400 text-orange-600">
+                        ADMIN
                       </Badge>
                     )}
                   </Link>
@@ -156,6 +165,11 @@ export function DashboardNav() {
                     {item?.badge && (
                       <Badge variant="secondary" className="ml-2 text-xs px-1.5 py-0">
                         PRO
+                      </Badge>
+                    )}
+                    {(item as any)?.adminBadge && (
+                      <Badge variant="outline" className="ml-2 text-xs px-1.5 py-0 border-orange-400 text-orange-600">
+                        ADMIN
                       </Badge>
                     )}
                   </Link>
