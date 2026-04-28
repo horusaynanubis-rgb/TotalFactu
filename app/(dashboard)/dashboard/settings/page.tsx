@@ -5,18 +5,15 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Building2, Mail, Send, CheckCircle, AlertCircle, Bot, Zap, ExternalLink, Loader2, Wifi, WifiOff, Brain } from 'lucide-react';
+import { Building2, Mail, Send, CheckCircle, Bot, ExternalLink, Loader2, Brain, RefreshCw, Unlink, Copy } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useTranslation } from '@/lib/i18n/context';
 
+const BOT_USERNAME = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME || 'totalfactu_helper_bot';
+
 export default function SettingsPage() {
-  const [company, setCompany] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [testingTelegram, setTestingTelegram] = useState(false);
-  const [settingWebhook, setSettingWebhook] = useState(false);
-  const [telegramBot, setTelegramBot] = useState<any>(null);
-  const [webhookInfo, setWebhookInfo] = useState<any>(null);
   const { t } = useTranslation();
 
   const [formData, setFormData] = useState({
@@ -25,29 +22,44 @@ export default function SettingsPage() {
     address: '',
     export_email: '',
     email_forwarding_address: '',
-    telegram_bot_token: '',
     ai_provider: 'external',
     ai_api_key: '',
     ai_api_endpoint: '',
   });
 
+  // Telegram link state
+  const [telegramLinked, setTelegramLinked] = useState(false);
+  const [telegramUsername, setTelegramUsername] = useState<string | null>(null);
+  const [telegramFirstName, setTelegramFirstName] = useState<string | null>(null);
+  const [linkCode, setLinkCode] = useState<string | null>(null);
+  const [codeExpiresAt, setCodeExpiresAt] = useState<Date | null>(null);
+  const [generatingCode, setGeneratingCode] = useState(false);
+  const [unlinking, setUnlinking] = useState(false);
+
   const fetchSettings = useCallback(async () => {
     try {
-      const response = await fetch('/api/company/settings');
-      const data = await response.json();
-      setCompany(data?.company);
+      const [settingsRes, statusRes] = await Promise.all([
+        fetch('/api/company/settings'),
+        fetch('/api/telegram/status'),
+      ]);
+      const data = await settingsRes.json();
+      const statusData = await statusRes.json();
+
       setFormData({
         name: data?.company?.name ?? '',
         tax_id: data?.company?.tax_id ?? '',
         address: data?.company?.address ?? '',
         export_email: data?.company?.export_email ?? '',
         email_forwarding_address: data?.company?.email_forwarding_address ?? '',
-        telegram_bot_token: data?.company?.telegram_bot_token ?? '',
         ai_provider: data?.company?.ai_provider ?? 'external',
         ai_api_key: data?.company?.ai_api_key ?? '',
         ai_api_endpoint: data?.company?.ai_api_endpoint ?? '',
       });
-    } catch (error: any) {
+
+      setTelegramLinked(statusData?.linked ?? false);
+      setTelegramUsername(statusData?.username ?? null);
+      setTelegramFirstName(statusData?.firstName ?? null);
+    } catch {
       toast.error(t.settings.fetchFailed);
     } finally {
       setLoading(false);
@@ -61,96 +73,60 @@ export default function SettingsPage() {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
-
     try {
       const response = await fetch('/api/company/settings', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData),
       });
-
-      if (!response.ok) {
-        throw new Error(t.settings.saveFailed);
-      }
-
+      if (!response.ok) throw new Error();
       toast.success(t.settings.saveSuccess);
       fetchSettings();
-    } catch (error: any) {
+    } catch {
       toast.error(t.settings.saveFailed);
     } finally {
       setSaving(false);
     }
   };
 
-  const handleTestTelegram = async () => {
-    setTestingTelegram(true);
-    setTelegramBot(null);
-
+  const handleGenerateCode = async () => {
+    setGeneratingCode(true);
+    setLinkCode(null);
     try {
-      // First save the token
-      await fetch('/api/company/settings', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ telegram_bot_token: formData.telegram_bot_token }),
-      });
-
-      const response = await fetch('/api/telegram/test', { method: 'POST' });
-      const data = await response.json();
-
-      if (data.connected) {
-        setTelegramBot(data.bot);
-        setWebhookInfo(data.webhook);
-        toast.success(`${t.settings.connectionSuccess} @${data.bot.username}`);
-      } else {
-        toast.error(`${t.settings.connectionFailed}: ${data.message}`);
-      }
-    } catch (error: any) {
-      toast.error(t.settings.connectionFailed);
+      const res = await fetch('/api/telegram/generate-code', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+      setLinkCode(data.code);
+      setCodeExpiresAt(new Date(data.expiresAt));
+      toast.success(t.settings.telegramCodeGenerated);
+    } catch {
+      toast.error(t.settings.telegramCodeFailed);
     } finally {
-      setTestingTelegram(false);
+      setGeneratingCode(false);
     }
   };
 
-  const handleSetWebhook = async () => {
-    setSettingWebhook(true);
+  const handleUnlink = async () => {
+    setUnlinking(true);
     try {
-      const webhookUrl = `${window.location.origin}/api/webhooks/telegram`;
-      const response = await fetch('/api/telegram/set-webhook', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ webhookUrl }),
-      });
-      const data = await response.json();
-
-      if (data.ok) {
-        toast.success(t.settings.webhookSetSuccess);
-        // Refresh webhook info
-        handleTestTelegram();
-      } else {
-        toast.error(`${t.settings.webhookSetFailed}: ${data.description}`);
-      }
-    } catch (error: any) {
-      toast.error(t.settings.webhookSetFailed);
+      const res = await fetch('/api/telegram/unlink', { method: 'DELETE' });
+      if (!res.ok) throw new Error();
+      setTelegramLinked(false);
+      setTelegramUsername(null);
+      setTelegramFirstName(null);
+      setLinkCode(null);
+      toast.success(t.settings.telegramUnlinked);
+    } catch {
+      toast.error(t.settings.telegramUnlinkFailed);
     } finally {
-      setSettingWebhook(false);
+      setUnlinking(false);
     }
   };
 
-  const handleRemoveWebhook = async () => {
-    try {
-      const response = await fetch('/api/telegram/set-webhook', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'delete' }),
-      });
-      const data = await response.json();
-
-      if (data.ok) {
-        toast.success(t.settings.webhookRemoved);
-        setWebhookInfo(null);
-      }
-    } catch (error: any) {
-      toast.error(t.settings.webhookSetFailed);
+  const handleCopyCode = () => {
+    if (linkCode) {
+      navigator.clipboard.writeText(`/start ${linkCode}`);
+      toast.success('Comando copiado');
     }
   };
 
@@ -161,8 +137,6 @@ export default function SettingsPage() {
       </div>
     );
   }
-
-  const hasWebhook = webhookInfo?.url && webhookInfo.url.length > 0;
 
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
@@ -211,7 +185,7 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
-        {/* Telegram Bot - Primary Channel */}
+        {/* Telegram — Bot oficial único */}
         <Card className="border-blue-200 bg-blue-50/30">
           <CardHeader>
             <CardTitle className="flex items-center">
@@ -221,98 +195,99 @@ export default function SettingsPage() {
             <CardDescription>{t.settings.telegramSubtitle}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* Bot Token */}
-            <div className="space-y-2">
-              <Label htmlFor="telegram_bot_token">{t.settings.botTokenLabel}</Label>
-              <Input
-                id="telegram_bot_token"
-                type="password"
-                value={formData.telegram_bot_token}
-                onChange={(e: any) => setFormData({ ...formData, telegram_bot_token: e?.target?.value ?? '' })}
-                placeholder={t.settings.botTokenPlaceholder}
-              />
-              <p className="text-xs text-gray-500">{t.settings.botTokenHelp}</p>
+            {/* Bot oficial */}
+            <div className="bg-white rounded-lg p-4 border flex items-center justify-between gap-4">
+              <div>
+                <p className="text-sm font-medium text-gray-700">{t.settings.telegramOfficialBot}</p>
+                <p className="text-base font-bold text-blue-700 mt-0.5">@{BOT_USERNAME}</p>
+              </div>
+              <a
+                href={`https://t.me/${BOT_USERNAME}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Button type="button" variant="outline" size="sm">
+                  <ExternalLink className="h-4 w-4 mr-2" />
+                  {t.settings.telegramOpenBot}
+                </Button>
+              </a>
             </div>
 
-            {/* Action Buttons */}
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleTestTelegram}
-                disabled={!formData.telegram_bot_token || testingTelegram}
-              >
-                {testingTelegram ? (
-                  <><Loader2 className="h-4 w-4 mr-2 animate-spin" />{t.settings.testing}</>
-                ) : (
-                  <><Wifi className="h-4 w-4 mr-2" />{t.settings.testConnection}</>
-                )}
-              </Button>
+            {/* Estado de vinculación */}
+            {telegramLinked ? (
+              <div className="bg-white rounded-lg p-4 border border-green-200">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle className="h-5 w-5 text-green-600" />
+                    <div>
+                      <p className="font-medium text-green-700">{t.settings.telegramLinked}</p>
+                      {(telegramUsername || telegramFirstName) && (
+                        <p className="text-sm text-gray-500">
+                          {t.settings.telegramLinkedAs}{' '}
+                          <span className="font-medium">
+                            {telegramUsername ? `@${telegramUsername}` : telegramFirstName}
+                          </span>
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleUnlink}
+                    disabled={unlinking}
+                    className="text-red-600 border-red-200 hover:bg-red-50"
+                  >
+                    {unlinking ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Unlink className="h-4 w-4 mr-2" />
+                    )}
+                    {t.settings.telegramUnlink}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-white rounded-lg p-4 border border-amber-200 space-y-3">
+                <p className="text-sm font-medium text-amber-800">{t.settings.telegramNotLinked}</p>
 
-              <Button
-                type="button"
-                variant="default"
-                onClick={handleSetWebhook}
-                disabled={!formData.telegram_bot_token || settingWebhook || !telegramBot}
-              >
-                {settingWebhook ? (
-                  <><Loader2 className="h-4 w-4 mr-2 animate-spin" />{t.settings.settingWebhook}</>
+                {/* Código de vinculación */}
+                {linkCode ? (
+                  <div className="space-y-2">
+                    <p className="text-sm text-gray-600">{t.settings.telegramCodeInstruction}</p>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 bg-gray-100 px-3 py-2 rounded border text-sm font-mono font-bold tracking-widest">
+                        /start {linkCode}
+                      </code>
+                      <Button type="button" variant="outline" size="sm" onClick={handleCopyCode}>
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    {codeExpiresAt && (
+                      <p className="text-xs text-gray-400">
+                        {t.settings.telegramCodeExpires}{' '}
+                        {codeExpiresAt.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    )}
+                  </div>
                 ) : (
-                  <><Zap className="h-4 w-4 mr-2" />{t.settings.setWebhook}</>
+                  <p className="text-sm text-gray-500">{t.settings.telegramLinkInstruction}</p>
                 )}
-              </Button>
 
-              {hasWebhook && (
                 <Button
                   type="button"
-                  variant="destructive"
-                  onClick={handleRemoveWebhook}
+                  variant="default"
                   size="sm"
+                  onClick={handleGenerateCode}
+                  disabled={generatingCode}
                 >
-                  <WifiOff className="h-4 w-4 mr-2" />
-                  {t.settings.removeWebhook}
-                </Button>
-              )}
-            </div>
-
-            {/* Connection Status */}
-            {telegramBot && (
-              <div className="bg-white rounded-lg p-4 border border-green-200">
-                <div className="flex items-center gap-2 mb-2">
-                  <CheckCircle className="h-4 w-4 text-green-600" />
-                  <span className="font-medium text-green-700">@{telegramBot.username}</span>
-                  <span className="text-sm text-gray-500">({telegramBot.first_name})</span>
-                </div>
-                <div className="flex items-center gap-2 text-sm">
-                  {hasWebhook ? (
-                    <><CheckCircle className="h-3 w-3 text-green-500" /><span className="text-green-600">{t.settings.webhookActive}</span></>
+                  {generatingCode ? (
+                    <><Loader2 className="h-4 w-4 mr-2 animate-spin" />{t.settings.telegramGeneratingCode}</>
                   ) : (
-                    <><AlertCircle className="h-3 w-3 text-amber-500" /><span className="text-amber-600">{t.settings.webhookNotSet}</span></>
+                    <><RefreshCw className="h-4 w-4 mr-2" />{t.settings.telegramGenerateCode}</>
                   )}
-                </div>
-              </div>
-            )}
-
-            {!telegramBot && !formData.telegram_bot_token && (
-              <div className="bg-white rounded-lg p-4 border">
-                <p className="text-sm font-medium text-gray-700 mb-2">{t.settings.telegramSetupSteps}</p>
-                <div className="space-y-1 text-sm text-gray-600">
-                  <p>{t.settings.telegramStep1}</p>
-                  <p>{t.settings.telegramStep2}</p>
-                  <p>{t.settings.telegramStep3}</p>
-                  <p>{t.settings.telegramStep4}</p>
-                  <p>{t.settings.telegramStep5}</p>
-                </div>
-              </div>
-            )}
-
-            {/* Webhook URL Info */}
-            {formData.telegram_bot_token && (
-              <div className="bg-white rounded-lg p-3 border">
-                <p className="text-xs text-gray-500 mb-1">{t.settings.webhookUrl}</p>
-                <code className="text-xs bg-gray-100 px-2 py-1 rounded border block overflow-x-auto">
-                  {typeof window !== 'undefined' ? window.location.origin : ''}/api/webhooks/telegram
-                </code>
+                </Button>
               </div>
             )}
           </CardContent>

@@ -56,12 +56,13 @@ model User {
   created_at    DateTime     @default(now())
   updated_at    DateTime     @updatedAt
   
-  accounts       Account[]
-  sessions       Session[]
-  memberships    Membership[]
-  documents      Document[]
-  audit_logs     AuditLog[]
-  telegram_links TelegramLink[]
+  accounts             Account[]
+  sessions             Session[]
+  memberships          Membership[]
+  documents            Document[]
+  audit_logs           AuditLog[]
+  telegram_links       TelegramLink[]
+  telegram_link_codes  TelegramLinkCode[]
 
   @@index([email])
 }
@@ -74,8 +75,6 @@ model Company {
   country                  String         @default("GB")
   fiscal_year_start        Int            @default(1)  // Month (1-12)
   export_email             String
-  telegram_bot_token       String?
-  telegram_webhook_secret  String?        // Secret for webhook verification
   email_forwarding_address String?
   ai_provider              String         @default("external") // local, external
   ai_api_key               String?
@@ -84,15 +83,16 @@ model Company {
   created_at               DateTime       @default(now())
   updated_at               DateTime       @updatedAt
 
-  memberships         Membership[]
-  subscriptions       Subscription[]
-  documents           Document[]
-  invoices            Invoice[]
-  exports             Export[]
-  audit_logs          AuditLog[]
-  telegram_links      TelegramLink[]
-  license_packs       LicensePack[]       // gestoria only
-  assigned_licenses   License[]           // licenses assigned to this company (client side)
+  memberships           Membership[]
+  subscriptions         Subscription[]
+  documents             Document[]
+  invoices              Invoice[]
+  exports               Export[]
+  audit_logs            AuditLog[]
+  telegram_links        TelegramLink[]
+  telegram_link_codes   TelegramLinkCode[]
+  license_packs         LicensePack[]       // gestoria only
+  assigned_licenses     License[]           // licenses assigned to this company (client side)
 
   @@index([tax_id])
   @@index([company_type])
@@ -173,6 +173,23 @@ model TelegramLink {
 
   @@unique([telegram_id, company_id])
   @@index([telegram_id])
+  @@index([user_id])
+  @@index([company_id])
+}
+
+model TelegramLinkCode {
+  id         String    @id @default(cuid())
+  code       String    @unique
+  user_id    String
+  company_id String
+  expires_at DateTime
+  used_at    DateTime?
+  created_at DateTime  @default(now())
+
+  user    User    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [company_id], references: [id], onDelete: Cascade)
+
+  @@index([code])
   @@index([user_id])
   @@index([company_id])
 }

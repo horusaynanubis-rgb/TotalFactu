@@ -104,9 +104,10 @@ export async function POST(
     const invoice = await prisma.invoice.create({ data: invoiceData });
 
     // Send Telegram notification if document came from Telegram
-    if (document.telegram_chat_id && document.company?.telegram_bot_token) {
+    const globalBotToken = process.env.TELEGRAM_BOT_TOKEN;
+    if (document.telegram_chat_id && globalBotToken) {
       await sendTelegramStatusUpdate(
-        document.company.telegram_bot_token,
+        globalBotToken,
         document.telegram_chat_id,
         document.telegram_message_id,
         processingStatus,
@@ -133,14 +134,15 @@ export async function POST(
       });
 
       // Notify via Telegram on failure
-      if (doc.telegram_chat_id && doc.company?.telegram_bot_token) {
+      const botToken = process.env.TELEGRAM_BOT_TOKEN;
+      if (doc.telegram_chat_id && botToken) {
         const failText = '\u274c <b>Processing failed</b>\n\n' +
           `${error?.message || 'An unexpected error occurred'}\n\n` +
           'You can retry from the dashboard or upload the file again.';
         if (doc.telegram_message_id) {
-          await editMessage(doc.company.telegram_bot_token, doc.telegram_chat_id, doc.telegram_message_id, failText);
+          await editMessage(botToken, doc.telegram_chat_id, doc.telegram_message_id, failText);
         } else {
-          await sendMessage(doc.company.telegram_bot_token, doc.telegram_chat_id, failText);
+          await sendMessage(botToken, doc.telegram_chat_id, failText);
         }
       }
     } catch (updateError: any) {

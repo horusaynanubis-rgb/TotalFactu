@@ -57,6 +57,7 @@ export async function GET() {
       needsReviewInvoices,
       recentDocuments,
       recentInvoices,
+      telegramLink,
     ] = await Promise.all([
       prisma.document.count({ where: { company_id: companyId } }),
       prisma.invoice.count({ where: { company_id: companyId } }),
@@ -92,6 +93,9 @@ export async function GET() {
         orderBy: { issue_date: "desc" },
         take: 5,
       }),
+      prisma.telegramLink.findFirst({
+        where: { user_id: session.user.id, company_id: companyId },
+      }),
     ]);
 
     return NextResponse.json({
@@ -108,7 +112,7 @@ export async function GET() {
         country: membership.company.country,
       },
       integrations: {
-        telegramConnected: Boolean(membership.company.telegram_bot_token),
+        telegramConnected: Boolean(telegramLink),
         aiConnected: Boolean(membership.company.ai_api_key),
         aiProvider: membership.company.ai_provider,
       },

@@ -15,26 +15,23 @@ import {
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-// Find company by bot token - we look up all companies with a telegram_bot_token
-// and match via the webhook secret in the header
-async function findCompanyBySecret(secretToken: string) {
-  return prisma.company.findFirst({
-    where: { telegram_webhook_secret: secretToken },
-  });
-}
-
-// Find company that owns this bot token (fallback: iterate companies)
-async function findCompanyByBotToken(botToken: string) {
-  return prisma.company.findFirst({
-    where: {
-      telegram_bot_token: botToken,
-    },
-  });
+function getBotToken(): string {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) throw new Error('TELEGRAM_BOT_TOKEN not configured');
+  return token;
 }
 
 export async function POST(request: NextRequest) {
   try {
-    // Parse the update from Telegram
+    // Validate webhook secret
+    const webhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
+    if (webhookSecret) {
+      const incomingSecret = request.headers.get('x-telegram-bot-api-secret-token');
+      if (incomingSecret !== webhookSecret) {
+        return NextResponse.json({ ok: true }); // Silent reject
+      }
+    }
+
     const update: TelegramUpdate = await request.json();
     const message = update.message;
 
@@ -42,82 +39,55 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    // Identify the company via the X-Telegram-Bot-Api-Secret-Token header
-    const secretToken = request.headers.get('x-telegram-bot-api-secret-token');
-    let company: any = null;
-
-    if (secretToken) {
-      company = await findCompanyBySecret(secretToken);
-    }
-
-    if (!company) {
-      // Fallback: try to find any company with a configured bot token
-      // In production with multiple companies, the secret token approach is preferred
-      const companies = await prisma.company.findMany({
-        where: { telegram_bot_token: { not: null } },
-      });
-      if (companies.length === 1) {
-        company = companies[0];
-      } else {
-        console.error('Cannot determine company for telegram webhook - no secret match and multiple companies have tokens');
-        return NextResponse.json({ ok: true });
-      }
-    }
-
-    if (!company?.telegram_bot_token) {
-      console.error('Company has no telegram bot token');
-      return NextResponse.json({ ok: true });
-    }
-
-    const botToken = company.telegram_bot_token;
+    const botToken = getBotToken();
     const chatId = String(message.chat.id);
-    const telegramUserId = String(message.from?.id || message.chat.id);
+    const telegramUserId = String(message.from?.id ?? message.chat.id);
 
-    // Handle /start command
     if (message.text?.startsWith('/start')) {
-      await handleStartCommand(botToken, chatId, telegramUserId, company, message);
+      await handleStartCommand(botToken, chatId, telegramUserId, message);
       return NextResponse.json({ ok: true });
     }
 
-    // Handle /status command
     if (message.text?.startsWith('/status')) {
-      await handleStatusCommand(botToken, chatId, telegramUserId, company);
+      await handleStatusCommand(botToken, chatId, telegramUserId);
       return NextResponse.json({ ok: true });
     }
 
-    // Handle /help command
     if (message.text?.startsWith('/help')) {
       await sendMessage(botToken, chatId,
-        '📋 <b>Available commands:</b>\n\n' +
-        '/start - Link your account\n' +
-        '/status - Check recent invoice status\n' +
-        '/help - Show this help\n\n' +
-        '📎 Send a <b>photo</b>, <b>PDF</b>, <b>JPG</b>, or <b>PNG</b> file to process an invoice.'
+        '📋 <b>Comandos disponibles:</b>\n\n' +
+        '/start CODIGO — Vincula tu cuenta de TotalFactu\n' +
+        '/status — Ver estado de tus últimas facturas\n' +
+        '/help — Mostrar esta ayuda\n\n' +
+        '📎 Envía una <b>foto</b>, <b>PDF</b>, <b>JPG</b> o <b>PNG</b> para procesar una factura.'
       );
       return NextResponse.json({ ok: true });
     }
 
-    // Handle text messages that might be email for linking
-    if (message.text && !message.text.startsWith('/')) {
-      await handleTextMessage(botToken, chatId, telegramUserId, company, message.text);
-      return NextResponse.json({ ok: true });
-    }
-
-    // Handle file uploads (document or photo)
     if (message.document || message.photo) {
-      await handleFileUpload(botToken, chatId, telegramUserId, company, message);
+      await handleFileUpload(botToken, chatId, telegramUserId, message);
       return NextResponse.json({ ok: true });
     }
 
-    // Unknown message type
-    await sendMessage(botToken, chatId,
-      '❓ I can only process invoice files.\n\nPlease send a <b>PDF</b>, <b>JPG</b>, <b>PNG</b>, or <b>photo</b> of an invoice.\n\nType /help for more options.'
-    );
+    // Unknown text — check if linked first
+    const link = await prisma.telegramLink.findFirst({
+      where: { telegram_id: telegramUserId },
+    });
+    if (!link) {
+      await sendMessage(botToken, chatId,
+        '👋 Bienvenido a <b>TotalFactu</b>.\n\n' +
+        'Para empezar, obtén tu código de vinculación en Configuración y envía:\n\n' +
+        '<code>/start TF-XXXXXX</code>'
+      );
+    } else {
+      await sendMessage(botToken, chatId,
+        '📎 Envía una <b>foto</b> o <b>archivo</b> de factura para procesarla.\n\nEscribe /help para más opciones.'
+      );
+    }
 
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error('Telegram webhook error:', error);
-    // Always return 200 to Telegram to prevent retries
     return NextResponse.json({ ok: true });
   }
 }
@@ -126,133 +96,115 @@ async function handleStartCommand(
   botToken: string,
   chatId: string,
   telegramUserId: string,
-  company: any,
   message: any
 ) {
-  // Check if already linked
-  const existingLink = await prisma.telegramLink.findUnique({
+  const parts = message.text?.trim().split(/\s+/) ?? [];
+  const code = parts[1];
+
+  if (!code) {
+    // No code provided
+    const existing = await prisma.telegramLink.findFirst({
+      where: { telegram_id: telegramUserId },
+      include: { user: true, company: true },
+    });
+    if (existing) {
+      await sendMessage(botToken, chatId,
+        `✅ Tu cuenta ya está vinculada.\n\n` +
+        `👤 <b>${existing.user.name}</b> → <b>${existing.company.name}</b>\n\n` +
+        '📎 Envía una factura para procesarla.'
+      );
+    } else {
+      await sendMessage(botToken, chatId,
+        '👋 Bienvenido a <b>TotalFactu</b>.\n\n' +
+        'Para vincular tu cuenta, genera un código desde Configuración y envía:\n\n' +
+        '<code>/start TF-XXXXXX</code>'
+      );
+    }
+    return;
+  }
+
+  // Validate the linking code
+  const linkCode = await prisma.telegramLinkCode.findUnique({
+    where: { code: code.toUpperCase() },
+    include: { user: true, company: true },
+  });
+
+  if (!linkCode) {
+    await sendMessage(botToken, chatId,
+      '❌ Código no válido. Genera uno nuevo desde Configuración en TotalFactu.'
+    );
+    return;
+  }
+
+  if (linkCode.used_at) {
+    await sendMessage(botToken, chatId,
+      '❌ Este código ya ha sido usado. Genera uno nuevo desde Configuración.'
+    );
+    return;
+  }
+
+  if (linkCode.expires_at < new Date()) {
+    await sendMessage(botToken, chatId,
+      '❌ Este código ha caducado. Genera uno nuevo desde Configuración.'
+    );
+    return;
+  }
+
+  // Create or update the TelegramLink
+  await prisma.telegramLink.upsert({
     where: {
       telegram_id_company_id: {
         telegram_id: telegramUserId,
-        company_id: company.id,
+        company_id: linkCode.company_id,
       },
     },
-    include: { user: true },
-  });
-
-  if (existingLink) {
-    await sendMessage(botToken, chatId,
-      `✅ Welcome back, <b>${existingLink.user.name}</b>!\n\n` +
-      `Your account is linked to <b>${company.name}</b>.\n\n` +
-      '📎 Send a photo or file of an invoice to process it.'
-    );
-    return;
-  }
-
-  // Not linked - ask for email
-  await sendMessage(botToken, chatId,
-    `👋 Welcome to <b>${company.name}</b>'s TotalFactu bot!\n\n` +
-    'To link your Telegram account, please send me your <b>registered email address</b>.\n\n' +
-    '💡 If you don\'t have an account yet, sign up at the TotalFactu web app first.'
-  );
-}
-
-async function handleTextMessage(
-  botToken: string,
-  chatId: string,
-  telegramUserId: string,
-  company: any,
-  text: string
-) {
-  // Check if already linked
-  const existingLink = await prisma.telegramLink.findUnique({
-    where: {
-      telegram_id_company_id: {
-        telegram_id: telegramUserId,
-        company_id: company.id,
-      },
-    },
-  });
-
-  if (existingLink) {
-    await sendMessage(botToken, chatId,
-      '📎 To process an invoice, send a <b>photo</b>, <b>PDF</b>, <b>JPG</b>, or <b>PNG</b> file.\n\nType /help for more commands.'
-    );
-    return;
-  }
-
-  // Try to match email
-  const email = text.trim().toLowerCase();
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-  if (!emailRegex.test(email)) {
-    await sendMessage(botToken, chatId,
-      '❓ That doesn\'t look like an email address.\n\nPlease send your <b>registered email address</b> to link your account, or type /start to begin.'
-    );
-    return;
-  }
-
-  // Look up the user in this company
-  const membership = await prisma.membership.findFirst({
-    where: {
-      company_id: company.id,
-      user: { email },
-    },
-    include: { user: true },
-  });
-
-  if (!membership) {
-    await sendMessage(botToken, chatId,
-      '❌ No account found with that email in this company.\n\n' +
-      'Please check your email or sign up at the TotalFactu web app first.'
-    );
-    return;
-  }
-
-  // Create the link
-  await prisma.telegramLink.create({
-    data: {
+    create: {
       telegram_id: telegramUserId,
-      user_id: membership.user_id,
-      company_id: company.id,
-      username: undefined,
-      first_name: undefined,
+      user_id: linkCode.user_id,
+      company_id: linkCode.company_id,
+      username: message.from?.username,
+      first_name: message.from?.first_name,
+    },
+    update: {
+      user_id: linkCode.user_id,
+      username: message.from?.username,
+      first_name: message.from?.first_name,
     },
   });
 
+  // Mark code as used
+  await prisma.telegramLinkCode.update({
+    where: { id: linkCode.id },
+    data: { used_at: new Date() },
+  });
+
   await sendMessage(botToken, chatId,
-    `✅ Account linked successfully!\n\n` +
-    `Welcome, <b>${membership.user.name}</b>! You're connected to <b>${company.name}</b>.\n\n` +
-    '📎 You can now send invoices (photos, PDFs, images) and I\'ll process them automatically.'
+    `✅ <b>¡Cuenta vinculada correctamente!</b>\n\n` +
+    `👤 ${linkCode.user.name}\n` +
+    `🏢 ${linkCode.company.name}\n\n` +
+    '📎 Ya puedes enviar facturas (fotos, PDFs, imágenes) y las procesaré automáticamente.'
   );
 }
 
 async function handleStatusCommand(
   botToken: string,
   chatId: string,
-  telegramUserId: string,
-  company: any
+  telegramUserId: string
 ) {
-  const link = await prisma.telegramLink.findUnique({
-    where: {
-      telegram_id_company_id: {
-        telegram_id: telegramUserId,
-        company_id: company.id,
-      },
-    },
+  const link = await prisma.telegramLink.findFirst({
+    where: { telegram_id: telegramUserId },
   });
 
   if (!link) {
     await sendMessage(botToken, chatId,
-      '⚠️ Your account is not linked. Send /start to begin.'
+      '⚠️ Tu cuenta no está vinculada. Genera un código en TotalFactu y envía /start CODIGO.'
     );
     return;
   }
 
-  // Get recent documents from this user via telegram
   const recentDocs = await prisma.document.findMany({
     where: {
-      company_id: company.id,
+      company_id: link.company_id,
       user_id: link.user_id,
       source_channel: 'telegram',
     },
@@ -263,7 +215,7 @@ async function handleStatusCommand(
 
   if (recentDocs.length === 0) {
     await sendMessage(botToken, chatId,
-      '📋 No recent invoices sent via Telegram. Send a file to get started!'
+      '📋 Aún no has enviado facturas por Telegram. ¡Envía tu primera factura!'
     );
     return;
   }
@@ -275,13 +227,13 @@ async function handleStatusCommand(
     failed: '❌',
   };
 
-  let statusText = '📋 <b>Recent invoices:</b>\n\n';
+  let statusText = '📋 <b>Últimas facturas:</b>\n\n';
   for (const doc of recentDocs) {
     const emoji = statusEmoji[doc.processing_status] || '❓';
-    const invoiceNum = doc.invoice?.invoice_number || 'Processing...';
+    const invoiceNum = doc.invoice?.invoice_number || 'Procesando...';
     const amount = doc.invoice ? `€${doc.invoice.total_amount.toFixed(2)}` : '-';
     statusText += `${emoji} <b>${doc.original_filename}</b>\n`;
-    statusText += `   Status: ${doc.processing_status} | #${invoiceNum} | ${amount}\n\n`;
+    statusText += `   ${doc.processing_status} | #${invoiceNum} | ${amount}\n\n`;
   }
 
   await sendMessage(botToken, chatId, statusText);
@@ -291,27 +243,19 @@ async function handleFileUpload(
   botToken: string,
   chatId: string,
   telegramUserId: string,
-  company: any,
   message: any
 ) {
-  // Check if user is linked
-  const link = await prisma.telegramLink.findUnique({
-    where: {
-      telegram_id_company_id: {
-        telegram_id: telegramUserId,
-        company_id: company.id,
-      },
-    },
+  const link = await prisma.telegramLink.findFirst({
+    where: { telegram_id: telegramUserId },
   });
 
   if (!link) {
     await sendMessage(botToken, chatId,
-      '⚠️ Please link your account first.\n\nSend /start to begin the linking process.'
+      '⚠️ Primero vincula tu cuenta.\n\nGenera un código en TotalFactu → Configuración y envía:\n<code>/start TF-XXXXXX</code>'
     );
     return;
   }
 
-  // Determine file info
   let fileId: string;
   let fileName: string;
   let mimeType: string;
@@ -321,16 +265,14 @@ async function handleFileUpload(
     fileName = message.document.file_name || `document_${Date.now()}`;
     mimeType = message.document.mime_type || getMimeType(fileName);
 
-    // Check file size (Telegram limit is 20MB for bots)
     if (message.document.file_size && message.document.file_size > 20 * 1024 * 1024) {
       await sendMessage(botToken, chatId,
-        '❌ File is too large. Maximum size is 20MB via Telegram.',
+        '❌ El archivo es demasiado grande. El tamaño máximo por Telegram es 20MB.',
         { reply_to_message_id: message.message_id }
       );
       return;
     }
   } else if (message.photo) {
-    // Get the largest photo
     const photo = message.photo[message.photo.length - 1];
     fileId = photo.file_id;
     fileName = `photo_${Date.now()}.jpg`;
@@ -339,38 +281,30 @@ async function handleFileUpload(
     return;
   }
 
-  // Check if supported
   if (!isSupportedFile(mimeType)) {
     await sendMessage(botToken, chatId,
-      '❌ Unsupported file type. Please send a <b>PDF</b>, <b>JPG</b>, or <b>PNG</b> file.',
+      '❌ Tipo de archivo no soportado. Envía un <b>PDF</b>, <b>JPG</b> o <b>PNG</b>.',
       { reply_to_message_id: message.message_id }
     );
     return;
   }
 
-  // Send "received" confirmation
   const statusMsg = await sendMessage(botToken, chatId,
-    '📨 <b>Invoice received!</b>\n⏳ Downloading and processing...',
+    '📨 <b>¡Factura recibida!</b>\n⏳ Descargando y procesando...',
     { reply_to_message_id: message.message_id }
   );
 
   try {
-    // Download file from Telegram
     const fileInfo = await getFile(botToken, fileId);
-    if (!fileInfo?.file_path) {
-      throw new Error('Could not get file path from Telegram');
-    }
+    if (!fileInfo?.file_path) throw new Error('No se pudo obtener la ruta del archivo');
 
     const fileBuffer = await downloadFile(botToken, fileInfo.file_path);
-    if (!fileBuffer) {
-      throw new Error('Could not download file from Telegram');
-    }
+    if (!fileBuffer) throw new Error('No se pudo descargar el archivo');
 
-    // Upload to S3
     const s3Client = createS3Client();
     const { bucketName, folderPrefix } = getBucketConfig();
     const timestamp = Date.now();
-    const cloudStoragePath = `${folderPrefix}uploads/telegram/${company.id}/${timestamp}-${fileName}`;
+    const cloudStoragePath = `${folderPrefix}uploads/telegram/${link.company_id}/${timestamp}-${fileName}`;
 
     await s3Client.send(
       new PutObjectCommand({
@@ -381,10 +315,9 @@ async function handleFileUpload(
       })
     );
 
-    // Create document record
     const document = await prisma.document.create({
       data: {
-        company_id: company.id,
+        company_id: link.company_id,
         user_id: link.user_id,
         source_channel: 'telegram',
         original_filename: fileName,
@@ -393,18 +326,16 @@ async function handleFileUpload(
         cloud_storage_path: cloudStoragePath,
         is_public: false,
         telegram_chat_id: chatId,
-        telegram_message_id: statusMsg?.message_id || null,
+        telegram_message_id: statusMsg?.message_id ?? null,
       },
     });
 
-    // Update status message
     if (statusMsg) {
       await editMessage(botToken, chatId, statusMsg.message_id,
-        '📨 <b>Invoice received!</b>\n🤖 AI is extracting data...'
+        '📨 <b>¡Factura recibida!</b>\n🤖 La IA está extrayendo los datos...'
       );
     }
 
-    // Trigger AI processing
     const baseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000';
     const processResponse = await fetch(`${baseUrl}/api/documents/${document.id}/process`, {
       method: 'POST',
@@ -416,13 +347,13 @@ async function handleFileUpload(
       const invoice = result.invoice;
 
       if (doc?.processing_status === 'completed') {
-        let completedText = '✅ <b>Invoice processed successfully!</b>\n\n';
+        let completedText = '✅ <b>¡Factura procesada correctamente!</b>\n\n';
         if (invoice) {
-          completedText += `📄 Invoice #${invoice.invoice_number}\n`;
+          completedText += `📄 Factura #${invoice.invoice_number}\n`;
           completedText += `🏢 ${invoice.supplier_name}\n`;
           completedText += `💰 ${invoice.currency} ${invoice.total_amount.toFixed(2)}\n`;
-          completedText += `📅 ${invoice.issue_date ? new Date(invoice.issue_date).toLocaleDateString() : 'N/A'}\n`;
-          completedText += `\n🎯 Confidence: ${((doc.confidence_score || 0) * 100).toFixed(0)}%`;
+          completedText += `📅 ${invoice.issue_date ? new Date(invoice.issue_date).toLocaleDateString('es-ES') : 'N/A'}\n`;
+          completedText += `\n🎯 Confianza: ${((doc.confidence_score || 0) * 100).toFixed(0)}%`;
         }
         if (statusMsg) {
           await editMessage(botToken, chatId, statusMsg.message_id, completedText);
@@ -430,9 +361,9 @@ async function handleFileUpload(
           await sendMessage(botToken, chatId, completedText);
         }
       } else if (doc?.processing_status === 'needs_review') {
-        const reviewText = '⚠️ <b>Invoice processed - needs review</b>\n\n' +
-          'Some fields could not be extracted with high confidence.\n' +
-          'Please review in the TotalFactu dashboard.';
+        const reviewText = '⚠️ <b>Factura procesada — requiere revisión</b>\n\n' +
+          'Algunos campos no se extrajeron con suficiente confianza.\n' +
+          'Revísalos en el panel de TotalFactu.';
         if (statusMsg) {
           await editMessage(botToken, chatId, statusMsg.message_id, reviewText);
         } else {
@@ -440,9 +371,8 @@ async function handleFileUpload(
         }
       }
     } else {
-      // Processing failed
-      const failText = '❌ <b>Processing failed</b>\n\n' +
-        'Could not extract data from this file. Please try again or upload via the web dashboard.';
+      const failText = '❌ <b>Error al procesar</b>\n\n' +
+        'No se pudo extraer datos de este archivo. Inténtalo de nuevo o sube la factura desde el panel web.';
       if (statusMsg) {
         await editMessage(botToken, chatId, statusMsg.message_id, failText);
       } else {
@@ -451,9 +381,9 @@ async function handleFileUpload(
     }
   } catch (error: any) {
     console.error('Telegram file processing error:', error);
-    const errorText = '❌ <b>Error processing invoice</b>\n\n' +
-      `${error?.message || 'An unexpected error occurred'}\n\n` +
-      'Please try again or upload via the web dashboard.';
+    const errorText = '❌ <b>Error procesando la factura</b>\n\n' +
+      `${error?.message || 'Error inesperado'}\n\n` +
+      'Inténtalo de nuevo o sube la factura desde el panel web.';
     if (statusMsg) {
       await editMessage(botToken, chatId, statusMsg.message_id, errorText);
     } else {

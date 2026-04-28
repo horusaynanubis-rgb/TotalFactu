@@ -52,7 +52,7 @@ export async function PATCH(request: NextRequest) {
     const allowedFields: Record<string, any> = {};
     const safeFields = [
       'name', 'tax_id', 'address', 'export_email',
-      'email_forwarding_address', 'telegram_bot_token',
+      'email_forwarding_address',
       'ai_provider', 'ai_api_key', 'ai_api_endpoint',
     ];
     for (const key of safeFields) {

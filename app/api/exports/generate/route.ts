@@ -101,7 +101,8 @@ export async function POST(request: NextRequest) {
 
 // Send Telegram notification to all linked users for this company
     try {
-      if (membership.company.telegram_bot_token) {
+      const botToken = process.env.TELEGRAM_BOT_TOKEN;
+      if (botToken) {
         const telegramLinks = await prisma.telegramLink.findMany({
           where: { company_id: membership.company_id },
         });
@@ -112,7 +113,7 @@ export async function POST(request: NextRequest) {
           `\ud83d\udcc6 ${formatDate(start)} \u2014 ${formatDate(end)}\n\n` +
           `Download it from the TotalFactu dashboard.`;
         for (const link of telegramLinks) {
-          await sendMessage(membership.company.telegram_bot_token, link.telegram_id, exportMsg);
+          await sendMessage(botToken, link.telegram_id, exportMsg);
         }
       }
     } catch (tgError: any) {
