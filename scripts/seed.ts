@@ -56,7 +56,6 @@ async function main() {
       country: 'GB',
       fiscal_year_start: 1,
       export_email: 'exports@democompany.com',
-      telegram_bot_token: null,
       email_forwarding_address: 'invoices@democompany.com',
     },
   });
@@ -72,7 +71,6 @@ async function main() {
       country: 'GB',
       fiscal_year_start: 4,
       export_email: 'accounting@techcorp.com',
-      telegram_bot_token: null,
       email_forwarding_address: 'bills@techcorp.com',
     },
   });
@@ -88,7 +86,6 @@ async function main() {
       country: 'FR',
       fiscal_year_start: 1,
       export_email: 'finance@designstudio.fr',
-      telegram_bot_token: null,
       email_forwarding_address: 'factures@designstudio.fr',
     },
   });
