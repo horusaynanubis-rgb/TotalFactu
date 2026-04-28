@@ -2,8 +2,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/auth-options';
 import { setWebhook, deleteWebhook } from '@/lib/telegram';
+import { ensureTelegramWebhook } from '@/lib/ensure-telegram-webhook';
 
 export const dynamic = 'force-dynamic';
+
+function getBaseUrl(request: NextRequest): string {
+  // Prefer explicit env override, then NEXTAUTH_URL, then request origin
+  if (process.env.TELEGRAM_WEBHOOK_URL) {
+    // Strip trailing path if full URL was given
+    return process.env.TELEGRAM_WEBHOOK_URL.replace(/\/api\/webhooks\/telegram$/, '');
+  }
+  if (process.env.NEXTAUTH_URL) return process.env.NEXTAUTH_URL;
+  return request.nextUrl.origin;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -20,26 +31,40 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const body = await request.json();
-    const { webhookUrl, action } = body;
+    const body = await request.json().catch(() => ({}));
+    const { action, force } = body;
 
+    // Delete webhook
     if (action === 'delete') {
-      return NextResponse.json(await deleteWebhook(botToken));
+      const result = await deleteWebhook(botToken);
+      if (result.ok) console.log('[Telegram] Webhook deleted');
+      return NextResponse.json(result);
     }
 
-    if (!webhookUrl) {
-      return NextResponse.json(
-        { ok: false, description: 'webhookUrl is required' },
-        { status: 400 }
-      );
+    // Ensure mode (check first, only update if needed) — default
+    if (!force) {
+      await ensureTelegramWebhook();
+      return NextResponse.json({ ok: true, description: 'Webhook verified/updated (ensure mode)' });
     }
 
-    const secretToken = process.env.TELEGRAM_WEBHOOK_SECRET;
-    return NextResponse.json(await setWebhook(botToken, webhookUrl, secretToken));
+    // Force mode: always re-register regardless of current state
+    const webhookUrl = body.webhookUrl ?? `${getBaseUrl(request)}/api/webhooks/telegram`;
+    const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
+
+    console.log(`[Telegram] Force-registering webhook → ${webhookUrl}`);
+    const result = await setWebhook(botToken, webhookUrl, secret);
+
+    if (result.ok) {
+      console.log('[Telegram] Webhook force-registered successfully ✓');
+    } else {
+      console.error('[Telegram] Force-register failed:', result.description);
+    }
+
+    return NextResponse.json(result);
   } catch (error: any) {
-    console.error('Set webhook error:', error);
+    console.error('[Telegram] set-webhook error:', error);
     return NextResponse.json(
-      { ok: false, description: 'Failed to set webhook' },
+      { ok: false, description: 'Internal server error' },
       { status: 500 }
     );
   }
