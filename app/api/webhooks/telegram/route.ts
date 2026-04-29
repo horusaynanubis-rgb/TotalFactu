@@ -102,7 +102,7 @@ export async function POST(request: NextRequest) {
     // Unknown text
     const link = await prisma.telegramLink.findFirst({
     where: { telegram_id: telegramUserId },
-    orderBy: { created_at: 'asc' },
+    orderBy: { created_at: 'desc' },
   });
     if (!link) {
       await sendMessage(botToken, chatId,
@@ -138,7 +138,7 @@ async function handleStartCommand(
   if (!code) {
     const existing = await prisma.telegramLink.findFirst({
       where: { telegram_id: telegramUserId },
-      orderBy: { created_at: 'asc' },
+      orderBy: { created_at: 'desc' },
       include: { user: true, company: true },
     });
     if (existing) {
@@ -194,6 +194,19 @@ async function handleStartCommand(
   }
 
   console.log(`[Telegram /start] Creating/updating TelegramLink telegram_id=${telegramUserId} company_id=${linkCode.company_id}`);
+
+  // Delete any stale links for this telegram_id that point to OTHER companies.
+  // One Telegram account = one active company at a time.
+  const deleted = await prisma.telegramLink.deleteMany({
+    where: {
+      telegram_id: telegramUserId,
+      NOT: { company_id: linkCode.company_id },
+    },
+  });
+  if (deleted.count > 0) {
+    console.log(`[Telegram /start] Removed ${deleted.count} stale TelegramLink(s) for telegram_id=${telegramUserId}`);
+  }
+
   await prisma.telegramLink.upsert({
     where: {
       telegram_id_company_id: {
@@ -249,7 +262,7 @@ async function handleStatusCommand(
 ) {
   const link = await prisma.telegramLink.findFirst({
     where: { telegram_id: telegramUserId },
-    orderBy: { created_at: 'asc' },
+    orderBy: { created_at: 'desc' },
   });
 
   if (!link) {
@@ -323,7 +336,7 @@ async function handleFileUpload(
 ) {
   const link = await prisma.telegramLink.findFirst({
     where: { telegram_id: telegramUserId },
-    orderBy: { created_at: 'asc' },
+    orderBy: { created_at: 'desc' },
   });
 
   if (!link) {
