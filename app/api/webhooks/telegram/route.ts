@@ -25,17 +25,38 @@ export async function POST(request: NextRequest) {
   try {
     // Validate webhook secret
     const webhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
+    const incomingSecret = request.headers.get('x-telegram-bot-api-secret-token');
+
     if (webhookSecret) {
-      const incomingSecret = request.headers.get('x-telegram-bot-api-secret-token');
-      if (incomingSecret !== webhookSecret) {
-        return NextResponse.json({ ok: true }); // Silent reject
+      if (!incomingSecret) {
+        console.warn('[Telegram webhook] REJECTED: TELEGRAM_WEBHOOK_SECRET is set but Telegram did not send X-Telegram-Bot-Api-Secret-Token header. The webhook may have been registered without a secret_token. Call POST /api/telegram/set-webhook with { force: true } to re-register.');
+        return NextResponse.json({ ok: true });
       }
+      if (incomingSecret !== webhookSecret) {
+        console.warn('[Telegram webhook] REJECTED: secret token mismatch. Incoming does not match TELEGRAM_WEBHOOK_SECRET. Re-register the webhook to sync the secret.');
+        return NextResponse.json({ ok: true });
+      }
+    } else if (incomingSecret) {
+      console.warn('[Telegram webhook] WARNING: Telegram sent a secret token but TELEGRAM_WEBHOOK_SECRET is not set. Update will be processed but consider setting the env var for security.');
     }
 
-    const update: TelegramUpdate = await request.json();
+    const body = await request.text();
+    console.log('[Telegram webhook] Raw body length:', body.length);
+
+    let update: TelegramUpdate;
+    try {
+      update = JSON.parse(body) as TelegramUpdate;
+    } catch {
+      console.error('[Telegram webhook] Failed to parse JSON body');
+      return NextResponse.json({ ok: true });
+    }
+
+    console.log('[Telegram webhook] update_id:', update.update_id, '| has message:', Boolean(update.message));
+
     const message = update.message;
 
     if (!message) {
+      console.log('[Telegram webhook] No message in update — ignoring');
       return NextResponse.json({ ok: true });
     }
 
@@ -43,17 +64,22 @@ export async function POST(request: NextRequest) {
     const chatId = String(message.chat.id);
     const telegramUserId = String(message.from?.id ?? message.chat.id);
 
+    console.log(`[Telegram webhook] chat_id=${chatId} user_id=${telegramUserId} text=${JSON.stringify(message.text ?? null)} has_doc=${Boolean(message.document)} has_photo=${Boolean(message.photo)}`);
+
     if (message.text?.startsWith('/start')) {
+      console.log('[Telegram webhook] Handling /start command');
       await handleStartCommand(botToken, chatId, telegramUserId, message);
       return NextResponse.json({ ok: true });
     }
 
     if (message.text?.startsWith('/status')) {
+      console.log('[Telegram webhook] Handling /status command');
       await handleStatusCommand(botToken, chatId, telegramUserId);
       return NextResponse.json({ ok: true });
     }
 
     if (message.text?.startsWith('/help')) {
+      console.log('[Telegram webhook] Handling /help command');
       await sendMessage(botToken, chatId,
         '📋 <b>Comandos disponibles:</b>\n\n' +
         '/start CODIGO — Vincula tu cuenta de TotalFactu\n' +
@@ -65,6 +91,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (message.document || message.photo) {
+      console.log('[Telegram webhook] Handling file upload');
       await handleFileUpload(botToken, chatId, telegramUserId, message);
       return NextResponse.json({ ok: true });
     }
@@ -87,7 +114,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ ok: true });
   } catch (error) {
-    console.error('Telegram webhook error:', error);
+    console.error('[Telegram webhook] Unhandled error:', error);
     return NextResponse.json({ ok: true });
   }
 }
@@ -101,19 +128,22 @@ async function handleStartCommand(
   const parts = message.text?.trim().split(/\s+/) ?? [];
   const code = parts[1];
 
+  console.log(`[Telegram /start] chat_id=${chatId} user_id=${telegramUserId} code=${code ?? 'none'}`);
+
   if (!code) {
-    // No code provided
     const existing = await prisma.telegramLink.findFirst({
       where: { telegram_id: telegramUserId },
       include: { user: true, company: true },
     });
     if (existing) {
+      console.log(`[Telegram /start] Already linked — user_id=${existing.user_id} company_id=${existing.company_id}`);
       await sendMessage(botToken, chatId,
         `✅ Tu cuenta ya está vinculada.\n\n` +
         `👤 <b>${existing.user.name}</b> → <b>${existing.company.name}</b>\n\n` +
         '📎 Envía una factura para procesarla.'
       );
     } else {
+      console.log('[Telegram /start] No code and not linked — showing welcome message');
       await sendMessage(botToken, chatId,
         '👋 Bienvenido a <b>TotalFactu</b>.\n\n' +
         'Para vincular tu cuenta, genera un código desde Configuración y envía:\n\n' +
@@ -124,19 +154,26 @@ async function handleStartCommand(
   }
 
   // Validate the linking code
+  const normalizedCode = code.toUpperCase();
+  console.log(`[Telegram /start] Looking up code: ${normalizedCode}`);
+
   const linkCode = await prisma.telegramLinkCode.findUnique({
-    where: { code: code.toUpperCase() },
+    where: { code: normalizedCode },
     include: { user: true, company: true },
   });
 
   if (!linkCode) {
+    console.warn(`[Telegram /start] Code not found in DB: ${normalizedCode}`);
     await sendMessage(botToken, chatId,
       '❌ Código no válido. Genera uno nuevo desde Configuración en TotalFactu.'
     );
     return;
   }
 
+  console.log(`[Telegram /start] Code found: id=${linkCode.id} user_id=${linkCode.user_id} used_at=${linkCode.used_at} expires_at=${linkCode.expires_at}`);
+
   if (linkCode.used_at) {
+    console.warn(`[Telegram /start] Code already used at ${linkCode.used_at}`);
     await sendMessage(botToken, chatId,
       '❌ Este código ya ha sido usado. Genera uno nuevo desde Configuración.'
     );
@@ -144,6 +181,7 @@ async function handleStartCommand(
   }
 
   if (linkCode.expires_at < new Date()) {
+    console.warn(`[Telegram /start] Code expired at ${linkCode.expires_at}`);
     await sendMessage(botToken, chatId,
       '❌ Este código ha caducado. Genera uno nuevo desde Configuración.'
     );
@@ -151,6 +189,7 @@ async function handleStartCommand(
   }
 
   // Create or update the TelegramLink
+  console.log(`[Telegram /start] Creating/updating TelegramLink for telegram_id=${telegramUserId} company_id=${linkCode.company_id}`);
   await prisma.telegramLink.upsert({
     where: {
       telegram_id_company_id: {
@@ -178,12 +217,20 @@ async function handleStartCommand(
     data: { used_at: new Date() },
   });
 
-  await sendMessage(botToken, chatId,
+  console.log(`[Telegram /start] TelegramLink created/updated successfully. Sending confirmation to chat_id=${chatId}`);
+
+  const sendResult = await sendMessage(botToken, chatId,
     `✅ <b>¡Cuenta vinculada correctamente!</b>\n\n` +
     `👤 ${linkCode.user.name}\n` +
     `🏢 ${linkCode.company.name}\n\n` +
     '📎 Ya puedes enviar facturas (fotos, PDFs, imágenes) y las procesaré automáticamente.'
   );
+
+  if (!sendResult) {
+    console.error(`[Telegram /start] sendMessage failed for chat_id=${chatId} — check TELEGRAM_BOT_TOKEN and bot permissions`);
+  } else {
+    console.log(`[Telegram /start] Confirmation message sent successfully`);
+  }
 }
 
 async function handleStatusCommand(

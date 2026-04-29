@@ -1,20 +1,25 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useSession } from 'next-auth/react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Building2, Mail, Send, CheckCircle, Bot, ExternalLink, Loader2, Brain, RefreshCw, Unlink, Copy } from 'lucide-react';
+import { Building2, Mail, Send, CheckCircle, Bot, ExternalLink, Loader2, Brain, RefreshCw, Unlink, Copy, AlertTriangle, ShieldCheck, Wrench } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useTranslation } from '@/lib/i18n/context';
 
 const BOT_USERNAME = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME || 'totalfactu_helper_bot';
 
+const ADMIN_EMAILS = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || '').split(',').map(e => e.trim());
+
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const { t } = useTranslation();
+  const { data: session } = useSession();
+  const isAdmin = Boolean(session?.user?.email && ADMIN_EMAILS.includes(session.user.email));
 
   const [formData, setFormData] = useState({
     name: '',
@@ -35,6 +40,11 @@ export default function SettingsPage() {
   const [codeExpiresAt, setCodeExpiresAt] = useState<Date | null>(null);
   const [generatingCode, setGeneratingCode] = useState(false);
   const [unlinking, setUnlinking] = useState(false);
+
+  // Admin: webhook diagnostic state
+  const [webhookInfo, setWebhookInfo] = useState<any>(null);
+  const [loadingWebhookInfo, setLoadingWebhookInfo] = useState(false);
+  const [registeringWebhook, setRegisteringWebhook] = useState(false);
 
   const fetchSettings = useCallback(async () => {
     try {
@@ -127,6 +137,41 @@ export default function SettingsPage() {
     if (linkCode) {
       navigator.clipboard.writeText(`/start ${linkCode}`);
       toast.success('Comando copiado');
+    }
+  };
+
+  const fetchWebhookInfo = async () => {
+    setLoadingWebhookInfo(true);
+    try {
+      const res = await fetch('/api/telegram/webhook-info');
+      const data = await res.json();
+      setWebhookInfo(data);
+    } catch {
+      toast.error('Error al obtener info del webhook');
+    } finally {
+      setLoadingWebhookInfo(false);
+    }
+  };
+
+  const handleRegisterWebhook = async (force: boolean) => {
+    setRegisteringWebhook(true);
+    try {
+      const res = await fetch('/api/telegram/set-webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        toast.success('Webhook registrado correctamente');
+        await fetchWebhookInfo();
+      } else {
+        toast.error(`Error: ${data.description || 'Desconocido'}`);
+      }
+    } catch {
+      toast.error('Error al registrar el webhook');
+    } finally {
+      setRegisteringWebhook(false);
     }
   };
 
@@ -292,6 +337,82 @@ export default function SettingsPage() {
             )}
           </CardContent>
         </Card>
+
+        {/* Admin: Telegram Webhook Diagnostic */}
+        {isAdmin && (
+          <Card className="border-purple-200 bg-purple-50/30">
+            <CardHeader>
+              <CardTitle className="flex items-center text-purple-800">
+                <Wrench className="h-5 w-5 mr-2" />
+                Admin — Diagnóstico Webhook Telegram
+              </CardTitle>
+              <CardDescription>Solo visible para administradores</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex gap-2 flex-wrap">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={fetchWebhookInfo}
+                  disabled={loadingWebhookInfo}
+                >
+                  {loadingWebhookInfo ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                  Verificar webhook
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleRegisterWebhook(false)}
+                  disabled={registeringWebhook}
+                  className="border-blue-200 text-blue-700 hover:bg-blue-50"
+                >
+                  {registeringWebhook ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <ShieldCheck className="h-4 w-4 mr-2" />}
+                  Asegurar webhook (auto)
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleRegisterWebhook(true)}
+                  disabled={registeringWebhook}
+                  className="border-orange-200 text-orange-700 hover:bg-orange-50"
+                >
+                  {registeringWebhook ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <AlertTriangle className="h-4 w-4 mr-2" />}
+                  Registrar webhook (forzar)
+                </Button>
+              </div>
+
+              {webhookInfo && (
+                <div className="bg-white rounded-lg border p-4 text-sm font-mono space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className={`font-bold ${webhookInfo.ok ? 'text-green-700' : 'text-red-700'}`}>
+                      {webhookInfo.ok ? '✅ OK' : '❌ ERROR'}
+                    </span>
+                    {webhookInfo.error && <span className="text-red-600">{webhookInfo.error}</span>}
+                  </div>
+                  <div><span className="text-gray-500">bot_token:</span> {webhookInfo.has_bot_token ? '✅ configurado' : '❌ FALTA'}</div>
+                  <div><span className="text-gray-500">webhook_secret:</span> {webhookInfo.has_webhook_secret ? '✅ configurado' : '⚠️ no configurado'}</div>
+                  <div className="break-all"><span className="text-gray-500">webhook_url:</span> {webhookInfo.webhook_url ?? '(vacío)'}</div>
+                  <div className="break-all"><span className="text-gray-500">expected_url:</span> {webhookInfo.expected_webhook_url ?? '(sin calcular)'}</div>
+                  <div>
+                    <span className="text-gray-500">url_matches:</span>{' '}
+                    {webhookInfo.url_matches_expected === true
+                      ? '✅ coincide'
+                      : webhookInfo.url_matches_expected === false
+                        ? '❌ NO coincide — registra el webhook'
+                        : '⚠️ no se puede verificar'}
+                  </div>
+                  <div><span className="text-gray-500">pending_updates:</span> {webhookInfo.pending_update_count ?? 0}</div>
+                  {webhookInfo.last_error_message && (
+                    <div className="text-red-600"><span className="text-gray-500">last_error:</span> {webhookInfo.last_error_message}</div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {/* AI Provider Settings */}
         <Card>
