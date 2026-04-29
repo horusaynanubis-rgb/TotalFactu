@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    // Allow internal health-check calls with a shared secret (no session needed)
+    // Allow internal calls with shared secret (no session needed)
     const internalSecret = request.headers.get('x-internal-secret');
     const isInternalCall =
       internalSecret &&
@@ -52,6 +52,7 @@ export async function GET(request: NextRequest) {
         has_bot_token: hasBotToken,
         has_webhook_secret: hasWebhookSecret,
         expected_webhook_url: expectedWebhookUrl,
+        full_raw_telegram_response: result,
       });
     }
 
@@ -67,13 +68,15 @@ export async function GET(request: NextRequest) {
       pending_update_count: w?.pending_update_count ?? 0,
       last_error_message: w?.last_error_message ?? null,
       last_error_date: w?.last_error_date ?? null,
+      has_custom_certificate: w?.has_custom_certificate ?? false,
+      ip_address: w?.ip_address ?? null,
+      max_connections: w?.max_connections ?? null,
+      allowed_updates: w?.allowed_updates ?? [],
       has_bot_token: hasBotToken,
       has_webhook_secret: hasWebhookSecret,
       expected_webhook_url: expectedWebhookUrl,
       url_matches_expected: urlMatchesExpected,
-      has_custom_certificate: w?.has_custom_certificate ?? false,
-      max_connections: w?.max_connections ?? null,
-      allowed_updates: w?.allowed_updates ?? [],
+      full_raw_telegram_response: result,
     });
   } catch (error: any) {
     console.error('[Telegram] webhook-info error:', error);

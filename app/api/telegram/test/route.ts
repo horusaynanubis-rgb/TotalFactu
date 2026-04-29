@@ -5,6 +5,32 @@ import { getMe, getWebhookInfo } from '@/lib/telegram';
 
 export const dynamic = 'force-dynamic';
 
+// GET — quick health check, no auth required (returns only safe non-sensitive info)
+export async function GET() {
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  const hasWebhookSecret = Boolean(process.env.TELEGRAM_WEBHOOK_SECRET);
+  const hasBotToken = Boolean(botToken);
+
+  const expectedWebhookUrl =
+    process.env.TELEGRAM_WEBHOOK_URL ??
+    (process.env.NEXTAUTH_URL
+      ? `${process.env.NEXTAUTH_URL}/api/webhooks/telegram`
+      : process.env.VERCEL_URL
+        ? `https://${process.env.VERCEL_URL}/api/webhooks/telegram`
+        : null);
+
+  return NextResponse.json({
+    ok: true,
+    bot_token_exists: hasBotToken,
+    webhook_secret_exists: hasWebhookSecret,
+    expected_webhook_url: expectedWebhookUrl,
+    timestamp: new Date().toISOString(),
+    runtime: process.env.NEXT_RUNTIME ?? 'unknown',
+    node_env: process.env.NODE_ENV ?? 'unknown',
+  });
+}
+
+// POST — full connection test (requires auth session)
 export async function POST() {
   try {
     const session = await getServerSession(authOptions);
