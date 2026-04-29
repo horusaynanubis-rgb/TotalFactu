@@ -58,6 +58,7 @@ export const authOptions: NextAuthOptions = {
       if (token.id) {
         const membership = await prisma.membership.findFirst({
           where: { user_id: token.id as string },
+          orderBy: { created_at: 'asc' },
           include: { company: { select: { id: true, company_type: true } } },
         });
         token.companyId = membership?.company.id ?? null;

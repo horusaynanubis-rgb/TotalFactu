@@ -12,12 +12,17 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
     }
 
-    const membership = await prisma.membership.findFirst({
-      where: { user_id: session.user.id },
-    });
-
-    if (!membership) {
-      return NextResponse.json({ message: 'No company found' }, { status: 400 });
+    // Use companyId already stored in the JWT
+    let companyId = session.user.companyId;
+    if (!companyId) {
+      const membership = await prisma.membership.findFirst({
+        where: { user_id: session.user.id },
+        orderBy: { created_at: 'asc' },
+      });
+      if (!membership) {
+        return NextResponse.json({ message: 'No company found' }, { status: 400 });
+      }
+      companyId = membership.company_id;
     }
 
     const { searchParams } = new URL(request.url);
@@ -25,13 +30,9 @@ export async function GET(request: NextRequest) {
     const review = searchParams.get('review');
     const search = searchParams.get('search');
 
-    const where: any = { company_id: membership.company_id };
-    if (type && type !== 'all') {
-      where.invoice_type = type;
-    }
-    if (review && review !== 'all') {
-      where.review_status = review;
-    }
+    const where: any = { company_id: companyId };
+    if (type && type !== 'all') where.invoice_type = type;
+    if (review && review !== 'all') where.review_status = review;
     if (search) {
       where.OR = [
         { invoice_number: { contains: search, mode: 'insensitive' } },
@@ -49,10 +50,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ invoices });
   } catch (error: any) {
-    console.error('Get invoices error:', error);
-    return NextResponse.json(
-      { message: 'Failed to fetch invoices' },
-      { status: 500 }
-    );
+    console.error('[invoices] GET error:', error);
+    return NextResponse.json({ message: 'Failed to fetch invoices' }, { status: 500 });
   }
 }

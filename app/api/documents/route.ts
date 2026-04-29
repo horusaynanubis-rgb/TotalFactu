@@ -12,38 +12,43 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
     }
 
-    const membership = await prisma.membership.findFirst({
-      where: { user_id: session.user.id },
-    });
-
-    if (!membership) {
-      return NextResponse.json({ message: 'No company found' }, { status: 400 });
+    // Use companyId already stored in the JWT — avoids a redundant DB query
+    // and ensures consistency with the same company used across all API routes.
+    const companyId = session.user.companyId;
+    if (!companyId) {
+      // Fallback: user exists but has no membership yet (edge case on first signup)
+      const membership = await prisma.membership.findFirst({
+        where: { user_id: session.user.id },
+        orderBy: { created_at: 'asc' },
+      });
+      if (!membership) {
+        return NextResponse.json({ message: 'No company found' }, { status: 400 });
+      }
+      // Redirect to the same handler with the resolved companyId
+      return fetchDocuments(request, membership.company_id);
     }
 
-    const { searchParams } = new URL(request.url);
-    const status = searchParams.get('status');
-    const channel = searchParams.get('channel');
-
-    const where: any = { company_id: membership.company_id };
-    if (status && status !== 'all') {
-      where.processing_status = status;
-    }
-    if (channel && channel !== 'all') {
-      where.source_channel = channel;
-    }
-
-    const documents = await prisma.document.findMany({
-      where,
-      orderBy: { upload_timestamp: 'desc' },
-      take: 100,
-    });
-
-    return NextResponse.json({ documents });
+    return fetchDocuments(request, companyId);
   } catch (error: any) {
-    console.error('Get documents error:', error);
-    return NextResponse.json(
-      { message: 'Failed to fetch documents' },
-      { status: 500 }
-    );
+    console.error('[documents] GET error:', error);
+    return NextResponse.json({ message: 'Failed to fetch documents' }, { status: 500 });
   }
+}
+
+async function fetchDocuments(request: NextRequest, companyId: string) {
+  const { searchParams } = new URL(request.url);
+  const status = searchParams.get('status');
+  const channel = searchParams.get('channel');
+
+  const where: any = { company_id: companyId };
+  if (status && status !== 'all') where.processing_status = status;
+  if (channel && channel !== 'all') where.source_channel = channel;
+
+  const documents = await prisma.document.findMany({
+    where,
+    orderBy: { upload_timestamp: 'desc' },
+    take: 100,
+  });
+
+  return NextResponse.json({ documents });
 }

@@ -101,8 +101,9 @@ export async function POST(request: NextRequest) {
 
     // Unknown text
     const link = await prisma.telegramLink.findFirst({
-      where: { telegram_id: telegramUserId },
-    });
+    where: { telegram_id: telegramUserId },
+    orderBy: { created_at: 'asc' },
+  });
     if (!link) {
       await sendMessage(botToken, chatId,
         '👋 Bienvenido a <b>TotalFactu</b>.\n\n' +
@@ -137,6 +138,7 @@ async function handleStartCommand(
   if (!code) {
     const existing = await prisma.telegramLink.findFirst({
       where: { telegram_id: telegramUserId },
+      orderBy: { created_at: 'asc' },
       include: { user: true, company: true },
     });
     if (existing) {
@@ -247,6 +249,7 @@ async function handleStatusCommand(
 ) {
   const link = await prisma.telegramLink.findFirst({
     where: { telegram_id: telegramUserId },
+    orderBy: { created_at: 'asc' },
   });
 
   if (!link) {
@@ -301,6 +304,7 @@ async function handleFileUpload(
 ) {
   const link = await prisma.telegramLink.findFirst({
     where: { telegram_id: telegramUserId },
+    orderBy: { created_at: 'asc' },
   });
 
   if (!link) {
