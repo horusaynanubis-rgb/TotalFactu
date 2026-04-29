@@ -3,8 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/auth-options';
 import { prisma } from '@/lib/prisma';
 import { generateCSV, getDateRange } from '@/lib/csv-generator';
-import { PutObjectCommand } from '@aws-sdk/client-s3';
-import { createS3Client, getBucketConfig } from '@/lib/aws-config';
+import { uploadFile, buildExportPath } from '@/lib/storage';
 import { sendMessage } from '@/lib/telegram';
 
 export const dynamic = 'force-dynamic';
@@ -30,14 +29,10 @@ export async function POST(request: NextRequest) {
 
     const { start, end } = getDateRange(exportType as any);
 
-    // Fetch invoices for the period
     const invoices = await prisma.invoice.findMany({
       where: {
         company_id: membership.company_id,
-        issue_date: {
-          gte: start,
-          lte: end,
-        },
+        issue_date: { gte: start, lte: end },
       },
       include: { document: true },
       orderBy: { issue_date: 'desc' },
@@ -50,27 +45,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Generate CSV
     const csvContent = generateCSV(invoices as any);
 
-    // Upload to S3
-    const s3Client = createS3Client();
-    const { bucketName, folderPrefix } = getBucketConfig();
-    const timestamp = Date.now();
     const filename = `${exportType}-export-${start.toISOString().split('T')[0]}-${end.toISOString().split('T')[0]}.csv`;
-    const cloud_storage_path = `${folderPrefix}exports/${membership.company_id}/${timestamp}-${filename}`;
+    const cloud_storage_path = buildExportPath(membership.company_id, filename);
 
-    await s3Client.send(
-      new PutObjectCommand({
-        Bucket: bucketName,
-        Key: cloud_storage_path,
-        Body: Buffer.from(csvContent, 'utf-8'),
-        ContentType: 'text/csv',
-        ContentDisposition: 'attachment',
-      })
-    );
+    await uploadFile(Buffer.from(csvContent, 'utf-8'), cloud_storage_path, 'text/csv');
 
-    // Save export record
     const exportRecord = await prisma.export.create({
       data: {
         company_id: membership.company_id,
@@ -83,23 +64,17 @@ export async function POST(request: NextRequest) {
       },
     });
 
-        // Send email notification (local mode): Abacus dependency removed.
-    // Keep export generation functional even without an email provider configured.
+    // Email notification placeholder
     try {
-      // TODO: integrate local SMTP/Resend provider.
-      // For now, we intentionally skip external email dispatch.
       await prisma.export.update({
         where: { id: exportRecord.id },
-        data: {
-          email_sent: false,
-          email_sent_at: null,
-        },
+        data: { email_sent: false, email_sent_at: null },
       });
     } catch (emailError: any) {
       console.error('Email notification skipped/failed:', emailError);
     }
 
-// Send Telegram notification to all linked users for this company
+    // Telegram notification
     try {
       const botToken = process.env.TELEGRAM_BOT_TOKEN;
       if (botToken) {
@@ -107,10 +82,10 @@ export async function POST(request: NextRequest) {
           where: { company_id: membership.company_id },
         });
         const exportMsg =
-          `\ud83d\udcc1 <b>CSV Export Ready!</b>\n\n` +
-          `\ud83d\udcc5 ${exportType.charAt(0).toUpperCase() + exportType.slice(1)} export\n` +
-          `\ud83d\udcc4 ${invoices.length} invoices\n` +
-          `\ud83d\udcc6 ${formatDate(start)} \u2014 ${formatDate(end)}\n\n` +
+          `📁 <b>CSV Export Ready!</b>\n\n` +
+          `📅 ${exportType.charAt(0).toUpperCase() + exportType.slice(1)} export\n` +
+          `📄 ${invoices.length} invoices\n` +
+          `📆 ${formatDate(start)} — ${formatDate(end)}\n\n` +
           `Download it from the TotalFactu dashboard.`;
         for (const link of telegramLinks) {
           await sendMessage(botToken, link.telegram_id, exportMsg);
@@ -131,9 +106,5 @@ export async function POST(request: NextRequest) {
 }
 
 function formatDate(date: Date): string {
-  return date.toLocaleDateString('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
+  return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }

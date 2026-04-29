@@ -63,21 +63,9 @@ export default function DocumentsPage() {
 
       const { uploadUrl, cloud_storage_path } = await presignedResponse.json();
 
-      const url = new URL(uploadUrl);
-      const signedHeaders = url.searchParams.get('X-Amz-SignedHeaders') ?? '';
-      const needsContentDisposition = signedHeaders.includes('content-disposition');
-
-      const uploadHeaders: Record<string, string> = {
-        'Content-Type': file.type,
-      };
-      
-      if (needsContentDisposition) {
-        uploadHeaders['Content-Disposition'] = 'attachment';
-      }
-
       const uploadResponse = await fetch(uploadUrl, {
         method: 'PUT',
-        headers: uploadHeaders,
+        headers: { 'Content-Type': file.type },
         body: file,
       });
 

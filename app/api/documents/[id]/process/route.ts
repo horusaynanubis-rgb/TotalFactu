@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getFileUrl } from '@/lib/s3';
+import { getFileUrl } from '@/lib/storage';
 import { extractInvoiceData, InvoiceExtraction } from '@/lib/ai-extraction';
 import { sendMessage, editMessage } from '@/lib/telegram';
 

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/auth-options';
-import { generatePresignedUploadUrl } from '@/lib/s3';
+import { createSignedUploadUrl, buildUploadPath } from '@/lib/storage';
 
 export async function POST(request: NextRequest) {
   try {
@@ -11,7 +11,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { fileName, contentType, isPublic } = body;
+    const { fileName, contentType } = body;
 
     if (!fileName || !contentType) {
       return NextResponse.json(
@@ -20,15 +20,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { uploadUrl, cloud_storage_path } = await generatePresignedUploadUrl(
-      fileName,
-      contentType,
-      isPublic ?? false
-    );
+    // Use a per-user path so each company's files stay isolated
+    const path = buildUploadPath(session.user.id, fileName);
+    const { uploadUrl, cloud_storage_path } = await createSignedUploadUrl(path);
 
     return NextResponse.json({ uploadUrl, cloud_storage_path });
   } catch (error: any) {
-    console.error('Presigned URL error:', error);
+    console.error('[upload/presigned] error:', error);
     return NextResponse.json(
       { message: 'Failed to generate upload URL' },
       { status: 500 }

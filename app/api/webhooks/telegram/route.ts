@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { PutObjectCommand } from '@aws-sdk/client-s3';
-import { createS3Client, getBucketConfig } from '@/lib/aws-config';
+import { uploadFile, buildTelegramPath } from '@/lib/storage';
 import {
   sendMessage,
   editMessage,
@@ -356,19 +355,8 @@ async function handleFileUpload(
     const fileBuffer = await downloadFile(botToken, fileInfo.file_path);
     if (!fileBuffer) throw new Error('No se pudo descargar el archivo');
 
-    const s3Client = createS3Client();
-    const { bucketName, folderPrefix } = getBucketConfig();
-    const timestamp = Date.now();
-    const cloudStoragePath = `${folderPrefix}uploads/telegram/${link.company_id}/${timestamp}-${fileName}`;
-
-    await s3Client.send(
-      new PutObjectCommand({
-        Bucket: bucketName,
-        Key: cloudStoragePath,
-        Body: fileBuffer,
-        ContentType: mimeType,
-      })
-    );
+    const cloudStoragePath = buildTelegramPath(link.company_id, fileName);
+    await uploadFile(fileBuffer, cloudStoragePath, mimeType);
 
     const document = await prisma.document.create({
       data: {
