@@ -296,6 +296,25 @@ async function handleStatusCommand(
   await sendMessage(botToken, chatId, statusText);
 }
 
+// Detect the real MIME type from the first bytes of a buffer (magic bytes).
+// Telegram sometimes delivers photos as WebP/HEIC despite the API saying "photo".
+function detectMimeType(buf: Buffer): string {
+  if (buf.length < 4) return 'application/octet-stream';
+  const b = buf;
+  // JPEG: FF D8 FF
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg';
+  // PNG: 89 50 4E 47
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'image/png';
+  // PDF: 25 50 44 46 (%PDF)
+  if (b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46) return 'application/pdf';
+  // WebP: RIFF....WEBP
+  if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 &&
+      buf.length >= 12 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) {
+    return 'image/webp';
+  }
+  return 'application/octet-stream';
+}
+
 async function handleFileUpload(
   botToken: string,
   chatId: string,
@@ -314,14 +333,18 @@ async function handleFileUpload(
     return;
   }
 
+  console.log(`[Telegram upload] TelegramLink found: user_id=${link.user_id} company_id=${link.company_id} chat_id=${chatId}`);
+
   let fileId: string;
   let fileName: string;
-  let mimeType: string;
+  // This is the declared MIME — will be verified against actual bytes after download
+  let declaredMime: string;
+  let isPhotoMessage = false;
 
   if (message.document) {
     fileId = message.document.file_id;
     fileName = message.document.file_name || `document_${Date.now()}`;
-    mimeType = message.document.mime_type || getMimeType(fileName);
+    declaredMime = message.document.mime_type || getMimeType(fileName);
 
     if (message.document.file_size && message.document.file_size > 20 * 1024 * 1024) {
       await sendMessage(botToken, chatId,
@@ -330,16 +353,21 @@ async function handleFileUpload(
       );
       return;
     }
+    console.log(`[Telegram upload] Document: name=${fileName} declared_mime=${declaredMime} size=${message.document.file_size ?? 'unknown'}`);
   } else if (message.photo) {
+    // Telegram always recompresses photos to JPEG — pick the largest available size
     const photo = message.photo[message.photo.length - 1];
     fileId = photo.file_id;
     fileName = `photo_${Date.now()}.jpg`;
-    mimeType = 'image/jpeg';
+    declaredMime = 'image/jpeg';
+    isPhotoMessage = true;
+    console.log(`[Telegram upload] Photo: ${message.photo.length} sizes, largest: ${photo.width}x${photo.height} file_size=${photo.file_size ?? 'unknown'}`);
   } else {
     return;
   }
 
-  if (!isSupportedFile(mimeType)) {
+  // Pre-check declared MIME before downloading (saves bandwidth on unsupported types)
+  if (!isSupportedFile(declaredMime)) {
     await sendMessage(botToken, chatId,
       '❌ Tipo de archivo no soportado. Envía un <b>PDF</b>, <b>JPG</b> o <b>PNG</b>.',
       { reply_to_message_id: message.message_id }
@@ -353,15 +381,61 @@ async function handleFileUpload(
   );
 
   try {
+    // --- Download from Telegram ---
     const fileInfo = await getFile(botToken, fileId);
-    if (!fileInfo?.file_path) throw new Error('No se pudo obtener la ruta del archivo');
+    if (!fileInfo?.file_path) throw new Error('No se pudo obtener la ruta del archivo de Telegram');
+    console.log(`[Telegram upload] file_path from Telegram: ${fileInfo.file_path}`);
 
     const fileBuffer = await downloadFile(botToken, fileInfo.file_path);
-    if (!fileBuffer) throw new Error('No se pudo descargar el archivo');
+    if (!fileBuffer || fileBuffer.length === 0) throw new Error('El archivo descargado está vacío');
+    console.log(`[Telegram upload] Downloaded buffer size: ${fileBuffer.length} bytes`);
 
+    // --- Verify actual MIME type from magic bytes ---
+    const actualMime = detectMimeType(fileBuffer);
+    console.log(`[Telegram upload] MIME — declared=${declaredMime} actual=${actualMime}`);
+
+    // If Telegram sent a WebP (some Android/iOS share sheets) but declared JPEG, use actual
+    let mimeType = declaredMime;
+    if (actualMime !== 'application/octet-stream' && actualMime !== declaredMime) {
+      console.warn(`[Telegram upload] MIME mismatch! Using actual: ${actualMime}`);
+      mimeType = actualMime;
+      // Rename file extension to match actual content
+      if (actualMime === 'image/png') fileName = fileName.replace(/\.\w+$/, '.png');
+      else if (actualMime === 'application/pdf') fileName = fileName.replace(/\.\w+$/, '.pdf');
+      else if (actualMime === 'image/webp') fileName = fileName.replace(/\.\w+$/, '.webp');
+    }
+
+    // WebP is not supported by Gemini invoice extraction — ask user to send as file/PDF
+    if (mimeType === 'image/webp') {
+      const webpMsg = '⚠️ <b>Formato no compatible</b>\n\n' +
+        'Las fotos enviadas como imagen se convierten a WebP y no pueden procesarse.\n\n' +
+        'Por favor, envía la foto como <b>archivo</b> (botón de clip → Archivo) para preservar la calidad.';
+      if (statusMsg) {
+        await editMessage(botToken, chatId, statusMsg.message_id, webpMsg);
+      } else {
+        await sendMessage(botToken, chatId, webpMsg);
+      }
+      return;
+    }
+
+    // Validate final MIME
+    if (!isSupportedFile(mimeType)) {
+      const unsupportedMsg = '❌ Formato no reconocido.\n\nEnvía un <b>PDF</b>, <b>JPG</b> o <b>PNG</b>. ' +
+        (isPhotoMessage ? '\n\nPara mejores resultados, envía la foto como <b>archivo</b> (botón de clip → Archivo).' : '');
+      if (statusMsg) {
+        await editMessage(botToken, chatId, statusMsg.message_id, unsupportedMsg);
+      } else {
+        await sendMessage(botToken, chatId, unsupportedMsg);
+      }
+      return;
+    }
+
+    // --- Upload to Supabase Storage ---
     const cloudStoragePath = buildTelegramPath(link.company_id, fileName);
     await uploadFile(fileBuffer, cloudStoragePath, mimeType);
+    console.log(`[Telegram upload] Uploaded to Supabase: path=${cloudStoragePath}`);
 
+    // --- Create Document record ---
     const document = await prisma.document.create({
       data: {
         company_id: link.company_id,
@@ -377,22 +451,23 @@ async function handleFileUpload(
       },
     });
 
+    console.log(`[Telegram upload] Document created: id=${document.id} company_id=${document.company_id} user_id=${document.user_id} mime=${mimeType} path=${cloudStoragePath}`);
+
     if (statusMsg) {
       await editMessage(botToken, chatId, statusMsg.message_id,
         '📨 <b>¡Factura recibida!</b>\n🤖 La IA está extrayendo los datos...'
       );
     }
 
-    // Build absolute URL for internal fetch — must work on Vercel
-    // Priority: NEXTAUTH_URL > VERCEL_URL (auto-set by Vercel) > localhost
+    // --- Call process endpoint ---
     const vercelUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null;
     const baseUrl = process.env.NEXTAUTH_URL || vercelUrl || 'http://localhost:3000';
     const processUrl = `${baseUrl}/api/documents/${document.id}/process`;
-    console.log(`[Telegram file upload] Calling process endpoint: ${processUrl}`);
+    console.log(`[Telegram upload] Calling process: ${processUrl}`);
 
     const processResponse = await fetch(processUrl, { method: 'POST' });
     const processBody = await processResponse.text();
-    console.log(`[Telegram file upload] Process response: status=${processResponse.status} body=${processBody}`);
+    console.log(`[Telegram upload] Process result: status=${processResponse.status} body=${processBody}`);
 
     if (processResponse.ok) {
       let result: any;
@@ -425,8 +500,13 @@ async function handleFileUpload(
         }
       }
     } else {
-      console.error(`[Telegram file upload] ❌ Process endpoint failed. documentId=${document.id} status=${processResponse.status} body=${processBody}`);
-      const failText = '❌ <b>Error extrayendo datos</b>\n\nNo se pudo procesar este archivo. Inténtalo de nuevo o sube la factura desde el panel web.';
+      console.error(`[Telegram upload] ❌ Process failed. documentId=${document.id} status=${processResponse.status} body=${processBody}`);
+      let failText = '❌ <b>Error extrayendo datos</b>\n\nNo se pudo procesar este archivo.';
+      if (isPhotoMessage) {
+        failText += '\n\n💡 <b>Consejo:</b> Para mejores resultados, envía la foto como <b>archivo</b> (botón de clip → Archivo) en lugar de como foto. Así se preserva la calidad original.';
+      } else {
+        failText += '\n\nInténtalo de nuevo o sube la factura desde el panel web.';
+      }
       if (statusMsg) {
         await editMessage(botToken, chatId, statusMsg.message_id, failText);
       } else {
@@ -434,7 +514,7 @@ async function handleFileUpload(
       }
     }
   } catch (error: any) {
-    console.error('[Telegram file upload] ❌ Error:', error);
+    console.error('[Telegram upload] ❌ Error:', error?.message, error?.stack);
     const errorText = '❌ <b>Error procesando la factura</b>\n\n' +
       `${error?.message || 'Error inesperado'}\n\n` +
       'Inténtalo de nuevo o sube la factura desde el panel web.';
