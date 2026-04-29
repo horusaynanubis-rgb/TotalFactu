@@ -7,10 +7,6 @@ import { sendMessage, editMessage } from '@/lib/telegram';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-/**
- * Maps validated AI extraction to database fields.
- * This is the ONLY place extraction data enters the database.
- */
 function mapExtractionToInvoice(extraction: InvoiceExtraction, documentId: string, companyId: string) {
   return {
     document_id: documentId,
@@ -52,34 +48,49 @@ export async function POST(
       return NextResponse.json({ message: 'Document not found' }, { status: 404 });
     }
 
-    // If retrying, delete the existing invoice first
+    // If retrying, delete existing invoice first
     if (document.invoice) {
       await prisma.invoice.delete({ where: { id: document.invoice.id } });
     }
 
-    // Mark as processing
     await prisma.document.update({
       where: { id: documentId },
       data: { processing_status: 'processing', confidence_score: null },
     });
 
-    // Get file from S3
+    // Download file from Supabase Storage and convert to base64 for Gemini inline_data
     const fileUrl = await getFileUrl(document.cloud_storage_path, document.is_public);
+    console.log(`[process] documentId=${documentId} storagePath=${document.cloud_storage_path} mimeType=${document.mime_type}`);
+    console.log(`[process] Signed URL obtained (length=${fileUrl.length}). Fetching file...`);
+
     const fileResponse = await fetch(fileUrl);
     if (!fileResponse.ok) {
-      throw new Error(`Failed to download file from storage: ${fileResponse.statusText}`);
+      throw new Error(`Error guardando archivo — storage fetch failed (${fileResponse.status} ${fileResponse.statusText})`);
     }
     const fileBuffer = await fileResponse.arrayBuffer();
     const fileBase64 = Buffer.from(fileBuffer).toString('base64');
+    console.log(`[process] File downloaded. size=${fileBuffer.byteLength} base64Length=${fileBase64.length}`);
 
-    // Build AI provider config from company settings
+    // Build AI provider config.
+    // Only use 'external' or 'local' if the company has valid credentials for them;
+    // otherwise fall back to Gemini (GEMINI_API_KEY env var).
+    const companyProvider = document.company?.ai_provider;
+    const hasExternalConfig =
+      companyProvider === 'external' &&
+      !!document.company?.ai_api_key &&
+      !!document.company?.ai_api_endpoint;
+    const hasLocalConfig = companyProvider === 'local';
+    const resolvedProvider = hasExternalConfig ? 'external' : hasLocalConfig ? 'local' : 'gemini';
+
+    console.log(`[process] AI provider resolved: ${resolvedProvider} (company setting: ${companyProvider})`);
+
     const aiConfig = {
-      provider: (document.company?.ai_provider || 'external') as 'local' | 'external',
+      provider: resolvedProvider as 'local' | 'external' | 'gemini',
       apiKey: document.company?.ai_api_key,
       apiEndpoint: document.company?.ai_api_endpoint,
     };
 
-    // AI Extraction: returns validated structured JSON, never touches DB
+    // AI Extraction — returns validated structured JSON, never writes to DB
     const extraction = await extractInvoiceData(
       fileBase64,
       document.mime_type,
@@ -87,10 +98,8 @@ export async function POST(
       aiConfig
     );
 
-    // Backend determines final status
     const processingStatus = extraction.needs_review ? 'needs_review' : 'completed';
 
-    // Update document with AI results
     const updatedDocument = await prisma.document.update({
       where: { id: documentId },
       data: {
@@ -99,54 +108,46 @@ export async function POST(
       },
     });
 
-    // Map validated extraction to DB schema and save invoice
     const invoiceData = mapExtractionToInvoice(extraction, documentId, document.company_id);
     const invoice = await prisma.invoice.create({ data: invoiceData });
 
-    // Send Telegram notification if document came from Telegram
-    const globalBotToken = process.env.TELEGRAM_BOT_TOKEN;
-    if (document.telegram_chat_id && globalBotToken) {
-      await sendTelegramStatusUpdate(
-        globalBotToken,
-        document.telegram_chat_id,
-        document.telegram_message_id,
-        processingStatus,
-        invoice
-      );
-    }
+    console.log(`[process] ✅ Invoice created. id=${invoice.id} status=${processingStatus} confidence=${extraction.extraction_confidence}`);
 
-    return NextResponse.json({
-      document: updatedDocument,
-      invoice,
-    });
+    // Telegram notification is handled by the webhook caller — skip duplicate here
+    // (webhook already edits the status message after receiving the process response)
+
+    return NextResponse.json({ document: updatedDocument, invoice });
   } catch (error: any) {
-    console.error('Process document error:', error);
+    console.error('[process] ❌ Error:', error?.message);
+    console.error('[process] Stack:', error?.stack);
 
-    // Update document to failed status
     try {
       const doc = await prisma.document.update({
         where: { id: params.id },
-        data: {
-          processing_status: 'failed',
-          confidence_score: 0,
-        },
+        data: { processing_status: 'failed', confidence_score: 0 },
         include: { company: true },
       });
 
-      // Notify via Telegram on failure
       const botToken = process.env.TELEGRAM_BOT_TOKEN;
       if (doc.telegram_chat_id && botToken) {
-        const failText = '\u274c <b>Processing failed</b>\n\n' +
-          `${error?.message || 'An unexpected error occurred'}\n\n` +
-          'You can retry from the dashboard or upload the file again.';
-        if (doc.telegram_message_id) {
-          await editMessage(botToken, doc.telegram_chat_id, doc.telegram_message_id, failText);
+        let msg: string;
+        if (error?.message?.includes('storage fetch failed')) {
+          msg = '❌ <b>Error guardando archivo</b>\n\nNo se pudo acceder al archivo guardado. Inténtalo de nuevo.';
+        } else if (error?.message?.includes('Gemini API error')) {
+          msg = '❌ <b>Error extrayendo datos</b>\n\nLa IA no pudo procesar el archivo. Inténtalo de nuevo.';
+        } else if (error?.message?.includes('No content') || error?.message?.includes('not valid JSON')) {
+          msg = '⚠️ <b>No se detectó factura válida</b>\n\nGemini no encontró datos de factura. Asegúrate de que la imagen sea legible y sea una factura.';
         } else {
-          await sendMessage(botToken, doc.telegram_chat_id, failText);
+          msg = '❌ <b>Error al procesar la factura</b>\n\nInténtalo de nuevo o sube la factura desde el panel web.';
+        }
+        if (doc.telegram_message_id) {
+          await editMessage(botToken, doc.telegram_chat_id, doc.telegram_message_id, msg);
+        } else {
+          await sendMessage(botToken, doc.telegram_chat_id, msg);
         }
       }
     } catch (updateError: any) {
-      console.error('Failed to update document status:', updateError);
+      console.error('[process] Failed to update document status:', updateError);
     }
 
     return NextResponse.json(
@@ -166,18 +167,18 @@ async function sendTelegramStatusUpdate(
   try {
     let text = '';
     if (status === 'completed') {
-      text = '\u2705 <b>Invoice processed successfully!</b>\n\n';
-      text += `\ud83d\udcc4 Invoice #${invoice.invoice_number}\n`;
-      text += `\ud83c\udfe2 ${invoice.supplier_name}\n`;
-      text += `\ud83d\udcb0 ${invoice.currency} ${invoice.total_amount.toFixed(2)}\n`;
-      text += `\ud83d\udcc5 ${invoice.issue_date ? new Date(invoice.issue_date).toLocaleDateString() : 'N/A'}\n`;
-      text += `\n\ud83c\udfaf Confidence: ${((invoice.extraction_confidence || 0) * 100).toFixed(0)}%`;
+      text = '✅ <b>¡Factura procesada correctamente!</b>\n\n';
+      text += `📄 Factura #${invoice.invoice_number}\n`;
+      text += `🏢 ${invoice.supplier_name}\n`;
+      text += `💰 ${invoice.currency} ${invoice.total_amount.toFixed(2)}\n`;
+      text += `📅 ${invoice.issue_date ? new Date(invoice.issue_date).toLocaleDateString('es-ES') : 'N/A'}\n`;
+      text += `\n🎯 Confianza: ${((invoice.extraction_confidence || 0) * 100).toFixed(0)}%`;
     } else if (status === 'needs_review') {
-      text = '\u26a0\ufe0f <b>Invoice processed \u2014 needs review</b>\n\n';
-      text += `\ud83d\udcc4 Invoice #${invoice.invoice_number}\n`;
-      text += `\ud83d\udcb0 ${invoice.currency} ${invoice.total_amount.toFixed(2)}\n`;
-      text += `\n\ud83c\udfaf Confidence: ${((invoice.extraction_confidence || 0) * 100).toFixed(0)}%\n`;
-      text += '\nPlease review in the TotalFactu dashboard.';
+      text = '⚠️ <b>Factura procesada — requiere revisión</b>\n\n';
+      text += `📄 Factura #${invoice.invoice_number}\n`;
+      text += `💰 ${invoice.currency} ${invoice.total_amount.toFixed(2)}\n`;
+      text += `\n🎯 Confianza: ${((invoice.extraction_confidence || 0) * 100).toFixed(0)}%\n`;
+      text += '\nRevísala en el panel de TotalFactu.';
     }
 
     if (text) {
@@ -188,6 +189,6 @@ async function sendTelegramStatusUpdate(
       }
     }
   } catch (err) {
-    console.error('Telegram status update failed:', err);
+    console.error('[process] Telegram status update failed:', err);
   }
 }

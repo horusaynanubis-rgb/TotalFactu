@@ -103,9 +103,13 @@ async function extractWithGemini(
   fileBase64: string,
   mimeType: string,
 ): Promise<InvoiceExtraction> {
-  const apiKey = process.env.GEMINI_API_KEY!;
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
+
   const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash-preview-04-17';
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+  console.log(`[gemini] model=${model} mimeType=${mimeType} base64Length=${fileBase64.length}`);
 
   const body = {
     contents: [{
@@ -128,20 +132,26 @@ async function extractWithGemini(
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => response.statusText);
+    console.error(`[gemini] API error (${response.status}): ${errorText}`);
     throw new Error(`Gemini API error (${response.status}): ${errorText}`);
   }
 
   const data = await response.json();
+  console.log(`[gemini] Raw response candidates=${data?.candidates?.length} finishReason=${data?.candidates?.[0]?.finishReason}`);
+
   const content = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  console.log(`[gemini] Extracted content (first 200 chars): ${String(content ?? '').slice(0, 200)}`);
 
   if (!content) {
+    console.error('[gemini] No content in response. Full data:', JSON.stringify(data));
     throw new Error('No content in Gemini response');
   }
 
   let rawJson: any;
   try {
     rawJson = JSON.parse(content);
-  } catch {
+  } catch (parseErr) {
+    console.error('[gemini] Failed to parse JSON content:', content);
     throw new Error('Gemini response is not valid JSON');
   }
 
