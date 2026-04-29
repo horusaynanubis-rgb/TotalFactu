@@ -379,13 +379,20 @@ async function handleFileUpload(
       );
     }
 
-    const baseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000';
-    const processResponse = await fetch(`${baseUrl}/api/documents/${document.id}/process`, {
-      method: 'POST',
-    });
+    // Build absolute URL for internal fetch — must work on Vercel
+    // Priority: NEXTAUTH_URL > VERCEL_URL (auto-set by Vercel) > localhost
+    const vercelUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null;
+    const baseUrl = process.env.NEXTAUTH_URL || vercelUrl || 'http://localhost:3000';
+    const processUrl = `${baseUrl}/api/documents/${document.id}/process`;
+    console.log(`[Telegram file upload] Calling process endpoint: ${processUrl}`);
+
+    const processResponse = await fetch(processUrl, { method: 'POST' });
+    const processBody = await processResponse.text();
+    console.log(`[Telegram file upload] Process response: status=${processResponse.status} body=${processBody}`);
 
     if (processResponse.ok) {
-      const result = await processResponse.json();
+      let result: any;
+      try { result = JSON.parse(processBody); } catch { result = {}; }
       const doc = result.document;
       const invoice = result.invoice;
 
@@ -414,8 +421,8 @@ async function handleFileUpload(
         }
       }
     } else {
-      const failText = '❌ <b>Error al procesar</b>\n\n' +
-        'No se pudo extraer datos de este archivo. Inténtalo de nuevo o sube la factura desde el panel web.';
+      console.error(`[Telegram file upload] ❌ Process endpoint failed. documentId=${document.id} status=${processResponse.status} body=${processBody}`);
+      const failText = '❌ <b>Error extrayendo datos</b>\n\nNo se pudo procesar este archivo. Inténtalo de nuevo o sube la factura desde el panel web.';
       if (statusMsg) {
         await editMessage(botToken, chatId, statusMsg.message_id, failText);
       } else {
