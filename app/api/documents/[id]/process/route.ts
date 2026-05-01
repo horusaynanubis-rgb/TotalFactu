@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getFileUrl } from '@/lib/storage';
 import { extractInvoiceData, InvoiceExtraction } from '@/lib/ai-extraction';
+import { classifyInvoiceType } from '@/lib/invoice-type-classifier';
 import { sendMessage, editMessage } from '@/lib/telegram';
 
 export const dynamic = 'force-dynamic';
@@ -98,7 +99,22 @@ export async function POST(
       aiConfig
     );
 
-    const processingStatus = extraction.needs_review ? 'needs_review' : 'completed';
+    // Post-process: verify invoice_type against company identity (AI can be wrong)
+    const classification = classifyInvoiceType(extraction, {
+      name: document.company.name,
+      tax_id: document.company.tax_id,
+    });
+
+    const finalType    = classification.invoice_type;
+    const needsReview  = classification.needs_review || extraction.needs_review;
+
+    if (classification.was_corrected) {
+      console.log(`[process] ⚠️  invoice_type corrected: ${extraction.invoice_type} → ${finalType}. Reason: ${classification.correction_reason}`);
+    } else if (!classification.correction_reason && classification.needs_review && !extraction.needs_review) {
+      console.log(`[process] ℹ️  invoice_type unconfirmed (no company match) — forcing needs_review`);
+    }
+
+    const processingStatus = needsReview ? 'needs_review' : 'completed';
 
     const updatedDocument = await prisma.document.update({
       where: { id: documentId },
@@ -108,10 +124,32 @@ export async function POST(
       },
     });
 
-    const invoiceData = mapExtractionToInvoice(extraction, documentId, document.company_id);
+    const invoiceData = {
+      ...mapExtractionToInvoice(extraction, documentId, document.company_id),
+      invoice_type: finalType,
+      review_status: needsReview ? 'pending' : 'approved',
+    };
     const invoice = await prisma.invoice.create({ data: invoiceData });
 
-    console.log(`[process] ✅ Invoice created. id=${invoice.id} status=${processingStatus} confidence=${extraction.extraction_confidence}`);
+    // Audit log when AI type was automatically corrected
+    if (classification.was_corrected) {
+      await prisma.auditLog.create({
+        data: {
+          company_id: document.company_id,
+          user_id: null,
+          entity_type: 'invoice',
+          entity_id: invoice.id,
+          action: 'auto_classify',
+          old_values: JSON.stringify({ invoice_type: extraction.invoice_type }),
+          new_values: JSON.stringify({
+            invoice_type: finalType,
+            reason: classification.correction_reason,
+          }),
+        },
+      });
+    }
+
+    console.log(`[process] ✅ Invoice created. id=${invoice.id} type=${finalType} corrected=${classification.was_corrected} status=${processingStatus} confidence=${extraction.extraction_confidence}`);
 
     // Telegram notification is handled by the webhook caller — skip duplicate here
     // (webhook already edits the status message after receiving the process response)
