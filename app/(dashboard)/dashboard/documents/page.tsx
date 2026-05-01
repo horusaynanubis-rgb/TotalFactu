@@ -5,10 +5,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { StatusBadge } from '@/components/status-badge';
-import { Upload, FileText, Filter, RotateCw, Trash2, X } from 'lucide-react';
+import { Upload, FileText, Filter, RotateCw, Trash2, X, Eye } from 'lucide-react';
 import { formatDateTime } from '@/lib/utils';
 import toast from 'react-hot-toast';
 import { useTranslation } from '@/lib/i18n/context';
+import { DocumentPreviewModal } from '@/components/document-preview-modal';
 
 export default function DocumentsPage() {
   const [documents, setDocuments] = useState<any[]>([]);
@@ -19,6 +20,7 @@ export default function DocumentsPage() {
   const [filterChannel, setFilterChannel] = useState<string>('all');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [previewDocId, setPreviewDocId] = useState<string | null>(null);
   const { t } = useTranslation();
 
   const fetchDocuments = useCallback(async () => {
@@ -285,6 +287,15 @@ export default function DocumentsPage() {
                           <Button
                             size="sm"
                             variant="outline"
+                            onClick={() => setPreviewDocId(doc.id)}
+                            title={t.documents.previewDocument}
+                          >
+                            <Eye className="h-3 w-3 mr-1" />
+                            {t.documents.previewDocument}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
                             onClick={() => setConfirmDeleteId(doc.id)}
                             disabled={deletingId === doc.id}
                             title={t.documents.deleteDocument}
@@ -304,6 +315,12 @@ export default function DocumentsPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Preview Modal */}
+      <DocumentPreviewModal
+        documentId={previewDocId}
+        onClose={() => setPreviewDocId(null)}
+      />
 
       {/* Delete Confirmation Modal */}
       {confirmDeleteId && (

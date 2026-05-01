@@ -199,6 +199,12 @@ export const es: Translations = {
     deleteSuccess: 'Documento eliminado correctamente',
     deleteFailed: 'Error al eliminar el documento',
     deleting: 'Eliminando...',
+    previewDocument: 'Ver documento',
+    previewLoading: 'Cargando documento...',
+    previewError: 'No se pudo cargar la previsualización',
+    previewOpenTab: 'Abrir en nueva pestaña',
+    previewClose: 'Cerrar',
+    previewUnsupported: 'Formato no compatible para previsualización',
   },
 
   invoices: {
@@ -251,6 +257,8 @@ export const es: Translations = {
     deleteFailed: 'Error al eliminar la factura',
     deleting: 'Eliminando...',
     duplicateWarning: 'Posible duplicado',
+    previewOriginal: 'Ver original',
+    previewNoDocument: 'Esta factura no tiene documento original asociado',
   },
 
   exports: {

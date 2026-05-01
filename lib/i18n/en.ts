@@ -199,6 +199,12 @@ export const en: Translations = {
     deleteSuccess: 'Document deleted successfully',
     deleteFailed: 'Failed to delete document',
     deleting: 'Deleting...',
+    previewDocument: 'View document',
+    previewLoading: 'Loading document...',
+    previewError: 'Could not load the preview',
+    previewOpenTab: 'Open in new tab',
+    previewClose: 'Close',
+    previewUnsupported: 'File type not supported for preview',
   },
 
   invoices: {
@@ -251,6 +257,8 @@ export const en: Translations = {
     deleteFailed: 'Failed to delete invoice',
     deleting: 'Deleting...',
     duplicateWarning: 'Possible duplicate',
+    previewOriginal: 'View original',
+    previewNoDocument: 'This invoice has no associated original document',
   },
 
   exports: {

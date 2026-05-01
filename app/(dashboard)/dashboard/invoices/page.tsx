@@ -6,10 +6,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { StatusBadge } from '@/components/status-badge';
-import { Search, Filter, X, Pencil, CheckCircle, XCircle, Trash2, AlertTriangle } from 'lucide-react';
+import { Search, Filter, X, Pencil, CheckCircle, XCircle, Trash2, AlertTriangle, Eye } from 'lucide-react';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import toast from 'react-hot-toast';
 import { useTranslation } from '@/lib/i18n/context';
+import { DocumentPreviewModal } from '@/components/document-preview-modal';
 
 export default function InvoicesPage() {
   const [invoices, setInvoices] = useState<any[]>([]);
@@ -23,6 +24,7 @@ export default function InvoicesPage() {
   const [confirmDeleteInvoice, setConfirmDeleteInvoice] = useState<any>(null);
   const [alsoDeleteDoc, setAlsoDeleteDoc] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [previewDocId, setPreviewDocId] = useState<string | null>(null);
   const { t } = useTranslation();
 
   const fetchInvoices = useCallback(async () => {
@@ -305,6 +307,21 @@ export default function InvoicesPage() {
                           )}
                           <Button
                             size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              if (inv?.document_id) {
+                                setPreviewDocId(inv.document_id);
+                              } else {
+                                toast.error(t.invoices.previewNoDocument);
+                              }
+                            }}
+                            title={t.invoices.previewOriginal}
+                          >
+                            <Eye className="h-3 w-3 mr-1" />
+                            {t.invoices.previewOriginal}
+                          </Button>
+                          <Button
+                            size="sm"
                             variant="ghost"
                             onClick={() => openEdit(inv)}
                             title={t.invoices.editInvoice}
@@ -333,6 +350,12 @@ export default function InvoicesPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Preview Modal */}
+      <DocumentPreviewModal
+        documentId={previewDocId}
+        onClose={() => setPreviewDocId(null)}
+      />
 
       {/* Edit Modal */}
       {editInvoice && (

@@ -205,6 +205,12 @@ export interface Translations {
     deleteSuccess: string;
     deleteFailed: string;
     deleting: string;
+    previewDocument: string;
+    previewLoading: string;
+    previewError: string;
+    previewOpenTab: string;
+    previewClose: string;
+    previewUnsupported: string;
   };
 
   // Invoices
@@ -259,6 +265,8 @@ export interface Translations {
     deleteFailed: string;
     deleting: string;
     duplicateWarning: string;
+    previewOriginal: string;
+    previewNoDocument: string;
   };
 
   // Exports
