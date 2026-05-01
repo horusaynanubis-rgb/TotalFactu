@@ -42,11 +42,24 @@ export async function GET() {
         where: { company_id: companyId, review_status: "pending" },
         select: {
           id: true,
+          document_id: true,
           invoice_number: true,
+          invoice_type: true,
           supplier_name: true,
+          supplier_tax_id: true,
+          customer_name: true,
+          customer_tax_id: true,
           total_amount: true,
+          subtotal: true,
+          tax_amount: true,
+          tax_rate: true,
           currency: true,
           issue_date: true,
+          due_date: true,
+          payment_method: true,
+          category: true,
+          notes: true,
+          extraction_confidence: true,
           review_status: true,
         },
         orderBy: { issue_date: "desc" },
@@ -60,6 +73,7 @@ export async function GET() {
           source_channel: true,
           processing_status: true,
           upload_timestamp: true,
+          mime_type: true,
         },
         orderBy: { upload_timestamp: "desc" },
         take: 100,
@@ -97,15 +111,34 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "INVALID_INPUT" }, { status: 400 });
     }
 
+    const companyId = ctx.membership.company_id;
+    const userId = ctx.membership.user_id;
+
     if (itemType === "invoice") {
       const review_status = action === "approve" ? "approved" : action === "reject" ? "rejected" : null;
       if (!review_status) {
         return NextResponse.json({ error: "INVALID_ACTION" }, { status: 400 });
       }
 
+      // Multi-tenant guard
+      const existing = await prisma.invoice.findFirst({ where: { id, company_id: companyId } });
+      if (!existing) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
+
       const updated = await prisma.invoice.update({
         where: { id },
         data: { review_status },
+      });
+
+      await prisma.auditLog.create({
+        data: {
+          company_id: companyId,
+          user_id: userId,
+          entity_type: "invoice",
+          entity_id: id,
+          action: "review",
+          old_values: JSON.stringify({ review_status: existing.review_status }),
+          new_values: JSON.stringify({ review_status }),
+        },
       });
 
       return NextResponse.json({ ok: true, itemType, id: updated.id, status: updated.review_status });
@@ -117,9 +150,25 @@ export async function PATCH(req: NextRequest) {
         return NextResponse.json({ error: "INVALID_ACTION" }, { status: 400 });
       }
 
+      // Multi-tenant guard
+      const existing = await prisma.document.findFirst({ where: { id, company_id: companyId } });
+      if (!existing) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
+
       const updated = await prisma.document.update({
         where: { id },
         data: { processing_status },
+      });
+
+      await prisma.auditLog.create({
+        data: {
+          company_id: companyId,
+          user_id: userId,
+          entity_type: "document",
+          entity_id: id,
+          action: "review",
+          old_values: JSON.stringify({ processing_status: existing.processing_status }),
+          new_values: JSON.stringify({ processing_status }),
+        },
       });
 
       return NextResponse.json({ ok: true, itemType, id: updated.id, status: updated.processing_status });

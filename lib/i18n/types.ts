@@ -362,6 +362,35 @@ export interface Translations {
     fetchFailed: string;
   };
 
+  // Review queue
+  review: {
+    title: string;
+    subtitle: string;
+    pendingInvoices: string;
+    pendingDocuments: string;
+    totalPending: string;
+    invoicesSection: string;
+    documentsSection: string;
+    noInvoicesPending: string;
+    noDocumentsPending: string;
+    editAndApprove: string;
+    viewDocument: string;
+    approveSuccess: string;
+    rejectSuccess: string;
+    editApproveSuccess: string;
+    actionFailed: string;
+    fetchFailed: string;
+    saving: string;
+    reasonsTitle: string;
+    reasonLowConfidence: string;
+    reasonMissingNumber: string;
+    reasonMissingSupplier: string;
+    reasonMissingCustomer: string;
+    reasonMissingAmount: string;
+    reasonTypeUncertain: string;
+    confidence: string;
+  };
+
   // Status badges
   statusBadges: {
     processing: string;
