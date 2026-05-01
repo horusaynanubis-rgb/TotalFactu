@@ -265,8 +265,10 @@ export default function InvoicesPage() {
                         </div>
                       </td>
                       <td className="py-3 px-4">
-                        <span className={`text-xs px-2 py-1 rounded-full ${
-                          inv?.invoice_type === 'received' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'
+                        <span className={`inline-flex items-center text-xs px-2 py-0.5 rounded-full font-medium ring-1 ring-inset ${
+                          inv?.invoice_type === 'received'
+                            ? 'bg-blue-50 text-blue-700 ring-blue-600/20'
+                            : 'bg-emerald-50 text-emerald-700 ring-emerald-600/20'
                         }`}>
                           {typeLabels[inv?.invoice_type] || inv?.invoice_type}
                         </span>
@@ -284,30 +286,26 @@ export default function InvoicesPage() {
                         <StatusBadge status={inv?.review_status} type="review" />
                       </td>
                       <td className="py-3 px-4">
-                        <div className="flex gap-1">
+                        <div className="flex items-center gap-1">
                           {inv?.review_status === 'pending' && (
                             <>
-                              <Button
-                                size="sm"
-                                variant="outline"
+                              <button
                                 onClick={() => handleApprove(inv?.id)}
                                 title={t.common.approve}
+                                className="inline-flex items-center justify-center w-8 h-8 rounded-md text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700 transition-colors"
                               >
-                                <CheckCircle className="h-3 w-3" />
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
+                                <CheckCircle className="h-4 w-4" />
+                              </button>
+                              <button
                                 onClick={() => handleReject(inv?.id)}
                                 title={t.invoices.reject}
+                                className="inline-flex items-center justify-center w-8 h-8 rounded-md text-orange-500 hover:bg-orange-50 hover:text-orange-600 transition-colors"
                               >
-                                <XCircle className="h-3 w-3" />
-                              </Button>
+                                <XCircle className="h-4 w-4" />
+                              </button>
                             </>
                           )}
-                          <Button
-                            size="sm"
-                            variant="outline"
+                          <button
                             onClick={() => {
                               if (inv?.document_id) {
                                 setPreviewDocId(inv.document_id);
@@ -316,28 +314,26 @@ export default function InvoicesPage() {
                               }
                             }}
                             title={t.invoices.previewOriginal}
+                            className="inline-flex items-center gap-1.5 px-2.5 h-8 rounded-md text-xs font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors"
                           >
-                            <Eye className="h-3 w-3 mr-1" />
-                            {t.invoices.previewOriginal}
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
+                            <Eye className="h-3.5 w-3.5" />
+                            Ver
+                          </button>
+                          <button
                             onClick={() => openEdit(inv)}
                             title={t.invoices.editInvoice}
+                            className="inline-flex items-center justify-center w-8 h-8 rounded-md text-gray-500 hover:bg-blue-50 hover:text-blue-600 transition-colors"
                           >
-                            <Pencil className="h-3 w-3" />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                          <button
                             onClick={() => { setAlsoDeleteDoc(true); setConfirmDeleteInvoice(inv); }}
                             disabled={deletingId === inv?.id}
                             title={t.invoices.deleteInvoice}
-                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                            className="inline-flex items-center justify-center w-8 h-8 rounded-md text-red-400 hover:bg-red-50 hover:text-red-600 transition-colors disabled:opacity-40"
                           >
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
+                            <Trash2 className="h-4 w-4" />
+                          </button>
                         </div>
                       </td>
                     </tr>

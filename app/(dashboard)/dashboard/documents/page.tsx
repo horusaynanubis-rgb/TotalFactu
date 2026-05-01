@@ -272,37 +272,34 @@ export default function DocumentsPage() {
                         {doc?.confidence_score ? `${(doc?.confidence_score * 100).toFixed(0)}%` : '-'}
                       </td>
                       <td className="py-3 px-4">
-                        <div className="flex gap-1">
+                        <div className="flex items-center gap-1">
                           {(doc?.processing_status === 'failed' || doc?.processing_status === 'needs_review') && (
-                            <Button
-                              size="sm"
-                              variant="outline"
+                            <button
                               onClick={() => handleRetry(doc.id)}
                               disabled={retryingId === doc.id}
+                              title={t.documents.retryProcessing}
+                              className="inline-flex items-center gap-1.5 px-2.5 h-8 rounded-md text-xs font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 transition-colors disabled:opacity-40"
                             >
-                              <RotateCw className={`h-3 w-3 mr-1 ${retryingId === doc.id ? 'animate-spin' : ''}`} />
+                              <RotateCw className={`h-3.5 w-3.5 ${retryingId === doc.id ? 'animate-spin' : ''}`} />
                               {retryingId === doc.id ? t.documents.retrying : t.documents.retryProcessing}
-                            </Button>
+                            </button>
                           )}
-                          <Button
-                            size="sm"
-                            variant="outline"
+                          <button
                             onClick={() => setPreviewDocId(doc.id)}
                             title={t.documents.previewDocument}
+                            className="inline-flex items-center gap-1.5 px-2.5 h-8 rounded-md text-xs font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors"
                           >
-                            <Eye className="h-3 w-3 mr-1" />
-                            {t.documents.previewDocument}
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
+                            <Eye className="h-3.5 w-3.5" />
+                            Ver
+                          </button>
+                          <button
                             onClick={() => setConfirmDeleteId(doc.id)}
                             disabled={deletingId === doc.id}
                             title={t.documents.deleteDocument}
-                            className="text-red-600 hover:text-red-700 hover:border-red-300"
+                            className="inline-flex items-center justify-center w-8 h-8 rounded-md text-red-400 hover:bg-red-50 hover:text-red-600 transition-colors disabled:opacity-40"
                           >
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
+                            <Trash2 className="h-4 w-4" />
+                          </button>
                         </div>
                       </td>
                     </tr>
