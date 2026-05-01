@@ -199,6 +199,12 @@ export interface Translations {
     retrying: string;
     retrySuccess: string;
     retryFailed: string;
+    deleteDocument: string;
+    deleteConfirmTitle: string;
+    deleteConfirmMessage: string;
+    deleteSuccess: string;
+    deleteFailed: string;
+    deleting: string;
   };
 
   // Invoices
@@ -245,6 +251,14 @@ export interface Translations {
     confidence: string;
     reviewStatus: string;
     reject: string;
+    deleteInvoice: string;
+    deleteConfirmTitle: string;
+    deleteConfirmMessage: string;
+    alsoDeleteDocument: string;
+    deleteSuccess: string;
+    deleteFailed: string;
+    deleting: string;
+    duplicateWarning: string;
   };
 
   // Exports

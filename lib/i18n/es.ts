@@ -193,6 +193,12 @@ export const es: Translations = {
     retrying: 'Reintentando...',
     retrySuccess: 'Reprocesamiento iniciado',
     retryFailed: 'Error al reintentar el procesamiento',
+    deleteDocument: 'Eliminar documento',
+    deleteConfirmTitle: 'Eliminar documento',
+    deleteConfirmMessage: '¿Estás seguro de que deseas eliminar este documento? Se eliminará también la factura asociada si existe. Esta acción no se puede deshacer.',
+    deleteSuccess: 'Documento eliminado correctamente',
+    deleteFailed: 'Error al eliminar el documento',
+    deleting: 'Eliminando...',
   },
 
   invoices: {
@@ -237,6 +243,14 @@ export const es: Translations = {
     confidence: 'Confianza',
     reviewStatus: 'Estado de revisión',
     reject: 'Rechazar',
+    deleteInvoice: 'Eliminar factura',
+    deleteConfirmTitle: 'Eliminar factura',
+    deleteConfirmMessage: '¿Estás seguro de que deseas eliminar esta factura? Esta acción no se puede deshacer.',
+    alsoDeleteDocument: 'Eliminar también el documento original',
+    deleteSuccess: 'Factura eliminada correctamente',
+    deleteFailed: 'Error al eliminar la factura',
+    deleting: 'Eliminando...',
+    duplicateWarning: 'Posible duplicado',
   },
 
   exports: {

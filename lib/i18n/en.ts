@@ -193,6 +193,12 @@ export const en: Translations = {
     retrying: 'Retrying...',
     retrySuccess: 'Reprocessing started',
     retryFailed: 'Failed to retry processing',
+    deleteDocument: 'Delete document',
+    deleteConfirmTitle: 'Delete document',
+    deleteConfirmMessage: 'Are you sure you want to delete this document? The associated invoice will also be deleted if it exists. This action cannot be undone.',
+    deleteSuccess: 'Document deleted successfully',
+    deleteFailed: 'Failed to delete document',
+    deleting: 'Deleting...',
   },
 
   invoices: {
@@ -237,6 +243,14 @@ export const en: Translations = {
     confidence: 'Confidence',
     reviewStatus: 'Review Status',
     reject: 'Reject',
+    deleteInvoice: 'Delete invoice',
+    deleteConfirmTitle: 'Delete invoice',
+    deleteConfirmMessage: 'Are you sure you want to delete this invoice? This action cannot be undone.',
+    alsoDeleteDocument: 'Also delete original document',
+    deleteSuccess: 'Invoice deleted successfully',
+    deleteFailed: 'Failed to delete invoice',
+    deleting: 'Deleting...',
+    duplicateWarning: 'Possible duplicate',
   },
 
   exports: {

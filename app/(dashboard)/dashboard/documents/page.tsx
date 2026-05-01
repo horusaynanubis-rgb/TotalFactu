@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { StatusBadge } from '@/components/status-badge';
-import { Upload, FileText, Filter, RotateCw } from 'lucide-react';
+import { Upload, FileText, Filter, RotateCw, Trash2, X } from 'lucide-react';
 import { formatDateTime } from '@/lib/utils';
 import toast from 'react-hot-toast';
 import { useTranslation } from '@/lib/i18n/context';
@@ -17,6 +17,8 @@ export default function DocumentsPage() {
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterChannel, setFilterChannel] = useState<string>('all');
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const { t } = useTranslation();
 
   const fetchDocuments = useCallback(async () => {
@@ -24,7 +26,7 @@ export default function DocumentsPage() {
       const params = new URLSearchParams();
       if (filterStatus !== 'all') params.append('status', filterStatus);
       if (filterChannel !== 'all') params.append('channel', filterChannel);
-      
+
       const response = await fetch(`/api/documents?${params.toString()}`);
       const data = await response.json();
       setDocuments(data?.documents ?? []);
@@ -88,7 +90,6 @@ export default function DocumentsPage() {
       if (!completeResponse.ok) {
         const errorData = await completeResponse.json().catch(() => ({}));
         if (errorData.code === 'DEMO_LIMIT_REACHED') {
-          // Redirect to Stripe upgrade flow
           const checkoutRes = await fetch('/api/stripe/checkout', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -107,7 +108,7 @@ export default function DocumentsPage() {
 
       toast.success(t.documents.uploadSuccess);
       fetchDocuments();
-      
+
       if (e?.target) {
         e.target.value = '';
       }
@@ -135,6 +136,26 @@ export default function DocumentsPage() {
       toast.error(t.documents.retryFailed);
     } finally {
       setRetryingId(null);
+    }
+  };
+
+  const handleDeleteConfirmed = async () => {
+    if (!confirmDeleteId) return;
+    const docId = confirmDeleteId;
+    setConfirmDeleteId(null);
+    setDeletingId(docId);
+    try {
+      const response = await fetch(`/api/documents/${docId}`, { method: 'DELETE' });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data?.message ?? t.documents.deleteFailed);
+      }
+      toast.success(t.documents.deleteSuccess);
+      fetchDocuments();
+    } catch (error: any) {
+      toast.error(error?.message ?? t.documents.deleteFailed);
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -249,17 +270,29 @@ export default function DocumentsPage() {
                         {doc?.confidence_score ? `${(doc?.confidence_score * 100).toFixed(0)}%` : '-'}
                       </td>
                       <td className="py-3 px-4">
-                        {(doc?.processing_status === 'failed' || doc?.processing_status === 'needs_review') && (
+                        <div className="flex gap-1">
+                          {(doc?.processing_status === 'failed' || doc?.processing_status === 'needs_review') && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleRetry(doc.id)}
+                              disabled={retryingId === doc.id}
+                            >
+                              <RotateCw className={`h-3 w-3 mr-1 ${retryingId === doc.id ? 'animate-spin' : ''}`} />
+                              {retryingId === doc.id ? t.documents.retrying : t.documents.retryProcessing}
+                            </Button>
+                          )}
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => handleRetry(doc.id)}
-                            disabled={retryingId === doc.id}
+                            onClick={() => setConfirmDeleteId(doc.id)}
+                            disabled={deletingId === doc.id}
+                            title={t.documents.deleteDocument}
+                            className="text-red-600 hover:text-red-700 hover:border-red-300"
                           >
-                            <RotateCw className={`h-3 w-3 mr-1 ${retryingId === doc.id ? 'animate-spin' : ''}`} />
-                            {retryingId === doc.id ? t.documents.retrying : t.documents.retryProcessing}
+                            <Trash2 className="h-3 w-3" />
                           </Button>
-                        )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -271,6 +304,36 @@ export default function DocumentsPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Delete Confirmation Modal */}
+      {confirmDeleteId && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full">
+            <div className="flex items-center justify-between p-6 border-b">
+              <h2 className="text-xl font-semibold text-red-600">{t.documents.deleteConfirmTitle}</h2>
+              <button onClick={() => setConfirmDeleteId(null)} className="text-gray-400 hover:text-gray-600">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-6">
+              <p className="text-gray-700">{t.documents.deleteConfirmMessage}</p>
+            </div>
+            <div className="flex justify-end gap-2 p-6 border-t">
+              <Button variant="outline" onClick={() => setConfirmDeleteId(null)}>
+                {t.common.cancel}
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={handleDeleteConfirmed}
+                className="bg-red-600 hover:bg-red-700 text-white"
+              >
+                <Trash2 className="h-4 w-4 mr-1" />
+                {t.common.delete}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

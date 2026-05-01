@@ -1,12 +1,12 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { StatusBadge } from '@/components/status-badge';
-import { Search, Filter, X, Pencil, CheckCircle, XCircle } from 'lucide-react';
+import { Search, Filter, X, Pencil, CheckCircle, XCircle, Trash2, AlertTriangle } from 'lucide-react';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import toast from 'react-hot-toast';
 import { useTranslation } from '@/lib/i18n/context';
@@ -20,6 +20,9 @@ export default function InvoicesPage() {
   const [editInvoice, setEditInvoice] = useState<any>(null);
   const [editForm, setEditForm] = useState<any>({});
   const [saving, setSaving] = useState(false);
+  const [confirmDeleteInvoice, setConfirmDeleteInvoice] = useState<any>(null);
+  const [alsoDeleteDoc, setAlsoDeleteDoc] = useState(true);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const { t } = useTranslation();
 
   const fetchInvoices = useCallback(async () => {
@@ -28,7 +31,7 @@ export default function InvoicesPage() {
       if (filterType !== 'all') params.append('type', filterType);
       if (filterReview !== 'all') params.append('review', filterReview);
       if (searchQuery) params.append('search', searchQuery);
-      
+
       const response = await fetch(`/api/invoices?${params.toString()}`);
       const data = await response.json();
       setInvoices(data?.invoices ?? []);
@@ -42,6 +45,24 @@ export default function InvoicesPage() {
   useEffect(() => {
     fetchInvoices();
   }, [fetchInvoices]);
+
+  // Detect potential duplicates: same invoice_number + supplier_tax_id + total_amount + issue_date
+  const duplicateIds = useMemo(() => {
+    const groups = new Map<string, string[]>();
+    invoices.forEach((inv) => {
+      if (inv.invoice_number && inv.supplier_tax_id && inv.total_amount != null && inv.issue_date) {
+        const key = `${inv.invoice_number}|${inv.supplier_tax_id}|${inv.total_amount}|${new Date(inv.issue_date).toDateString()}`;
+        const group = groups.get(key) ?? [];
+        group.push(inv.id);
+        groups.set(key, group);
+      }
+    });
+    const ids = new Set<string>();
+    groups.forEach((group) => {
+      if (group.length > 1) group.forEach((id) => ids.add(id));
+    });
+    return ids;
+  }, [invoices]);
 
   const handleApprove = async (invoiceId: string) => {
     try {
@@ -116,6 +137,28 @@ export default function InvoicesPage() {
       toast.error(t.invoices.editFailed);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDeleteConfirmed = async () => {
+    if (!confirmDeleteInvoice) return;
+    const inv = confirmDeleteInvoice;
+    setConfirmDeleteInvoice(null);
+    setDeletingId(inv.id);
+    try {
+      const url = `/api/invoices/${inv.id}?deleteDocument=${alsoDeleteDoc}`;
+      const response = await fetch(url, { method: 'DELETE' });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data?.message ?? t.invoices.deleteFailed);
+      }
+      toast.success(t.invoices.deleteSuccess);
+      fetchInvoices();
+    } catch (error: any) {
+      toast.error(error?.message ?? t.invoices.deleteFailed);
+    } finally {
+      setDeletingId(null);
+      setAlsoDeleteDoc(true);
     }
   };
 
@@ -204,8 +247,21 @@ export default function InvoicesPage() {
                 </thead>
                 <tbody>
                   {invoices.map((inv: any) => (
-                    <tr key={inv?.id} className="border-b hover:bg-gray-50">
-                      <td className="py-3 px-4 text-sm font-medium">{inv?.invoice_number}</td>
+                    <tr key={inv?.id} className={`border-b hover:bg-gray-50 ${duplicateIds.has(inv?.id) ? 'bg-amber-50' : ''}`}>
+                      <td className="py-3 px-4 text-sm font-medium">
+                        <div className="flex items-center gap-1">
+                          {inv?.invoice_number}
+                          {duplicateIds.has(inv?.id) && (
+                            <span
+                              title={t.invoices.duplicateWarning}
+                              className="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-700"
+                            >
+                              <AlertTriangle className="h-3 w-3" />
+                              {t.invoices.duplicateWarning}
+                            </span>
+                          )}
+                        </div>
+                      </td>
                       <td className="py-3 px-4">
                         <span className={`text-xs px-2 py-1 rounded-full ${
                           inv?.invoice_type === 'received' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'
@@ -254,6 +310,16 @@ export default function InvoicesPage() {
                             title={t.invoices.editInvoice}
                           >
                             <Pencil className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => { setAlsoDeleteDoc(true); setConfirmDeleteInvoice(inv); }}
+                            disabled={deletingId === inv?.id}
+                            title={t.invoices.deleteInvoice}
+                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                          >
+                            <Trash2 className="h-3 w-3" />
                           </Button>
                         </div>
                       </td>
@@ -446,6 +512,51 @@ export default function InvoicesPage() {
               </Button>
               <Button onClick={handleSaveEdit} disabled={saving}>
                 {saving ? t.invoices.savingChanges : t.invoices.saveChanges}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {confirmDeleteInvoice && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full">
+            <div className="flex items-center justify-between p-6 border-b">
+              <h2 className="text-xl font-semibold text-red-600">{t.invoices.deleteConfirmTitle}</h2>
+              <button onClick={() => setConfirmDeleteInvoice(null)} className="text-gray-400 hover:text-gray-600">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-gray-700">{t.invoices.deleteConfirmMessage}</p>
+              <div className="bg-gray-50 rounded-lg p-3 text-sm">
+                <span className="font-medium">{confirmDeleteInvoice.invoice_number}</span>
+                {' · '}
+                {confirmDeleteInvoice.supplier_name}
+                {' · '}
+                {formatCurrency(confirmDeleteInvoice.total_amount ?? 0, confirmDeleteInvoice.currency)}
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={alsoDeleteDoc}
+                  onChange={(e) => setAlsoDeleteDoc(e.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300"
+                />
+                <span className="text-sm text-gray-700">{t.invoices.alsoDeleteDocument}</span>
+              </label>
+            </div>
+            <div className="flex justify-end gap-2 p-6 border-t">
+              <Button variant="outline" onClick={() => setConfirmDeleteInvoice(null)}>
+                {t.common.cancel}
+              </Button>
+              <Button
+                onClick={handleDeleteConfirmed}
+                className="bg-red-600 hover:bg-red-700 text-white"
+              >
+                <Trash2 className="h-4 w-4 mr-1" />
+                {t.common.delete}
               </Button>
             </div>
           </div>
