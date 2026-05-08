@@ -20,6 +20,7 @@ export default function SettingsPage() {
   const { t } = useTranslation();
   const { data: session } = useSession();
   const isAdmin = Boolean(session?.user?.email && ADMIN_EMAILS.includes(session.user.email));
+  const isGestoria = (session?.user as any)?.companyType === 'gestoria';
 
   const [formData, setFormData] = useState({
     name: '',
@@ -231,7 +232,7 @@ export default function SettingsPage() {
         </Card>
 
         {/* Telegram — Bot oficial único */}
-        <Card className="border-blue-200 bg-blue-50/30">
+        {!isGestoria && <Card className="border-blue-200 bg-blue-50/30">
           <CardHeader>
             <CardTitle className="flex items-center">
               <Bot className="h-5 w-5 mr-2 text-blue-600" />
@@ -336,7 +337,7 @@ export default function SettingsPage() {
               </div>
             )}
           </CardContent>
-        </Card>
+        </Card>}
 
         {/* Admin: Telegram Webhook Diagnostic */}
         {isAdmin && (
@@ -414,113 +415,118 @@ export default function SettingsPage() {
           </Card>
         )}
 
-        {/* AI Provider Settings */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <Brain className="h-5 w-5 mr-2" />
-              {t.settings.aiProviderTitle}
-            </CardTitle>
-            <CardDescription>{t.settings.aiProviderSubtitle}</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="ai_provider">{t.settings.aiProviderLabel}</Label>
-              <select
-                id="ai_provider"
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                value={formData.ai_provider}
-                onChange={(e: any) => setFormData({ ...formData, ai_provider: e?.target?.value ?? 'external' })}
-              >
-                <option value="local">Local (Ollama)</option>
-                <option value="external">{t.settings.aiProviderExternal}</option>
-              </select>
-              <p className="text-xs text-gray-500">{t.settings.aiProviderHelp}</p>
-            </div>
-
-            {formData.ai_provider === 'external' && (
-              <>
-                <div className="space-y-2">
-                  <Label htmlFor="ai_api_endpoint">{t.settings.aiApiEndpointLabel}</Label>
-                  <Input
-                    id="ai_api_endpoint"
-                    value={formData.ai_api_endpoint}
-                    onChange={(e: any) => setFormData({ ...formData, ai_api_endpoint: e?.target?.value ?? '' })}
-                    placeholder={t.settings.aiApiEndpointPlaceholder}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="ai_api_key">{t.settings.aiApiKeyLabel}</Label>
-                  <Input
-                    id="ai_api_key"
-                    type="password"
-                    value={formData.ai_api_key}
-                    onChange={(e: any) => setFormData({ ...formData, ai_api_key: e?.target?.value ?? '' })}
-                    placeholder={t.settings.aiApiKeyPlaceholder}
-                  />
-                </div>
-              </>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Export Settings */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <Mail className="h-5 w-5 mr-2" />
-              {t.settings.exportEmailSettings}
-            </CardTitle>
-            <CardDescription>{t.settings.exportEmailDescription}</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="export_email">{t.settings.exportRecipientEmail}</Label>
-              <Input
-                id="export_email"
-                type="email"
-                value={formData.export_email}
-                onChange={(e: any) => setFormData({ ...formData, export_email: e?.target?.value ?? '' })}
-                required
-              />
-              <p className="text-xs text-gray-500">{t.settings.exportEmailHelp}</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Other Integrations */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <Send className="h-5 w-5 mr-2" />
-              {t.settings.integrationSettings}
-            </CardTitle>
-            <CardDescription>{t.settings.connectServices}</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="email_forwarding_address">{t.settings.emailForwarding}</Label>
-              <Input
-                id="email_forwarding_address"
-                type="email"
-                value={formData.email_forwarding_address}
-                onChange={(e: any) =>
-                  setFormData({ ...formData, email_forwarding_address: e?.target?.value ?? '' })
-                }
-                placeholder={t.settings.emailForwardingPlaceholder}
-              />
-              <div className="bg-gray-50 p-4 rounded-md mt-2">
-                <p className="text-sm text-gray-600 mb-2">
-                  <strong>{t.settings.webhookUrl}</strong>
-                </p>
-                <code className="text-xs bg-white px-2 py-1 rounded border">
-                  {typeof window !== 'undefined' ? window.location.origin : ''}/api/webhooks/email
-                </code>
-                <p className="text-xs text-gray-500 mt-2">{t.settings.forwardInvoicesHelp}</p>
+        {/* AI Provider Settings — solo usuarios finales */}
+        {!isGestoria && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <Brain className="h-5 w-5 mr-2" />
+                {t.settings.aiProviderTitle}
+              </CardTitle>
+              <CardDescription>{t.settings.aiProviderSubtitle}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="ai_provider">{t.settings.aiProviderLabel}</Label>
+                <select
+                  id="ai_provider"
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  value={formData.ai_provider}
+                  onChange={(e: any) => setFormData({ ...formData, ai_provider: e?.target?.value ?? 'external' })}
+                >
+                  <option value="local">Local (Ollama)</option>
+                  <option value="external">{t.settings.aiProviderExternal}</option>
+                </select>
+                <p className="text-xs text-gray-500">{t.settings.aiProviderHelp}</p>
               </div>
-            </div>
-          </CardContent>
-        </Card>
+
+              {formData.ai_provider === 'external' && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="ai_api_endpoint">{t.settings.aiApiEndpointLabel}</Label>
+                    <Input
+                      id="ai_api_endpoint"
+                      value={formData.ai_api_endpoint}
+                      onChange={(e: any) => setFormData({ ...formData, ai_api_endpoint: e?.target?.value ?? '' })}
+                      placeholder={t.settings.aiApiEndpointPlaceholder}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="ai_api_key">{t.settings.aiApiKeyLabel}</Label>
+                    <Input
+                      id="ai_api_key"
+                      type="password"
+                      value={formData.ai_api_key}
+                      onChange={(e: any) => setFormData({ ...formData, ai_api_key: e?.target?.value ?? '' })}
+                      placeholder={t.settings.aiApiKeyPlaceholder}
+                    />
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Export Settings — solo usuarios finales */}
+        {!isGestoria && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <Mail className="h-5 w-5 mr-2" />
+                {t.settings.exportEmailSettings}
+              </CardTitle>
+              <CardDescription>{t.settings.exportEmailDescription}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="export_email">{t.settings.exportRecipientEmail}</Label>
+                <Input
+                  id="export_email"
+                  type="email"
+                  value={formData.export_email}
+                  onChange={(e: any) => setFormData({ ...formData, export_email: e?.target?.value ?? '' })}
+                />
+                <p className="text-xs text-gray-500">{t.settings.exportEmailHelp}</p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Other Integrations — solo usuarios finales */}
+        {!isGestoria && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <Send className="h-5 w-5 mr-2" />
+                {t.settings.integrationSettings}
+              </CardTitle>
+              <CardDescription>{t.settings.connectServices}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="email_forwarding_address">{t.settings.emailForwarding}</Label>
+                <Input
+                  id="email_forwarding_address"
+                  type="email"
+                  value={formData.email_forwarding_address}
+                  onChange={(e: any) =>
+                    setFormData({ ...formData, email_forwarding_address: e?.target?.value ?? '' })
+                  }
+                  placeholder={t.settings.emailForwardingPlaceholder}
+                />
+                <div className="bg-gray-50 p-4 rounded-md mt-2">
+                  <p className="text-sm text-gray-600 mb-2">
+                    <strong>{t.settings.webhookUrl}</strong>
+                  </p>
+                  <code className="text-xs bg-white px-2 py-1 rounded border">
+                    {typeof window !== 'undefined' ? window.location.origin : ''}/api/webhooks/email
+                  </code>
+                  <p className="text-xs text-gray-500 mt-2">{t.settings.forwardInvoicesHelp}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <div className="flex justify-end">
           <Button type="submit" disabled={saving}>

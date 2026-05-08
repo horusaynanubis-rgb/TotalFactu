@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
-import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -53,7 +52,6 @@ export default function BillingPage() {
   const [purchasingPack, setPurchasingPack] = useState<number | null>(null);
   const { t } = useTranslation();
   const { data: session } = useSession();
-  const router = useRouter();
   const isGestoria = (session?.user as any)?.companyType === 'gestoria';
 
   useEffect(() => {
@@ -91,144 +89,162 @@ export default function BillingPage() {
         <p className="text-gray-600 mt-1">{t.billing.subtitle}</p>
       </div>
 
-      {/* Current Subscription */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center justify-between">
-            <span className="flex items-center">
-              <CreditCard className="h-5 w-5 mr-2" />
-              {t.billing.currentPlanTitle}
-            </span>
-            <Badge variant={subscription?.status === 'active' ? 'success' : 'warning'}>
-              {subscription?.status}
-            </Badge>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-between flex-wrap gap-4">
-            <div>
-              <h3 className="text-2xl font-bold mb-2">{PLAN_NAMES[currentPlanKey] || 'Demo'}</h3>
-              <p className="text-3xl font-bold text-primary">
-                {currentPlanKey === 'gestoria'
-                  ? 'Packs de licencias'
-                  : currentPlanKey === 'demo'
-                  ? 'Gratis'
-                  : `${formatCurrency(PLAN_PRICES[currentPlanKey] ?? 0, 'EUR')}`}
-                {currentPlanKey === 'profesional' && (
-                  <span className="text-lg font-normal text-gray-600">{t.common.perMonth}</span>
+      {/* Estado actual — gestoría */}
+      {isGestoria ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center justify-between">
+              <span className="flex items-center">
+                <Building2 className="h-5 w-5 mr-2" />
+                Plan Gestoría
+              </span>
+              <Badge variant="secondary">Gestoría activa</Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-3xl font-bold text-primary">Packs de licencias</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              Gestiona tus clientes comprando packs de licencias. Cada licencia se asigna a un cliente.
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          {/* Current Subscription — usuarios finales */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between">
+                <span className="flex items-center">
+                  <CreditCard className="h-5 w-5 mr-2" />
+                  {t.billing.currentPlanTitle}
+                </span>
+                <Badge variant={subscription?.status === 'active' ? 'success' : 'warning'}>
+                  {subscription?.status}
+                </Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-between flex-wrap gap-4">
+                <div>
+                  <h3 className="text-2xl font-bold mb-2">{PLAN_NAMES[currentPlanKey] || 'Demo'}</h3>
+                  <p className="text-3xl font-bold text-primary">
+                    {currentPlanKey === 'demo'
+                      ? 'Gratis'
+                      : `${formatCurrency(PLAN_PRICES[currentPlanKey] ?? 0, 'EUR')}`}
+                    {currentPlanKey === 'profesional' && (
+                      <span className="text-lg font-normal text-gray-600">{t.common.perMonth}</span>
+                    )}
+                  </p>
+                </div>
+                {currentPlanKey === 'demo' && (
+                  <a href="/signup?plan=profesional">
+                    <Button size="sm">
+                      <Zap className="h-4 w-4 mr-1.5" /> Pasar a Profesional — €14,99/mes
+                    </Button>
+                  </a>
                 )}
-              </p>
+              </div>
+              <div className="mt-6">
+                <p className="text-sm font-medium text-gray-700 mb-3">{t.billing.planFeatures}</p>
+                <ul className="space-y-2">
+                  {currentPlanFeatures.map((feature: string, idx: number) => (
+                    <li key={idx} className="flex items-start">
+                      <CheckCircle className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
+                      <span className="text-sm text-gray-600">{feature}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Available Plans — usuarios finales */}
+          <div>
+            <h2 className="text-xl font-bold text-gray-900 mb-4">{t.billing.availablePlans}</h2>
+            <div className="grid md:grid-cols-2 gap-6 max-w-2xl">
+              {PLAN_KEYS.map((key) => {
+                const isCurrent = key === subscription?.plan_name;
+                const features = t.planFeatures[key];
+                return (
+                  <Card
+                    key={key}
+                    className={`border-2 ${isCurrent ? 'border-primary' : ''} ${key === 'profesional' ? 'shadow-md' : ''}`}
+                  >
+                    <CardHeader>
+                      <CardTitle className="text-center">
+                        {PLAN_NAMES[key]}
+                        {isCurrent && (
+                          <Badge variant="success" className="ml-2">
+                            {t.common.current}
+                          </Badge>
+                        )}
+                      </CardTitle>
+                      <div className="text-center mt-4">
+                        {key === 'demo' ? (
+                          <span className="text-3xl font-bold">Gratis</span>
+                        ) : (
+                          <>
+                            <span className="text-3xl font-bold">€{PLAN_PRICES[key]}</span>
+                            <span className="text-gray-600">{t.common.perMonth}</span>
+                          </>
+                        )}
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <ul className="space-y-2 mb-6">
+                        {features.map((feature: string, idx: number) => (
+                          <li key={idx} className="flex items-start">
+                            <CheckCircle className="h-4 w-4 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
+                            <span className="text-xs text-gray-600">{feature}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      {!isCurrent && key === 'profesional' && (
+                        <Button
+                          className="w-full"
+                          onClick={async () => {
+                            try {
+                              const res = await fetch('/api/stripe/checkout', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ type: 'plan', plan: 'profesional' }),
+                              });
+                              const data = await res.json();
+                              if (data.url) {
+                                window.location.href = data.url;
+                              } else {
+                                toast.error(data.error || t.billing.stripeKeysRequired);
+                              }
+                            } catch {
+                              toast.error(t.billing.stripeKeysRequired);
+                            }
+                          }}
+                        >
+                          <Zap className="h-4 w-4 mr-1.5" /> {t.common.upgrade}
+                        </Button>
+                      )}
+                      {isCurrent && (
+                        <Button className="w-full" variant="outline" disabled>
+                          {t.common.currentPlan}
+                        </Button>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })}
             </div>
-            {currentPlanKey === 'demo' && (
-              <a href="/signup?plan=profesional">
-                <Button size="sm">
-                  <Zap className="h-4 w-4 mr-1.5" /> Pasar a Profesional — €14,99/mes
-                </Button>
-              </a>
-            )}
           </div>
-          <div className="mt-6">
-            <p className="text-sm font-medium text-gray-700 mb-3">{t.billing.planFeatures}</p>
-            <ul className="space-y-2">
-              {currentPlanFeatures.map((feature: string, idx: number) => (
-                <li key={idx} className="flex items-start">
-                  <CheckCircle className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
-                  <span className="text-sm text-gray-600">{feature}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </CardContent>
-      </Card>
+        </>
+      )}
 
-      {/* Available Plans */}
-      <div>
-        <h2 className="text-xl font-bold text-gray-900 mb-4">{t.billing.availablePlans}</h2>
-        <div className="grid md:grid-cols-2 gap-6 max-w-2xl">
-          {PLAN_KEYS.map((key) => {
-            const isCurrent = key === subscription?.plan_name;
-            const features = t.planFeatures[key];
-            return (
-              <Card
-                key={key}
-                className={`border-2 ${isCurrent ? 'border-primary' : ''} ${key === 'profesional' ? 'shadow-md' : ''}`}
-              >
-                <CardHeader>
-                  <CardTitle className="text-center">
-                    {PLAN_NAMES[key]}
-                    {isCurrent && (
-                      <Badge variant="success" className="ml-2">
-                        {t.common.current}
-                      </Badge>
-                    )}
-                  </CardTitle>
-                  <div className="text-center mt-4">
-                    {key === 'demo' ? (
-                      <span className="text-3xl font-bold">Gratis</span>
-                    ) : (
-                      <>
-                        <span className="text-3xl font-bold">€{PLAN_PRICES[key]}</span>
-                        <span className="text-gray-600">{t.common.perMonth}</span>
-                      </>
-                    )}
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <ul className="space-y-2 mb-6">
-                    {features.map((feature: string, idx: number) => (
-                      <li key={idx} className="flex items-start">
-                        <CheckCircle className="h-4 w-4 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
-                        <span className="text-xs text-gray-600">{feature}</span>
-                      </li>
-                    ))}
-                  </ul>
-                  {!isCurrent && key === 'profesional' && (
-                    <Button
-                      className="w-full"
-                      onClick={async () => {
-                        try {
-                          const res = await fetch('/api/stripe/checkout', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ type: 'plan', plan: 'profesional' }),
-                          });
-                          const data = await res.json();
-                          if (data.url) {
-                            window.location.href = data.url;
-                          } else {
-                            toast.error(data.error || t.billing.stripeKeysRequired);
-                          }
-                        } catch {
-                          toast.error(t.billing.stripeKeysRequired);
-                        }
-                      }}
-                    >
-                      <Zap className="h-4 w-4 mr-1.5" /> {t.common.upgrade}
-                    </Button>
-                  )}
-                  {isCurrent && (
-                    <Button className="w-full" variant="outline" disabled>
-                      {t.common.currentPlan}
-                    </Button>
-                  )}
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Gestoria Packs Section */}
-      <div id="gestoria-packs" className="pt-4 border-t">
+      {/* Packs Gestoría */}
+      <div id="gestoria-packs" className={isGestoria ? '' : 'pt-4 border-t'}>
         <div className="flex items-center gap-3 mb-2">
           <Building2 className="h-6 w-6 text-primary" />
           <div>
             <h2 className="text-xl font-bold text-gray-900">Packs para Gestorías</h2>
             <p className="text-sm text-gray-500">Compra licencias en bloque y asígnalas a tus clientes</p>
           </div>
-          {isGestoria && (
-            <Badge className="ml-auto" variant="secondary">Gestoría activa</Badge>
-          )}
         </div>
 
         <div className="grid md:grid-cols-3 gap-6 mt-4">
@@ -300,14 +316,16 @@ export default function BillingPage() {
         </div>
       </div>
 
-      {/* Billing Notice */}
-      <Card className="bg-blue-50 border-blue-200">
-        <CardContent className="pt-6">
-          <p className="text-sm text-blue-800">
-            <strong>Note:</strong> {t.billing.stripeNotice}
-          </p>
-        </CardContent>
-      </Card>
+      {/* Billing Notice — solo usuarios finales */}
+      {!isGestoria && (
+        <Card className="bg-blue-50 border-blue-200">
+          <CardContent className="pt-6">
+            <p className="text-sm text-blue-800">
+              <strong>Note:</strong> {t.billing.stripeNotice}
+            </p>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

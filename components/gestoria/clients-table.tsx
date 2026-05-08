@@ -4,7 +4,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Users, Shield } from 'lucide-react';
+import { Users, Shield, RotateCcw } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface License {
@@ -24,9 +24,10 @@ interface Pack {
 interface Props {
   packs: Pack[];
   onRefresh: () => void;
+  onResendInvitation?: (email: string) => void;
 }
 
-export function ClientsTable({ packs, onRefresh }: Props) {
+export function ClientsTable({ packs, onRefresh, onResendInvitation }: Props) {
   const clients = packs
     .flatMap((p) => p.licenses)
     .filter((l) => l.status === 'assigned' && l.client_company);
@@ -65,24 +66,23 @@ export function ClientsTable({ packs, onRefresh }: Props) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Empresa</TableHead>
-              <TableHead>NIF/CIF</TableHead>
-              <TableHead>Email</TableHead>
-              <TableHead>Activado</TableHead>
+              <TableHead>Cliente</TableHead>
               <TableHead>Estado</TableHead>
+              <TableHead>Telegram</TableHead>
+              <TableHead>Facturas este mes</TableHead>
+              <TableHead>Pendientes</TableHead>
+              <TableHead>Última actividad</TableHead>
               <TableHead className="text-right">Acciones</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {clients.map((license) => (
               <TableRow key={license.id}>
-                <TableCell className="font-medium">{license.client_company?.name}</TableCell>
-                <TableCell className="text-muted-foreground text-sm">{license.client_company?.tax_id}</TableCell>
-                <TableCell className="text-sm">{license.invitation?.email ?? '—'}</TableCell>
-                <TableCell className="text-sm text-muted-foreground">
-                  {license.invitation?.accepted_at
-                    ? new Date(license.invitation.accepted_at).toLocaleDateString('es-ES')
-                    : '—'}
+                <TableCell>
+                  <div>
+                    <p className="font-medium">{license.client_company?.name}</p>
+                    <p className="text-xs text-muted-foreground">{license.client_company?.tax_id}</p>
+                  </div>
                 </TableCell>
                 <TableCell>
                   <Badge variant="default" className="bg-green-100 text-green-700 hover:bg-green-100">
@@ -90,10 +90,35 @@ export function ClientsTable({ packs, onRefresh }: Props) {
                     Activo
                   </Badge>
                 </TableCell>
+                <TableCell className="text-sm text-muted-foreground">—</TableCell>
+                <TableCell className="text-sm text-muted-foreground">—</TableCell>
+                <TableCell className="text-sm text-muted-foreground">—</TableCell>
+                <TableCell className="text-sm text-muted-foreground">
+                  {license.invitation?.accepted_at
+                    ? new Date(license.invitation.accepted_at).toLocaleDateString('es-ES')
+                    : '—'}
+                </TableCell>
                 <TableCell className="text-right">
-                  <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => handleRevoke(license.id)}>
-                    Revocar
-                  </Button>
+                  <div className="flex items-center justify-end gap-1">
+                    {onResendInvitation && license.invitation?.email && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => onResendInvitation(license.invitation!.email)}
+                        title="Reenviar invitación"
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-destructive hover:text-destructive"
+                      onClick={() => handleRevoke(license.id)}
+                    >
+                      Revocar
+                    </Button>
+                  </div>
                 </TableCell>
               </TableRow>
             ))}

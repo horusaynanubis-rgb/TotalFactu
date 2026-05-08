@@ -63,9 +63,13 @@ async function getDashboardData(userId: string) {
 
 export default async function DashboardPage() {
   const session = await getServerSession(authOptions);
-  
+
   if (!session?.user?.id) {
     redirect('/login');
+  }
+
+  if ((session?.user as any)?.companyType === 'gestoria') {
+    redirect('/dashboard/gestoria');
   }
 
   const data = await getDashboardData(session.user.id);

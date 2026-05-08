@@ -33,17 +33,23 @@ export function DashboardNav() {
   const adminEmails = (process.env.NEXT_PUBLIC_ADMIN_EMAILS ?? '').split(',').map((e) => e.trim()).filter(Boolean);
   const isAdmin = adminEmails.includes(session?.user?.email ?? '');
 
-  const navigation = [
-    { name: t.nav.dashboard, href: '/dashboard', icon: LayoutDashboard },
-    { name: t.nav.documents, href: '/dashboard/documents', icon: FileText },
-    { name: t.nav.invoices, href: '/dashboard/invoices', icon: Receipt },
-    { name: 'Cola de Revisión', href: '/dashboard/review', icon: ListChecks },
-    { name: t.nav.exports, href: '/dashboard/exports', icon: Download },
-    ...(isGestoria ? [{ name: 'Portal Gestoría', href: '/dashboard/gestoria', icon: Building2, badge: true }] : []),
-    ...(isAdmin ? [{ name: 'Admin Demo', href: '/dashboard/admin/demo', icon: ShieldCheck, adminBadge: true }] : []),
-    { name: t.nav.settings, href: '/dashboard/settings', icon: Settings },
-    { name: t.nav.billing, href: '/dashboard/billing', icon: CreditCard },
-  ];
+  const navigation = isGestoria
+    ? [
+        { name: 'Panel Gestoría', href: '/dashboard/gestoria', icon: Building2 },
+        ...(isAdmin ? [{ name: 'Admin Demo', href: '/dashboard/admin/demo', icon: ShieldCheck, adminBadge: true }] : []),
+        { name: t.nav.settings, href: '/dashboard/settings', icon: Settings },
+        { name: t.nav.billing, href: '/dashboard/billing', icon: CreditCard },
+      ]
+    : [
+        { name: t.nav.dashboard, href: '/dashboard', icon: LayoutDashboard },
+        { name: t.nav.documents, href: '/dashboard/documents', icon: FileText },
+        { name: t.nav.invoices, href: '/dashboard/invoices', icon: Receipt },
+        { name: 'Cola de Revisión', href: '/dashboard/review', icon: ListChecks },
+        { name: t.nav.exports, href: '/dashboard/exports', icon: Download },
+        ...(isAdmin ? [{ name: 'Admin Demo', href: '/dashboard/admin/demo', icon: ShieldCheck, adminBadge: true }] : []),
+        { name: t.nav.settings, href: '/dashboard/settings', icon: Settings },
+        { name: t.nav.billing, href: '/dashboard/billing', icon: CreditCard },
+      ];
 
   const handleSignOut = async () => {
     await signOut({ callbackUrl: '/' });

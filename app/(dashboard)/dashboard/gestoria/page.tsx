@@ -7,7 +7,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Users, Package, Mail, CheckCircle, Clock, XCircle, Loader2, Plus, ShoppingCart } from 'lucide-react';
+import {
+  Users, Package, Mail, CheckCircle, Clock, Loader2, Plus, ShoppingCart,
+  FileText, AlertTriangle, UserX,
+} from 'lucide-react';
 import { InviteClientModal } from '@/components/gestoria/invite-client-modal';
 import { ClientsTable } from '@/components/gestoria/clients-table';
 import { InvitationsTable } from '@/components/gestoria/invitations-table';
@@ -35,6 +38,7 @@ export default function GestoriaPage() {
   const [packs, setPacks] = useState<Pack[]>([]);
   const [loading, setLoading] = useState(true);
   const [showInviteModal, setShowInviteModal] = useState(false);
+  const [resendEmail, setResendEmail] = useState<string | undefined>(undefined);
 
   const companyType = (session?.user as any)?.companyType;
 
@@ -70,6 +74,11 @@ export default function GestoriaPage() {
   const assignedClients = allLicenses.filter((l) => l.status === 'assigned' && l.client_company);
   const pendingInvitations = allLicenses.filter((l) => l.invitation?.status === 'pending');
 
+  const handleResendInvitation = (email: string) => {
+    setResendEmail(email);
+    setShowInviteModal(true);
+  };
+
   if (status === 'loading' || (status === 'authenticated' && companyType !== 'gestoria')) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -80,24 +89,25 @@ export default function GestoriaPage() {
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Portal Gestoría</h1>
-          <p className="text-muted-foreground">Gestiona las licencias de tus clientes</p>
+          <h1 className="text-2xl font-bold tracking-tight">Panel Gestoría</h1>
+          <p className="text-muted-foreground">Administra tus clientes y licencias</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => router.push('/dashboard/billing#gestoria-packs')}>
+          <Button variant="outline" onClick={() => router.push('/dashboard/billing')}>
             <ShoppingCart className="mr-2 h-4 w-4" />
-            Comprar más licencias
+            Comprar licencias
           </Button>
-          <Button onClick={() => setShowInviteModal(true)} disabled={availableLicenses === 0}>
+          <Button onClick={() => { setResendEmail(undefined); setShowInviteModal(true); }} disabled={availableLicenses === 0}>
             <Plus className="mr-2 h-4 w-4" />
             Invitar cliente
           </Button>
         </div>
       </div>
 
-      {/* Stats */}
+      {/* KPIs — fila 1: licencias */}
       <div className="grid gap-4 md:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -141,7 +151,51 @@ export default function GestoriaPage() {
         </Card>
       </div>
 
-      {/* Usage bar */}
+      {/* KPIs — fila 2: actividad clientes */}
+      <div className="grid gap-4 md:grid-cols-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Facturas este mes</CardTitle>
+            <FileText className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-muted-foreground">—</div>
+            <p className="text-xs text-muted-foreground">Sumando todos los clientes</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Pendientes de revisión</CardTitle>
+            <Clock className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-muted-foreground">—</div>
+            <p className="text-xs text-muted-foreground">En cola de clientes</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Errores de proceso</CardTitle>
+            <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-muted-foreground">—</div>
+            <p className="text-xs text-muted-foreground">Documentos con error</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Sin onboarding</CardTitle>
+            <UserX className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-muted-foreground">—</div>
+            <p className="text-xs text-muted-foreground">Configuración incompleta</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Barra de uso */}
       {totalLicenses > 0 && (
         <Card>
           <CardContent className="pt-6">
@@ -157,7 +211,10 @@ export default function GestoriaPage() {
             </div>
             {availableLicenses === 0 && (
               <p className="text-xs text-orange-600 mt-2">
-                No quedan licencias disponibles. <button className="underline" onClick={() => router.push('/dashboard/billing')}>Compra más packs</button>
+                No quedan licencias disponibles.{' '}
+                <button className="underline" onClick={() => router.push('/dashboard/billing')}>
+                  Compra más packs
+                </button>
               </p>
             )}
           </CardContent>
@@ -186,7 +243,7 @@ export default function GestoriaPage() {
           </TabsList>
 
           <TabsContent value="clients" className="mt-4">
-            <ClientsTable packs={packs} onRefresh={loadPacks} />
+            <ClientsTable packs={packs} onRefresh={loadPacks} onResendInvitation={handleResendInvitation} />
           </TabsContent>
 
           <TabsContent value="invitations" className="mt-4">
@@ -235,9 +292,10 @@ export default function GestoriaPage() {
 
       <InviteClientModal
         open={showInviteModal}
-        onClose={() => setShowInviteModal(false)}
+        onClose={() => { setShowInviteModal(false); setResendEmail(undefined); }}
         onSuccess={loadPacks}
         availableLicenses={availableLicenses}
+        defaultEmail={resendEmail}
       />
     </div>
   );

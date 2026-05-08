@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,13 +14,18 @@ interface Props {
   onClose: () => void;
   onSuccess: () => void;
   availableLicenses: number;
+  defaultEmail?: string;
 }
 
-export function InviteClientModal({ open, onClose, onSuccess, availableLicenses }: Props) {
-  const [email, setEmail] = useState('');
+export function InviteClientModal({ open, onClose, onSuccess, availableLicenses, defaultEmail }: Props) {
+  const [email, setEmail] = useState(defaultEmail ?? '');
   const [loading, setLoading] = useState(false);
   const [activationUrl, setActivationUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (open) setEmail(defaultEmail ?? '');
+  }, [open, defaultEmail]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
