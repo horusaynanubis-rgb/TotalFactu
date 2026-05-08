@@ -35,7 +35,6 @@ const GESTORIA_PACKS = [
   },
 ];
 
-const PLAN_KEYS = ['demo', 'profesional'] as const;
 const PLAN_PRICES: Record<string, number> = {
   demo: 0,
   profesional: 14.99,
@@ -81,6 +80,9 @@ export default function BillingPage() {
 
   const currentPlanKey = (subscription?.plan_name || 'demo') as keyof typeof PLAN_PRICES;
   const currentPlanFeatures = t.planFeatures[currentPlanKey as keyof typeof t.planFeatures] || t.planFeatures.demo;
+  // Only show "Available Plans" section when there's an upgrade path (demo → profesional).
+  // Profesional users have no higher plan, so we hide the section to avoid showing Demo as a "downgrade" option.
+  const showAvailablePlans = !isGestoria && currentPlanKey === 'demo';
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
@@ -158,87 +160,62 @@ export default function BillingPage() {
             </CardContent>
           </Card>
 
-          {/* Available Plans — usuarios finales */}
-          <div>
-            <h2 className="text-xl font-bold text-gray-900 mb-4">{t.billing.availablePlans}</h2>
-            <div className="grid md:grid-cols-2 gap-6 max-w-2xl">
-              {PLAN_KEYS.map((key) => {
-                const isCurrent = key === subscription?.plan_name;
-                const features = t.planFeatures[key];
-                return (
-                  <Card
-                    key={key}
-                    className={`border-2 ${isCurrent ? 'border-primary' : ''} ${key === 'profesional' ? 'shadow-md' : ''}`}
-                  >
-                    <CardHeader>
-                      <CardTitle className="text-center">
-                        {PLAN_NAMES[key]}
-                        {isCurrent && (
-                          <Badge variant="success" className="ml-2">
-                            {t.common.current}
-                          </Badge>
-                        )}
-                      </CardTitle>
-                      <div className="text-center mt-4">
-                        {key === 'demo' ? (
-                          <span className="text-3xl font-bold">Gratis</span>
-                        ) : (
-                          <>
-                            <span className="text-3xl font-bold">€{PLAN_PRICES[key]}</span>
-                            <span className="text-gray-600">{t.common.perMonth}</span>
-                          </>
-                        )}
-                      </div>
-                    </CardHeader>
-                    <CardContent>
-                      <ul className="space-y-2 mb-6">
-                        {features.map((feature: string, idx: number) => (
-                          <li key={idx} className="flex items-start">
-                            <CheckCircle className="h-4 w-4 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
-                            <span className="text-xs text-gray-600">{feature}</span>
-                          </li>
-                        ))}
-                      </ul>
-                      {!isCurrent && key === 'profesional' && (
-                        <Button
-                          className="w-full"
-                          onClick={async () => {
-                            try {
-                              const res = await fetch('/api/stripe/checkout', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ type: 'plan', plan: 'profesional' }),
-                              });
-                              const data = await res.json();
-                              if (data.url) {
-                                window.location.href = data.url;
-                              } else {
-                                toast.error(data.error || t.billing.stripeKeysRequired);
-                              }
-                            } catch {
-                              toast.error(t.billing.stripeKeysRequired);
-                            }
-                          }}
-                        >
-                          <Zap className="h-4 w-4 mr-1.5" /> {t.common.upgrade}
-                        </Button>
-                      )}
-                      {isCurrent && (
-                        <Button className="w-full" variant="outline" disabled>
-                          {t.common.currentPlan}
-                        </Button>
-                      )}
-                    </CardContent>
-                  </Card>
-                );
-              })}
+          {/* Upgrade a Profesional — solo si el plan actual es Demo */}
+          {showAvailablePlans && (
+            <div>
+              <h2 className="text-xl font-bold text-gray-900 mb-4">{t.billing.availablePlans}</h2>
+              <div className="max-w-sm">
+                <Card className="border-2 border-primary shadow-md">
+                  <CardHeader>
+                    <CardTitle className="text-center">
+                      {PLAN_NAMES.profesional}
+                    </CardTitle>
+                    <div className="text-center mt-4">
+                      <span className="text-3xl font-bold">€{PLAN_PRICES.profesional}</span>
+                      <span className="text-gray-600">{t.common.perMonth}</span>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <ul className="space-y-2 mb-6">
+                      {t.planFeatures.profesional.map((feature: string, idx: number) => (
+                        <li key={idx} className="flex items-start">
+                          <CheckCircle className="h-4 w-4 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
+                          <span className="text-xs text-gray-600">{feature}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <Button
+                      className="w-full"
+                      onClick={async () => {
+                        try {
+                          const res = await fetch('/api/stripe/checkout', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ type: 'plan', plan: 'profesional' }),
+                          });
+                          const data = await res.json();
+                          if (data.url) {
+                            window.location.href = data.url;
+                          } else {
+                            toast.error(data.error || t.billing.stripeKeysRequired);
+                          }
+                        } catch {
+                          toast.error(t.billing.stripeKeysRequired);
+                        }
+                      }}
+                    >
+                      <Zap className="h-4 w-4 mr-1.5" /> {t.common.upgrade}
+                    </Button>
+                  </CardContent>
+                </Card>
+              </div>
             </div>
-          </div>
+          )}
         </>
       )}
 
-      {/* Packs Gestoría */}
-      <div id="gestoria-packs" className={isGestoria ? '' : 'pt-4 border-t'}>
+      {/* Packs Gestoría — solo para cuentas gestoria */}
+      {isGestoria && <div id="gestoria-packs">
         <div className="flex items-center gap-3 mb-2">
           <Building2 className="h-6 w-6 text-primary" />
           <div>
@@ -314,18 +291,9 @@ export default function BillingPage() {
             </Card>
           ))}
         </div>
-      </div>
+      </div>}
 
-      {/* Billing Notice — solo usuarios finales */}
-      {!isGestoria && (
-        <Card className="bg-blue-50 border-blue-200">
-          <CardContent className="pt-6">
-            <p className="text-sm text-blue-800">
-              <strong>Note:</strong> {t.billing.stripeNotice}
-            </p>
-          </CardContent>
-        </Card>
-      )}
+
     </div>
   );
 }

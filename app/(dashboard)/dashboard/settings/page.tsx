@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Building2, Mail, Send, CheckCircle, Bot, ExternalLink, Loader2, Brain, RefreshCw, Unlink, Copy, AlertTriangle, ShieldCheck, Wrench } from 'lucide-react';
+import { Building2, Mail, CheckCircle, Bot, ExternalLink, Loader2, RefreshCw, Unlink, Copy, AlertTriangle, ShieldCheck, Wrench } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useTranslation } from '@/lib/i18n/context';
 
@@ -415,113 +415,35 @@ export default function SettingsPage() {
           </Card>
         )}
 
-        {/* AI Provider Settings — solo usuarios finales */}
-        {!isGestoria && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center">
-                <Brain className="h-5 w-5 mr-2" />
-                {t.settings.aiProviderTitle}
-              </CardTitle>
-              <CardDescription>{t.settings.aiProviderSubtitle}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="ai_provider">{t.settings.aiProviderLabel}</Label>
-                <select
-                  id="ai_provider"
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                  value={formData.ai_provider}
-                  onChange={(e: any) => setFormData({ ...formData, ai_provider: e?.target?.value ?? 'external' })}
-                >
-                  <option value="local">Local (Ollama)</option>
-                  <option value="external">{t.settings.aiProviderExternal}</option>
-                </select>
-                <p className="text-xs text-gray-500">{t.settings.aiProviderHelp}</p>
-              </div>
-
-              {formData.ai_provider === 'external' && (
-                <>
-                  <div className="space-y-2">
-                    <Label htmlFor="ai_api_endpoint">{t.settings.aiApiEndpointLabel}</Label>
-                    <Input
-                      id="ai_api_endpoint"
-                      value={formData.ai_api_endpoint}
-                      onChange={(e: any) => setFormData({ ...formData, ai_api_endpoint: e?.target?.value ?? '' })}
-                      placeholder={t.settings.aiApiEndpointPlaceholder}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="ai_api_key">{t.settings.aiApiKeyLabel}</Label>
-                    <Input
-                      id="ai_api_key"
-                      type="password"
-                      value={formData.ai_api_key}
-                      onChange={(e: any) => setFormData({ ...formData, ai_api_key: e?.target?.value ?? '' })}
-                      placeholder={t.settings.aiApiKeyPlaceholder}
-                    />
-                  </div>
-                </>
-              )}
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Export Settings — solo usuarios finales */}
+        {/* Correo para exportaciones — solo usuarios finales */}
         {!isGestoria && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center">
                 <Mail className="h-5 w-5 mr-2" />
-                {t.settings.exportEmailSettings}
+                Correo para recibir exportaciones
               </CardTitle>
-              <CardDescription>{t.settings.exportEmailDescription}</CardDescription>
+              <CardDescription>
+                Dirección donde TotalFactu enviará automáticamente los archivos CSV al generar una exportación.
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="export_email">{t.settings.exportRecipientEmail}</Label>
+                <Label htmlFor="export_email">Correo de destino</Label>
                 <Input
                   id="export_email"
                   type="email"
                   value={formData.export_email}
                   onChange={(e: any) => setFormData({ ...formData, export_email: e?.target?.value ?? '' })}
+                  placeholder="admin@tuempresa.com"
                 />
-                <p className="text-xs text-gray-500">{t.settings.exportEmailHelp}</p>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Other Integrations — solo usuarios finales */}
-        {!isGestoria && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center">
-                <Send className="h-5 w-5 mr-2" />
-                {t.settings.integrationSettings}
-              </CardTitle>
-              <CardDescription>{t.settings.connectServices}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="email_forwarding_address">{t.settings.emailForwarding}</Label>
-                <Input
-                  id="email_forwarding_address"
-                  type="email"
-                  value={formData.email_forwarding_address}
-                  onChange={(e: any) =>
-                    setFormData({ ...formData, email_forwarding_address: e?.target?.value ?? '' })
-                  }
-                  placeholder={t.settings.emailForwardingPlaceholder}
-                />
-                <div className="bg-gray-50 p-4 rounded-md mt-2">
-                  <p className="text-sm text-gray-600 mb-2">
-                    <strong>{t.settings.webhookUrl}</strong>
+                <div className="bg-gray-50 rounded-md p-3 space-y-1.5 mt-1">
+                  <p className="text-xs text-gray-600">
+                    <span className="font-medium">¿Cuándo se usa?</span> Cuando solicitas una exportación mensual o trimestral desde el panel de Exportaciones, TotalFactu envía el archivo CSV a esta dirección automáticamente.
                   </p>
-                  <code className="text-xs bg-white px-2 py-1 rounded border">
-                    {typeof window !== 'undefined' ? window.location.origin : ''}/api/webhooks/email
-                  </code>
-                  <p className="text-xs text-gray-500 mt-2">{t.settings.forwardInvoicesHelp}</p>
+                  <p className="text-xs text-gray-500">
+                    Puede ser el correo de la empresa, del administrador o el de tu gestoría. Si lo dejas vacío, se usará el correo de tu cuenta.
+                  </p>
                 </div>
               </div>
             </CardContent>
