@@ -1,11 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/app/api/auth/[...nextauth]/auth-options';
 import { getStripeKeys, isStripeConfigured, GESTORIA_PACKS, SUBSCRIPTION_PLANS } from '@/lib/stripe-helpers';
 
 export async function POST(request: NextRequest) {
   try {
+    // Get authenticated user for customer_email and company_id in metadata
+    const session = await getServerSession(authOptions);
+    const userEmail = session?.user?.email ?? undefined;
+    const companyId = (session?.user as any)?.companyId ?? undefined;
+
     if (!isStripeConfigured()) {
+      console.error('[stripe/checkout] Stripe not configured — STRIPE_SECRET_KEY missing or is placeholder');
       return NextResponse.json(
-        { error: 'Stripe no está configurado. Añade las claves API de Stripe a las variables de entorno.' },
+        { error: 'Stripe no está configurado. Contacta con soporte.' },
         { status: 503 }
       );
     }
@@ -13,17 +21,28 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { type, pack_size, plan, contact } = body;
 
+    const effectiveEmail = userEmail || contact?.email || undefined;
+
+    console.log(`[stripe/checkout] type=${type} pack_size=${pack_size} plan=${plan} userEmail=${effectiveEmail} companyId=${companyId}`);
+
     const Stripe = (await import('stripe')).default;
     const stripe = new Stripe(getStripeKeys().secretKey, { apiVersion: '2024-06-20' as any });
 
     const baseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000';
     let lineItems: any[];
     let metadata: Record<string, string> = {};
+    let successPath: string;
+    let cancelPath: string;
 
     if (type === 'gestoria_pack') {
       const packInfo = GESTORIA_PACKS[pack_size as keyof typeof GESTORIA_PACKS];
       if (!packInfo) {
-        return NextResponse.json({ error: 'Pack no válido' }, { status: 400 });
+        const validKeys = Object.keys(GESTORIA_PACKS).join(', ');
+        console.error(`[stripe/checkout] Pack no válido: pack_size=${pack_size}. Claves válidas: ${validKeys}`);
+        return NextResponse.json(
+          { error: `Pack no válido (tamaño ${pack_size}). Recarga la página e inténtalo de nuevo.` },
+          { status: 400 }
+        );
       }
       lineItems = [{
         price_data: {
@@ -40,11 +59,13 @@ export async function POST(request: NextRequest) {
       metadata = {
         type: 'gestoria_pack',
         pack_size: String(pack_size),
-        contact_name: contact?.name || '',
-        contact_email: contact?.email || '',
-        contact_company: contact?.company || '',
-        contact_message: contact?.message || '',
+        // Include both so webhook can activate without depending solely on customer_email
+        company_id: companyId || '',
+        user_email: effectiveEmail || '',
       };
+      successPath = '/dashboard/gestoria?checkout=success';
+      cancelPath = '/dashboard/billing';
+
     } else if (type === 'plan' && plan === 'profesional') {
       const planInfo = SUBSCRIPTION_PLANS.profesional;
       lineItems = [{
@@ -59,23 +80,56 @@ export async function POST(request: NextRequest) {
         },
         quantity: 1,
       }];
-      metadata = { type: 'plan', plan: 'profesional' };
+      metadata = {
+        type: 'plan',
+        plan: 'profesional',
+        company_id: companyId || '',
+        user_email: effectiveEmail || '',
+      };
+      successPath = '/dashboard?checkout=success&plan=profesional';
+      cancelPath = '/dashboard/billing';
+
     } else {
       return NextResponse.json({ error: 'Tipo de checkout no válido' }, { status: 400 });
     }
 
-    const session = await stripe.checkout.sessions.create({
+    const checkoutSession = await stripe.checkout.sessions.create({
       mode: 'subscription',
       line_items: lineItems,
       metadata,
-      success_url: `${baseUrl}/dashboard?checkout=success&plan=${type === 'gestoria_pack' ? 'gestoria' : plan}`,
-      cancel_url: `${baseUrl}/#pricing`,
-      customer_email: contact?.email || undefined,
+      success_url: `${baseUrl}${successPath}`,
+      cancel_url: `${baseUrl}${cancelPath}`,
+      customer_email: effectiveEmail,
     });
 
-    return NextResponse.json({ url: session.url });
+    console.log(`[stripe/checkout] Session creada: ${checkoutSession.id} para ${effectiveEmail}`);
+    return NextResponse.json({ url: checkoutSession.url });
+
   } catch (error: any) {
-    console.error('Stripe checkout error:', error);
-    return NextResponse.json({ error: 'Error al crear la sesión de pago' }, { status: 500 });
+    // Extract Stripe-specific error info for useful logs
+    const errType    = error?.type    ?? 'unknown_type';
+    const errCode    = error?.code    ?? 'unknown_code';
+    const errMessage = error?.message ?? 'Sin mensaje';
+
+    console.error(`[stripe/checkout] Error — type=${errType} code=${errCode} message=${errMessage}`);
+
+    if (errType === 'StripeAuthenticationError') {
+      return NextResponse.json(
+        { error: 'Error de autenticación con Stripe. Verifica que STRIPE_SECRET_KEY esté configurada correctamente en Vercel.' },
+        { status: 500 }
+      );
+    }
+
+    if (errType === 'StripeInvalidRequestError') {
+      return NextResponse.json(
+        { error: `Solicitud inválida a Stripe: ${errMessage}` },
+        { status: 400 }
+      );
+    }
+
+    return NextResponse.json(
+      { error: `Error al crear la sesión de pago: ${errMessage}` },
+      { status: 500 }
+    );
   }
 }

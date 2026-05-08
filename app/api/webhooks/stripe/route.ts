@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
 
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
   if (!webhookSecret) {
-    console.error('STRIPE_WEBHOOK_SECRET not configured');
+    console.error('[stripe/webhook] STRIPE_WEBHOOK_SECRET not configured');
     return NextResponse.json({ error: 'Webhook secret not configured' }, { status: 500 });
   }
 
@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
   try {
     event = stripe.webhooks.constructEvent(body, sig, webhookSecret);
   } catch (err: any) {
-    console.error('Webhook signature verification failed:', err.message);
+    console.error('[stripe/webhook] Signature verification failed:', err.message);
     return NextResponse.json({ error: `Webhook error: ${err.message}` }, { status: 400 });
   }
 
@@ -45,11 +45,10 @@ export async function POST(request: NextRequest) {
         break;
 
       default:
-        // Ignore other events
         break;
     }
   } catch (err: any) {
-    console.error(`Error processing webhook event ${event.type}:`, err);
+    console.error(`[stripe/webhook] Error processing ${event.type}:`, err);
     // Return 200 so Stripe doesn't keep retrying for business logic errors
     return NextResponse.json({ error: 'Internal processing error' }, { status: 200 });
   }
@@ -58,22 +57,19 @@ export async function POST(request: NextRequest) {
 }
 
 // ─── Email confirmation ───────────────────────────────────────────────────────
-// TODO: replace with real email provider (Resend, SMTP, etc.)
 
 async function sendConfirmationEmail(to: string, plan: string, packSize?: number) {
   try {
     const subject = plan === 'gestoria'
       ? `TotalFactu — Pack de ${packSize} licencias activado`
       : 'TotalFactu — Plan Profesional activado';
-    const body = plan === 'gestoria'
+    const text = plan === 'gestoria'
       ? `Tu pack de ${packSize} licencias está activo. Accede a tu portal en https://totalfactu.com/dashboard/gestoria`
       : 'Tu plan Profesional está activo. Ya puedes subir facturas ilimitadas en https://totalfactu.com/dashboard';
 
-    // When an email provider is configured, send here.
-    // Example with Resend: await resend.emails.send({ from: 'noreply@totalfactu.com', to, subject, text: body });
-    console.log(`[Email confirmation] To: ${to} | Subject: ${subject} | Body: ${body}`);
+    console.log(`[stripe/webhook] Email confirmation — To: ${to} | Subject: ${subject} | ${text}`);
   } catch (err) {
-    console.error('Failed to send confirmation email:', err);
+    console.error('[stripe/webhook] Failed to send confirmation email:', err);
   }
 }
 
@@ -82,38 +78,58 @@ async function sendConfirmationEmail(to: string, plan: string, packSize?: number
 async function handleCheckoutCompleted(session: Stripe.Checkout.Session, stripe: Stripe) {
   const { metadata, customer, subscription: subscriptionId, customer_email } = session;
 
-  const email = customer_email || metadata?.contact_email || '';
+  // Prefer metadata.user_email (set when user is logged in); fall back to Stripe customer_email
+  const email = metadata?.user_email || customer_email || metadata?.contact_email || '';
+  // company_id in metadata lets us activate without an email lookup
+  const companyId = metadata?.company_id || undefined;
   const type = metadata?.type;
 
+  console.log(`[stripe/webhook] checkout.session.completed type=${type} email=${email} companyId=${companyId}`);
+
   if (type === 'plan' && metadata?.plan === 'profesional') {
-    await activateProfesionalPlan(email, customer as string, subscriptionId as string, stripe);
+    await activateProfesionalPlan(email, customer as string, subscriptionId as string, stripe, companyId);
   } else if (type === 'gestoria_pack') {
     const packSize = parseInt(metadata?.pack_size || '0', 10);
-    await activateGestoriaPack(email, packSize, customer as string, subscriptionId as string, stripe);
+    await activateGestoriaPack(email, packSize, customer as string, subscriptionId as string, stripe, companyId);
   } else {
-    console.warn('checkout.session.completed: unknown metadata type', metadata);
+    console.warn('[stripe/webhook] checkout.session.completed: unknown metadata type', metadata);
   }
 }
+
+// ─── Resolve company_id from email when not in metadata ──────────────────────
+
+async function resolveCompanyId(email: string, companyId?: string): Promise<string | null> {
+  if (companyId) return companyId;
+  if (!email) return null;
+
+  const user = await prisma.user.findUnique({ where: { email } });
+  if (!user) {
+    console.error(`[stripe/webhook] resolveCompanyId: no user found for email "${email}"`);
+    return null;
+  }
+  const membership = await prisma.membership.findFirst({ where: { user_id: user.id } });
+  if (!membership) {
+    console.error(`[stripe/webhook] resolveCompanyId: no membership for user ${user.id}`);
+    return null;
+  }
+  return membership.company_id;
+}
+
+// ─── activateProfesionalPlan ──────────────────────────────────────────────────
 
 async function activateProfesionalPlan(
   email: string,
   stripeCustomerId: string,
   stripeSubscriptionId: string,
-  stripe: Stripe
+  stripe: Stripe,
+  companyId?: string,
 ) {
-  const user = await prisma.user.findUnique({ where: { email } });
-  if (!user) {
-    console.error(`activateProfesionalPlan: no user found for email ${email}`);
+  const resolvedCompanyId = await resolveCompanyId(email, companyId);
+  if (!resolvedCompanyId) {
+    console.error(`[stripe/webhook] activateProfesionalPlan: could not resolve company (email=${email} companyId=${companyId})`);
     return;
   }
 
-  const membership = await prisma.membership.findFirst({ where: { user_id: user.id } });
-  if (!membership) {
-    console.error(`activateProfesionalPlan: no company membership for user ${user.id}`);
-    return;
-  }
-
-  // Get subscription period from Stripe
   let periodStart: Date | null = null;
   let periodEnd: Date | null = null;
   if (stripeSubscriptionId) {
@@ -122,9 +138,7 @@ async function activateProfesionalPlan(
     periodEnd = new Date(sub.current_period_end * 1000);
   }
 
-  const existing = await prisma.subscription.findFirst({
-    where: { company_id: membership.company_id },
-  });
+  const existing = await prisma.subscription.findFirst({ where: { company_id: resolvedCompanyId } });
 
   if (existing) {
     await prisma.subscription.update({
@@ -141,7 +155,7 @@ async function activateProfesionalPlan(
   } else {
     await prisma.subscription.create({
       data: {
-        company_id: membership.company_id,
+        company_id: resolvedCompanyId,
         plan_name: 'profesional',
         status: 'active',
         stripe_customer_id: stripeCustomerId,
@@ -152,42 +166,36 @@ async function activateProfesionalPlan(
     });
   }
 
-  console.log(`Profesional plan activated for company ${membership.company_id}`);
+  console.log(`[stripe/webhook] Profesional plan activated for company ${resolvedCompanyId}`);
   await sendConfirmationEmail(email, 'profesional');
 }
+
+// ─── activateGestoriaPack ─────────────────────────────────────────────────────
 
 async function activateGestoriaPack(
   email: string,
   packSize: number,
   stripeCustomerId: string,
   stripeSubscriptionId: string,
-  stripe: Stripe
+  stripe: Stripe,
+  companyId?: string,
 ) {
-  const user = await prisma.user.findUnique({ where: { email } });
-  if (!user) {
-    console.error(`activateGestoriaPack: no user found for email ${email}. Manual activation needed.`);
-    // TODO: send activation email to the contact so they can register
+  const resolvedCompanyId = await resolveCompanyId(email, companyId);
+  if (!resolvedCompanyId) {
+    console.error(`[stripe/webhook] activateGestoriaPack: could not resolve company (email=${email} companyId=${companyId})`);
     return;
   }
 
-  const membership = await prisma.membership.findFirst({ where: { user_id: user.id } });
-  if (!membership) {
-    console.error(`activateGestoriaPack: no company for user ${user.id}`);
-    return;
-  }
-
-  // Get period from Stripe
   let periodEnd: Date | null = null;
   if (stripeSubscriptionId) {
     const sub = await stripe.subscriptions.retrieve(stripeSubscriptionId) as any;
     periodEnd = new Date(sub.current_period_end * 1000);
   }
 
-  // Create pack and generate individual license slots
   await prisma.$transaction(async (tx: any) => {
     const pack = await tx.licensePack.create({
       data: {
-        gestoria_company_id: membership.company_id,
+        gestoria_company_id: resolvedCompanyId,
         pack_size: packSize,
         licenses_used: 0,
         stripe_subscription_id: stripeSubscriptionId,
@@ -196,16 +204,14 @@ async function activateGestoriaPack(
       },
     });
 
-    // Create one License record per slot
     const licenseData = Array.from({ length: packSize }, () => ({
       pack_id: pack.id,
       status: 'available',
     }));
     await tx.license.createMany({ data: licenseData });
 
-    // Mark company subscription as gestoria/active
     const existingSub = await tx.subscription.findFirst({
-      where: { company_id: membership.company_id },
+      where: { company_id: resolvedCompanyId },
     });
     if (existingSub) {
       await tx.subscription.update({
@@ -215,7 +221,7 @@ async function activateGestoriaPack(
     } else {
       await tx.subscription.create({
         data: {
-          company_id: membership.company_id,
+          company_id: resolvedCompanyId,
           plan_name: 'gestoria',
           status: 'active',
           stripe_customer_id: stripeCustomerId,
@@ -224,16 +230,13 @@ async function activateGestoriaPack(
     }
   });
 
-  console.log(`Gestoria pack of ${packSize} licenses activated for company ${membership.company_id}`);
+  console.log(`[stripe/webhook] Gestoria pack of ${packSize} licenses activated for company ${resolvedCompanyId}`);
   await sendConfirmationEmail(email, 'gestoria', packSize);
 }
 
 // ─── customer.subscription.updated ───────────────────────────────────────────
 
 async function handleSubscriptionUpdated(stripeSubscription: Stripe.Subscription) {
-  const stripeStatus = stripeSubscription.status;
-
-  // Map Stripe status to our internal status
   const statusMap: Record<string, string> = {
     active: 'active',
     past_due: 'past_due',
@@ -244,23 +247,17 @@ async function handleSubscriptionUpdated(stripeSubscription: Stripe.Subscription
     incomplete: 'inactive',
     incomplete_expired: 'cancelled',
   };
-  const internalStatus = statusMap[stripeStatus] || 'inactive';
+  const internalStatus = statusMap[stripeSubscription.status] || 'inactive';
 
   const sub = stripeSubscription as any;
   const periodStart = new Date(sub.current_period_start * 1000);
   const periodEnd = new Date(sub.current_period_end * 1000);
 
-  // Try to update by stripe_subscription_id on Subscription table
   const updated = await prisma.subscription.updateMany({
     where: { stripe_subscription_id: stripeSubscription.id },
-    data: {
-      status: internalStatus,
-      current_period_start: periodStart,
-      current_period_end: periodEnd,
-    },
+    data: { status: internalStatus, current_period_start: periodStart, current_period_end: periodEnd },
   });
 
-  // Also update LicensePack if it belongs to a gestoria subscription
   await prisma.licensePack.updateMany({
     where: { stripe_subscription_id: stripeSubscription.id },
     data: {
@@ -270,7 +267,7 @@ async function handleSubscriptionUpdated(stripeSubscription: Stripe.Subscription
   });
 
   if (updated.count === 0) {
-    console.warn(`subscription.updated: no subscription found for ${stripeSubscription.id}`);
+    console.warn(`[stripe/webhook] subscription.updated: no subscription found for ${stripeSubscription.id}`);
   }
 }
 
@@ -287,5 +284,5 @@ async function handleSubscriptionDeleted(stripeSubscription: Stripe.Subscription
     data: { status: 'cancelled' },
   });
 
-  console.log(`Subscription ${stripeSubscription.id} cancelled`);
+  console.log(`[stripe/webhook] Subscription ${stripeSubscription.id} cancelled`);
 }

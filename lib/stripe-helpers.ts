@@ -1,6 +1,3 @@
-// Stripe integration helpers
-// Production-ready with environment variables
-
 export function getStripeKeys() {
   return {
     secretKey: process.env.STRIPE_SECRET_KEY || '',
@@ -10,7 +7,12 @@ export function getStripeKeys() {
 
 export function isStripeConfigured(): boolean {
   const { secretKey, publishableKey } = getStripeKeys();
-  return !!secretKey && !!publishableKey;
+  if (!secretKey || !publishableKey) return false;
+  // Reject placeholder values
+  if (secretKey.includes('placeholder') || publishableKey.includes('placeholder')) return false;
+  // Must look like a real Stripe key
+  if (!secretKey.startsWith('sk_')) return false;
+  return true;
 }
 
 export const SUBSCRIPTION_PLANS = {
@@ -44,8 +46,9 @@ export const SUBSCRIPTION_PLANS = {
   },
 };
 
+// Pack sizes must match the values defined in billing/page.tsx GESTORIA_PACKS array
 export const GESTORIA_PACKS = {
-  10: { name: 'Pack Básico', price: 89, stripePriceId: process.env.STRIPE_PRICE_GESTORIA_10 || '' },
-  30: { name: 'Pack Profesional', price: 229, stripePriceId: process.env.STRIPE_PRICE_GESTORIA_30 || '' },
-  50: { name: 'Pack Business', price: 349, stripePriceId: process.env.STRIPE_PRICE_GESTORIA_50 || '' },
+  10: { name: 'Pack Básico',      price: 89,  stripePriceId: process.env.STRIPE_PRICE_GESTORIA_10 || '' },
+  20: { name: 'Pack Profesional', price: 159, stripePriceId: process.env.STRIPE_PRICE_GESTORIA_20 || '' },
+  50: { name: 'Pack Business',    price: 349, stripePriceId: process.env.STRIPE_PRICE_GESTORIA_50 || '' },
 };
