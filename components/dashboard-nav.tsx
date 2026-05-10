@@ -18,6 +18,7 @@ import {
   X,
   Building2,
   ShieldCheck,
+  Users,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useState } from 'react';
@@ -36,6 +37,7 @@ export function DashboardNav() {
   const navigation = isGestoria
     ? [
         { name: 'Panel Gestoría', href: '/dashboard/gestoria', icon: Building2 },
+        { name: 'Clientes', href: '/dashboard/gestoria/clients', icon: Users, matchPrefix: true },
         ...(isAdmin ? [{ name: 'Admin Demo', href: '/dashboard/admin/demo', icon: ShieldCheck, adminBadge: true }] : []),
         { name: t.nav.settings, href: '/dashboard/settings', icon: Settings },
         { name: t.nav.billing, href: '/dashboard/billing', icon: CreditCard },
@@ -67,7 +69,9 @@ export function DashboardNav() {
           <div className="flex-grow flex flex-col">
             <nav className="flex-1 px-2 py-4 space-y-1">
               {navigation.map((item: any) => {
-                const isActive = pathname === item?.href;
+                const isActive = item?.matchPrefix
+                  ? pathname.startsWith(item?.href)
+                  : pathname === item?.href;
                 return (
                   <Link
                     key={item?.href}
@@ -148,7 +152,9 @@ export function DashboardNav() {
           <div className="fixed inset-0 z-40 bg-white pt-16">
             <nav className="px-2 py-4 space-y-1">
               {navigation.map((item: any) => {
-                const isActive = pathname === item?.href;
+                const isActive = item?.matchPrefix
+                  ? pathname.startsWith(item?.href)
+                  : pathname === item?.href;
                 return (
                   <Link
                     key={item?.href}

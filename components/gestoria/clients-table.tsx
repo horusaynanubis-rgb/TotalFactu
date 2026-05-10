@@ -1,10 +1,11 @@
 'use client';
 
+import Link from 'next/link';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Users, Shield, RotateCcw } from 'lucide-react';
+import { Users, Shield, RotateCcw, ChevronRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface License {
@@ -100,6 +101,14 @@ export function ClientsTable({ packs, onRefresh, onResendInvitation }: Props) {
                 </TableCell>
                 <TableCell className="text-right">
                   <div className="flex items-center justify-end gap-1">
+                    {license.client_company?.id && (
+                      <Button variant="outline" size="sm" asChild>
+                        <Link href={`/dashboard/gestoria/clients/${license.client_company.id}`}>
+                          Ver
+                          <ChevronRight className="ml-1 h-3.5 w-3.5" />
+                        </Link>
+                      </Button>
+                    )}
                     {onResendInvitation && license.invitation?.email && (
                       <Button
                         variant="ghost"
