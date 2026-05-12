@@ -389,7 +389,7 @@ async function handleFileUpload(
   }
 
   const statusMsg = await sendMessage(botToken, chatId,
-    '📨 <b>¡Factura recibida!</b>\n⏳ Descargando y procesando...',
+    '📨 <b>Documento recibido</b>\n⏳ Descargando y procesando...',
     { reply_to_message_id: message.message_id }
   );
 
@@ -468,7 +468,7 @@ async function handleFileUpload(
 
     if (statusMsg) {
       await editMessage(botToken, chatId, statusMsg.message_id,
-        '📨 <b>¡Factura recibida!</b>\n🤖 La IA está extrayendo los datos...'
+        '📨 <b>Documento recibido</b>\n🤖 La IA está analizando el contenido...'
       );
     }
 
@@ -487,29 +487,45 @@ async function handleFileUpload(
       try { result = JSON.parse(processBody); } catch { result = {}; }
       const doc = result.document;
       const invoice = result.invoice;
+      const deliveryNote = result.delivery_note;
 
-      if (doc?.processing_status === 'completed') {
-        let completedText = '✅ <b>¡Factura procesada correctamente!</b>\n\n';
-        if (invoice) {
-          completedText += `📄 Factura #${invoice.invoice_number}\n`;
-          completedText += `🏢 ${invoice.supplier_name}\n`;
-          completedText += `💰 ${invoice.currency} ${invoice.total_amount.toFixed(2)}\n`;
-          completedText += `📅 ${invoice.issue_date ? new Date(invoice.issue_date).toLocaleDateString('es-ES') : 'N/A'}\n`;
-          completedText += `\n🎯 Confianza: ${((doc.confidence_score || 0) * 100).toFixed(0)}%`;
+      let finalText = '';
+
+      if (deliveryNote) {
+        // Delivery note path
+        finalText = '📦 <b>Albarán recibido y guardado</b>\n\n';
+        finalText += `🏢 ${deliveryNote.supplier_name}\n`;
+        finalText += `📋 Albarán #${deliveryNote.delivery_note_number}\n`;
+        if (deliveryNote.issue_date) {
+          finalText += `📅 ${new Date(deliveryNote.issue_date).toLocaleDateString('es-ES')}\n`;
         }
-        if (statusMsg) {
-          await editMessage(botToken, chatId, statusMsg.message_id, completedText);
-        } else {
-          await sendMessage(botToken, chatId, completedText);
+        if (deliveryNote.total_amount != null) {
+          finalText += `💰 ${deliveryNote.currency ?? ''} ${deliveryNote.total_amount.toFixed(2)}\n`;
+        }
+        finalText += '\n<i>No se contabilizará como factura hasta que llegue la factura asociada.</i>';
+        if (doc?.processing_status === 'needs_review') {
+          finalText += '\n\n⚠️ Algunos campos requieren revisión en el panel web.';
+        }
+      } else if (doc?.processing_status === 'completed') {
+        finalText = '✅ <b>¡Factura procesada correctamente!</b>\n\n';
+        if (invoice) {
+          finalText += `📄 Factura #${invoice.invoice_number}\n`;
+          finalText += `🏢 ${invoice.supplier_name}\n`;
+          finalText += `💰 ${invoice.currency} ${invoice.total_amount.toFixed(2)}\n`;
+          finalText += `📅 ${invoice.issue_date ? new Date(invoice.issue_date).toLocaleDateString('es-ES') : 'N/A'}\n`;
+          finalText += `\n🎯 Confianza: ${((doc.confidence_score || 0) * 100).toFixed(0)}%`;
         }
       } else if (doc?.processing_status === 'needs_review') {
-        const reviewText = '⚠️ <b>Factura procesada — requiere revisión</b>\n\n' +
+        finalText = '⚠️ <b>Factura procesada — requiere revisión</b>\n\n' +
           'Algunos campos no se extrajeron con suficiente confianza.\n' +
           'Revísalos en el panel de TotalFactu.';
+      }
+
+      if (finalText) {
         if (statusMsg) {
-          await editMessage(botToken, chatId, statusMsg.message_id, reviewText);
+          await editMessage(botToken, chatId, statusMsg.message_id, finalText);
         } else {
-          await sendMessage(botToken, chatId, reviewText);
+          await sendMessage(botToken, chatId, finalText);
         }
       }
     } else {

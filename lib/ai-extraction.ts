@@ -3,6 +3,8 @@
 // The AI module is purely responsible for extraction — never writes to DB
 
 export interface InvoiceExtraction {
+  document_type: 'invoice' | 'delivery_note' | 'unknown';
+  delivery_note_number: string | null;
   invoice_type: string;
   invoice_number: string;
   issue_date: string;
@@ -29,19 +31,23 @@ export interface AIProviderConfig {
   apiEndpoint?: string | null;
 }
 
-const EXTRACTION_PROMPT = `You are an invoice data extraction system. Extract structured data from this document.
-Support multilingual invoices (Spanish, English, French, German, Italian, Portuguese).
+const EXTRACTION_PROMPT = `You are a document data extraction system. Extract structured data from this document.
+Support multilingual documents (Spanish, English, French, German, Italian, Portuguese).
 
 Rules:
 - Do NOT hallucinate or invent values. If a field is not found, use null or empty string.
 - Dates must be in YYYY-MM-DD format when possible. If only partial date is found, normalize it.
 - All monetary amounts must be numbers (not strings).
-- invoice_type: "received" if this is an invoice received from a supplier, "issued" if sent to a customer.
+- document_type: "invoice" if it is a tax invoice (factura), "delivery_note" if it is a delivery note / albaran / albarán / bon de livraison / Lieferschein (NOT a fiscal document), "unknown" if unclear.
+- delivery_note_number: the delivery note number if document_type is "delivery_note", otherwise null.
+- invoice_type: "received" if this is an invoice received from a supplier, "issued" if sent to a customer. Use "received" for delivery_note documents.
 - extraction_confidence: a number between 0 and 1 indicating overall extraction quality.
 - needs_review: true if confidence < 0.7 or if critical fields are missing.
 
 Respond with raw JSON only (no markdown, no code blocks). Use this exact structure:
 {
+  "document_type": "invoice" or "delivery_note" or "unknown",
+  "delivery_note_number": null,
   "invoice_type": "received" or "issued",
   "invoice_number": "string or empty",
   "issue_date": "YYYY-MM-DD or empty",
@@ -195,11 +201,19 @@ export function validateExtraction(raw: any): InvoiceExtraction {
     return '';
   };
 
+  const rawDocType = safeString(raw.document_type);
+  const documentType: 'invoice' | 'delivery_note' | 'unknown' =
+    ['invoice', 'delivery_note', 'unknown'].includes(rawDocType)
+      ? (rawDocType as 'invoice' | 'delivery_note' | 'unknown')
+      : 'invoice';
+
   const invoiceType = ['received', 'issued'].includes(safeString(raw.invoice_type))
     ? safeString(raw.invoice_type)
     : 'received';
 
   const extraction: InvoiceExtraction = {
+    document_type: documentType,
+    delivery_note_number: safeNullString(raw.delivery_note_number),
     invoice_type: invoiceType,
     invoice_number: safeString(raw.invoice_number),
     issue_date: normalizeDate(raw.issue_date),

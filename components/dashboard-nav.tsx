@@ -19,6 +19,7 @@ import {
   Building2,
   ShieldCheck,
   Users,
+  ClipboardList,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useState } from 'react';
@@ -46,6 +47,7 @@ export function DashboardNav() {
         { name: t.nav.dashboard, href: '/dashboard', icon: LayoutDashboard },
         { name: t.nav.documents, href: '/dashboard/documents', icon: FileText },
         { name: t.nav.invoices, href: '/dashboard/invoices', icon: Receipt },
+        { name: 'Albaranes', href: '/dashboard/albaranes', icon: ClipboardList },
         { name: 'Cola de Revisión', href: '/dashboard/review', icon: ListChecks },
         { name: t.nav.exports, href: '/dashboard/exports', icon: Download },
         ...(isAdmin ? [{ name: 'Admin Demo', href: '/dashboard/admin/demo', icon: ShieldCheck, adminBadge: true }] : []),

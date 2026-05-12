@@ -87,6 +87,7 @@ model Company {
   subscriptions         Subscription[]
   documents             Document[]
   invoices              Invoice[]
+  delivery_notes        DeliveryNote[]
   exports               Export[]
   audit_logs            AuditLog[]
   telegram_links        TelegramLink[]
@@ -148,10 +149,11 @@ model Document {
   telegram_message_id  Int?     // Message ID for editing status messages
   created_at           DateTime @default(now())
   updated_at           DateTime @updatedAt
-  
-  company Company   @relation(fields: [company_id], references: [id], onDelete: Cascade)
-  user    User?     @relation(fields: [user_id], references: [id], onDelete: SetNull)
-  invoice Invoice?
+
+  company       Company       @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  user          User?         @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  invoice       Invoice?
+  delivery_note DeliveryNote?
 
   @@index([company_id])
   @@index([processing_status])
@@ -219,14 +221,42 @@ model Invoice {
   created_at             DateTime @default(now())
   updated_at             DateTime @updatedAt
   
-  document Document @relation(fields: [document_id], references: [id], onDelete: Cascade)
-  company  Company  @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  document               Document       @relation(fields: [document_id], references: [id], onDelete: Cascade)
+  company                Company        @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  matched_delivery_notes DeliveryNote[]
 
   @@index([company_id])
   @@index([invoice_type])
   @@index([issue_date])
   @@index([review_status])
   @@index([invoice_number, supplier_name, issue_date]) // For duplicate detection
+}
+
+model DeliveryNote {
+  id                    String    @id @default(cuid())
+  company_id            String
+  document_id           String    @unique
+  supplier_name         String
+  supplier_tax_id       String?
+  delivery_note_number  String
+  issue_date            DateTime?
+  total_amount          Float?
+  currency              String?
+  status                String    @default("pending") // pending, matched, expired, archived
+  matched_invoice_id    String?
+  notes                 String?
+  extraction_confidence Float?
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @updatedAt
+
+  company         Company  @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  document        Document @relation(fields: [document_id], references: [id], onDelete: Cascade)
+  matched_invoice Invoice? @relation(fields: [matched_invoice_id], references: [id], onDelete: SetNull)
+
+  @@index([company_id])
+  @@index([status])
+  @@index([supplier_name])
+  @@index([issue_date])
 }
 
 model Export {

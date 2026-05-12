@@ -42,16 +42,19 @@ export async function POST(
 
     const document = await prisma.document.findUnique({
       where: { id: documentId },
-      include: { company: true, invoice: true },
+      include: { company: true, invoice: true, delivery_note: true },
     });
 
     if (!document) {
       return NextResponse.json({ message: 'Document not found' }, { status: 404 });
     }
 
-    // If retrying, delete existing invoice first
+    // If retrying, delete existing records first
     if (document.invoice) {
       await prisma.invoice.delete({ where: { id: document.invoice.id } });
+    }
+    if (document.delivery_note) {
+      await prisma.deliveryNote.delete({ where: { id: document.delivery_note.id } });
     }
 
     await prisma.document.update({
@@ -72,9 +75,7 @@ export async function POST(
     const fileBase64 = Buffer.from(fileBuffer).toString('base64');
     console.log(`[process] File downloaded. size=${fileBuffer.byteLength} base64Length=${fileBase64.length}`);
 
-    // Build AI provider config.
-    // Only use 'external' or 'local' if the company has valid credentials for them;
-    // otherwise fall back to Gemini (GEMINI_API_KEY env var).
+    // Build AI provider config
     const companyProvider = document.company?.ai_provider;
     const hasExternalConfig =
       companyProvider === 'external' &&
@@ -98,6 +99,57 @@ export async function POST(
       document.original_filename,
       aiConfig
     );
+
+    console.log(`[process] document_type=${extraction.document_type} confidence=${extraction.extraction_confidence}`);
+
+    // ── DELIVERY NOTE path ─────────────────────────────────────────────────
+    if (extraction.document_type === 'delivery_note') {
+      const needsReview = extraction.needs_review || extraction.extraction_confidence < 0.6;
+      const processingStatus = needsReview ? 'needs_review' : 'completed';
+
+      const updatedDocument = await prisma.document.update({
+        where: { id: documentId },
+        data: { processing_status: processingStatus, confidence_score: extraction.extraction_confidence },
+      });
+
+      const deliveryNote = await prisma.deliveryNote.create({
+        data: {
+          company_id: document.company_id,
+          document_id: documentId,
+          supplier_name: extraction.supplier_name || 'Proveedor desconocido',
+          supplier_tax_id: extraction.supplier_tax_id,
+          delivery_note_number: extraction.delivery_note_number || extraction.invoice_number || 'DESCONOCIDO',
+          issue_date: extraction.issue_date ? new Date(extraction.issue_date) : null,
+          total_amount: extraction.total_amount > 0 ? extraction.total_amount : null,
+          currency: extraction.currency || null,
+          notes: extraction.notes,
+          extraction_confidence: extraction.extraction_confidence,
+          status: 'pending',
+        },
+      });
+
+      await prisma.auditLog.create({
+        data: {
+          company_id: document.company_id,
+          user_id: null,
+          entity_type: 'delivery_note',
+          entity_id: deliveryNote.id,
+          action: 'create',
+          new_values: JSON.stringify({ source: 'ai_extraction', document_type: 'delivery_note' }),
+        },
+      });
+
+      // Try to auto-match with a pending invoice from the same supplier
+      await tryAutoMatch(deliveryNote, document.company_id);
+
+      console.log(`[process] ✅ DeliveryNote created. id=${deliveryNote.id} status=${processingStatus}`);
+      return NextResponse.json({ document: updatedDocument, delivery_note: deliveryNote });
+    }
+
+    // ── INVOICE path (also handles 'unknown' with forced needs_review) ──────
+    if (extraction.document_type === 'unknown') {
+      extraction.needs_review = true;
+    }
 
     // Post-process: verify invoice_type against company identity (AI can be wrong)
     const classification = classifyInvoiceType(extraction, {
@@ -149,11 +201,12 @@ export async function POST(
       });
     }
 
+    // When an invoice arrives, check if it matches any pending delivery notes
+    await tryMatchInvoiceToDeliveryNotes(invoice, document.company_id);
+
     console.log(`[process] ✅ Invoice created. id=${invoice.id} type=${finalType} corrected=${classification.was_corrected} status=${processingStatus} confidence=${extraction.extraction_confidence}`);
 
-    // Telegram notification is handled by the webhook caller — skip duplicate here
-    // (webhook already edits the status message after receiving the process response)
-
+    // Telegram notification is handled by the webhook caller
     return NextResponse.json({ document: updatedDocument, invoice });
   } catch (error: any) {
     console.error('[process] ❌ Error:', error?.message);
@@ -193,6 +246,98 @@ export async function POST(
       { status: 500 }
     );
   }
+}
+
+// Attempt to auto-match a newly created delivery note with existing pending invoices
+async function tryAutoMatch(deliveryNote: any, companyId: string) {
+  try {
+    if (!deliveryNote.supplier_name) return;
+
+    const candidates = await prisma.invoice.findMany({
+      where: {
+        company_id: companyId,
+        invoice_type: 'received',
+        matched_delivery_notes: { none: {} },
+        issue_date: deliveryNote.issue_date
+          ? { gte: deliveryNote.issue_date }
+          : undefined,
+      },
+      orderBy: { issue_date: 'asc' },
+      take: 10,
+    });
+
+    for (const inv of candidates) {
+      if (isLikelyMatch(deliveryNote, inv)) {
+        await prisma.deliveryNote.update({
+          where: { id: deliveryNote.id },
+          data: { status: 'matched', matched_invoice_id: inv.id },
+        });
+        console.log(`[process] Auto-matched delivery_note=${deliveryNote.id} → invoice=${inv.id}`);
+        return;
+      }
+    }
+  } catch (err) {
+    console.error('[process] tryAutoMatch error:', err);
+  }
+}
+
+// When a new invoice arrives, check pending delivery notes from same supplier
+async function tryMatchInvoiceToDeliveryNotes(invoice: any, companyId: string) {
+  try {
+    if (!invoice.supplier_name || invoice.invoice_type !== 'received') return;
+
+    const pending = await prisma.deliveryNote.findMany({
+      where: { company_id: companyId, status: 'pending' },
+      orderBy: { issue_date: 'asc' },
+      take: 20,
+    });
+
+    for (const dn of pending) {
+      if (isLikelyMatch(dn, invoice)) {
+        await prisma.deliveryNote.update({
+          where: { id: dn.id },
+          data: { status: 'matched', matched_invoice_id: invoice.id },
+        });
+        console.log(`[process] Auto-matched delivery_note=${dn.id} → invoice=${invoice.id}`);
+      }
+    }
+  } catch (err) {
+    console.error('[process] tryMatchInvoiceToDeliveryNotes error:', err);
+  }
+}
+
+function normalizeName(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/\b(s\.?l\.?u?|s\.?a\.?|s\.?l\.?|ltd|gmbh|inc|srl|sl|sa)\b/g, '')
+    .replace(/[^a-z0-9 ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isLikelyMatch(dn: any, inv: any): boolean {
+  // Tax ID exact match — strongest signal
+  if (dn.supplier_tax_id && inv.supplier_tax_id) {
+    const dnTax = dn.supplier_tax_id.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+    const invTax = inv.supplier_tax_id.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+    if (dnTax === invTax) return true;
+  }
+
+  // Supplier name similarity
+  const dnName = normalizeName(dn.supplier_name || '');
+  const invName = normalizeName(inv.supplier_name || '');
+  if (dnName.length >= 5 && invName.length >= 5) {
+    if (dnName.includes(invName) || invName.includes(dnName)) {
+      // Amount similarity (within 5%) or no amount on delivery note
+      if (!dn.total_amount) return true;
+      const diff = Math.abs((dn.total_amount - inv.total_amount) / (inv.total_amount || 1));
+      if (diff < 0.05) return true;
+    }
+  }
+
+  return false;
 }
 
 async function sendTelegramStatusUpdate(
