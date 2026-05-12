@@ -107,6 +107,9 @@ export interface Translations {
     demoInvoiceLimit: string;
     demoInvoiceLimitDesc: string;
     demoInvoiceLimitButton: string;
+    // Support
+    supportTitle: string;
+    supportDescription: string;
   };
 
   // Auth
@@ -148,6 +151,8 @@ export interface Translations {
     exports: string;
     settings: string;
     billing: string;
+    support: string;
+    supportHelp: string;
   };
 
   // Dashboard

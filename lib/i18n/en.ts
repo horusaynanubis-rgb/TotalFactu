@@ -105,6 +105,9 @@ export const en: Translations = {
     demoInvoiceLimit: 'Invoice limit reached',
     demoInvoiceLimitDesc: 'The Demo plan allows a maximum of 5 invoices. Upgrade to continue.',
     demoInvoiceLimitButton: 'Upgrade now',
+    // Support
+    supportTitle: 'Support & Contact',
+    supportDescription: 'Have questions or need help with TotalFactu? Write to us and we\'ll get back to you as soon as possible.',
   },
 
   auth: {
@@ -144,6 +147,8 @@ export const en: Translations = {
     exports: 'Exports',
     settings: 'Settings',
     billing: 'Billing',
+    support: 'Support',
+    supportHelp: 'Need help?',
   },
 
   dashboard: {

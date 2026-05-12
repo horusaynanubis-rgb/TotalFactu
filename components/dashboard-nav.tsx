@@ -20,6 +20,7 @@ import {
   ShieldCheck,
   Users,
   ClipboardList,
+  Mail,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useState } from 'react';
@@ -108,7 +109,18 @@ export function DashboardNav() {
             </nav>
           </div>
           <div className="flex-shrink-0 border-t">
-            <div className="flex items-center justify-center px-4 py-3">
+            {/* Support block */}
+            <div className="px-4 pt-3 pb-2">
+              <p className="text-xs font-medium text-gray-500 mb-1">{t.nav.support}</p>
+              <a
+                href="mailto:info@horusayn.com"
+                className="flex items-center gap-1.5 text-xs text-primary hover:underline"
+              >
+                <Mail className="h-3 w-3 flex-shrink-0" />
+                info@horusayn.com
+              </a>
+            </div>
+            <div className="flex items-center justify-center px-4 py-2">
               <LanguageSelector variant="compact" />
             </div>
             <div className="px-4 pb-4">
@@ -189,9 +201,21 @@ export function DashboardNav() {
                   </Link>
                 );
               })}
+              {/* Support block — mobile */}
+              <div className="px-3 pt-4 pb-2 border-t mt-2">
+                <p className="text-sm font-medium text-gray-500 mb-1">{t.nav.support}</p>
+                <a
+                  href="mailto:info@horusayn.com"
+                  className="flex items-center gap-1.5 text-sm text-primary hover:underline"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  <Mail className="h-4 w-4 flex-shrink-0" />
+                  info@horusayn.com
+                </a>
+              </div>
               <Button
                 variant="ghost"
-                className="w-full justify-start text-gray-700 hover:bg-gray-100 mt-4"
+                className="w-full justify-start text-gray-700 hover:bg-gray-100 mt-2"
                 onClick={handleSignOut}
               >
                 <LogOut className="mr-3 h-6 w-6 text-gray-400" />

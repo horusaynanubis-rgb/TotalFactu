@@ -306,6 +306,24 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* Support & Contact */}
+      <section className="bg-gray-50 border-t py-14">
+        <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+          <div className="inline-flex items-center justify-center w-12 h-12 bg-primary/10 rounded-xl mb-4">
+            <Mail className="h-6 w-6 text-primary" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-3">{t.landing.supportTitle}</h2>
+          <p className="text-gray-600 mb-5 leading-relaxed">{t.landing.supportDescription}</p>
+          <a
+            href="mailto:info@horusayn.com"
+            className="inline-flex items-center gap-2 bg-white border border-gray-200 hover:border-primary/40 hover:shadow-sm text-primary font-medium px-5 py-2.5 rounded-lg transition-all text-sm"
+          >
+            <Mail className="h-4 w-4" />
+            info@horusayn.com
+          </a>
+        </div>
+      </section>
+
       {/* Footer */}
       <footer className="bg-gray-900 text-gray-400 py-8">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

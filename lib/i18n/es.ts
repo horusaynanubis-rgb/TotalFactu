@@ -105,6 +105,9 @@ export const es: Translations = {
     demoInvoiceLimit: 'Límite de facturas alcanzado',
     demoInvoiceLimitDesc: 'El plan Demo permite un máximo de 5 facturas. Actualiza tu plan para continuar.',
     demoInvoiceLimitButton: 'Actualizar ahora',
+    // Support
+    supportTitle: 'Soporte y contacto',
+    supportDescription: '¿Tienes dudas o necesitas ayuda con TotalFactu? Escríbenos y te responderemos lo antes posible.',
   },
 
   auth: {
@@ -144,6 +147,8 @@ export const es: Translations = {
     exports: 'Exportaciones',
     settings: 'Configuración',
     billing: 'Facturación',
+    support: 'Soporte',
+    supportHelp: '¿Necesitas ayuda?',
   },
 
   dashboard: {
