@@ -4,6 +4,7 @@ import { getFileUrl } from '@/lib/storage';
 import { extractInvoiceData, InvoiceExtraction } from '@/lib/ai-extraction';
 import { classifyInvoiceType } from '@/lib/invoice-type-classifier';
 import { sendMessage, editMessage } from '@/lib/telegram';
+import { normalizeDescription } from '@/lib/supplier-analysis';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -372,17 +373,6 @@ function isLikelyMatch(dn: any, inv: any): boolean {
   }
 
   return false;
-}
-
-function normalizeDescription(s: string): string {
-  return s
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/[^a-z0-9 ]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 200);
 }
 
 async function findOrCreateSupplier(
