@@ -2,6 +2,14 @@
 // Supports local Ollama and external OpenAI-compatible APIs
 // The AI module is purely responsible for extraction — never writes to DB
 
+export interface InvoiceLineItem {
+  description: string;
+  quantity: number | null;
+  unit_price: number | null;
+  tax_rate: number | null;
+  total_amount: number | null;
+}
+
 export interface InvoiceExtraction {
   document_type: 'invoice' | 'delivery_note' | 'unknown';
   delivery_note_number: string | null;
@@ -23,6 +31,7 @@ export interface InvoiceExtraction {
   notes: string | null;
   extraction_confidence: number;
   needs_review: boolean;
+  line_items: InvoiceLineItem[];
 }
 
 export interface AIProviderConfig {
@@ -65,8 +74,24 @@ Respond with raw JSON only (no markdown, no code blocks). Use this exact structu
   "category": null,
   "notes": null,
   "extraction_confidence": 0.95,
-  "needs_review": false
-}`;
+  "needs_review": false,
+  "line_items": [
+    {
+      "description": "Product or service name as shown on the document",
+      "quantity": 1.0,
+      "unit_price": 9.99,
+      "tax_rate": 21.0,
+      "total_amount": 12.09
+    }
+  ]
+}
+
+Rules for line_items:
+- Extract every line from the invoice (products, services, fees).
+- If no individual lines are visible, return "line_items": [].
+- Do NOT invent or estimate lines. Only include what is explicitly shown.
+- quantity, unit_price, tax_rate, total_amount can be null if not visible for a line.
+- description must be non-empty for each item.`;
 
 function isGeminiProvider(config?: AIProviderConfig): boolean {
   // Gemini is the default when API key is configured, unless forced local
@@ -126,7 +151,7 @@ async function extractWithGemini(
     }],
     generationConfig: {
       responseMimeType: 'application/json',
-      maxOutputTokens: 2000,
+      maxOutputTokens: 4000,
     },
   };
 
@@ -211,6 +236,18 @@ export function validateExtraction(raw: any): InvoiceExtraction {
     ? safeString(raw.invoice_type)
     : 'received';
 
+  // Validate line items — reject items without a description
+  const rawLineItems: any[] = Array.isArray(raw.line_items) ? raw.line_items : [];
+  const line_items: InvoiceLineItem[] = rawLineItems
+    .filter((item: any) => item && typeof item.description === 'string' && item.description.trim())
+    .map((item: any) => ({
+      description: safeString(item.description),
+      quantity: item.quantity !== null && item.quantity !== undefined ? safeNumber(item.quantity) : null,
+      unit_price: item.unit_price !== null && item.unit_price !== undefined ? safeNumber(item.unit_price) : null,
+      tax_rate: item.tax_rate !== null && item.tax_rate !== undefined ? safeNumber(item.tax_rate) : null,
+      total_amount: item.total_amount !== null && item.total_amount !== undefined ? safeNumber(item.total_amount) : null,
+    }));
+
   const extraction: InvoiceExtraction = {
     document_type: documentType,
     delivery_note_number: safeNullString(raw.delivery_note_number),
@@ -232,6 +269,7 @@ export function validateExtraction(raw: any): InvoiceExtraction {
     notes: safeNullString(raw.notes),
     extraction_confidence: Math.max(0, Math.min(1, safeNumber(raw.extraction_confidence ?? raw.confidence_score, 0.5))),
     needs_review: false, // Will be computed below
+    line_items,
   };
 
   // Compute needs_review based on business rules

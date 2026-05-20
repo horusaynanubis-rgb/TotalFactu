@@ -204,6 +204,40 @@ export async function POST(
     // When an invoice arrives, check if it matches any pending delivery notes
     await tryMatchInvoiceToDeliveryNotes(invoice, document.company_id);
 
+    // Supplier tracking + line items (received invoices only, non-fatal)
+    if (finalType === 'received') {
+      try {
+        const supplierId = await findOrCreateSupplier(
+          document.company_id,
+          extraction.supplier_name || invoice.supplier_name,
+          extraction.supplier_tax_id,
+        );
+        await prisma.invoice.update({
+          where: { id: invoice.id },
+          data: { supplier_id: supplierId },
+        });
+        if (extraction.line_items.length > 0) {
+          await prisma.invoiceLine.createMany({
+            data: extraction.line_items.map((item) => ({
+              company_id: document.company_id,
+              invoice_id: invoice.id,
+              supplier_id: supplierId,
+              description: item.description,
+              normalized_description: normalizeDescription(item.description),
+              quantity: item.quantity,
+              unit_price: item.unit_price,
+              tax_rate: item.tax_rate,
+              total_amount: item.total_amount,
+              currency: extraction.currency || 'EUR',
+            })),
+          });
+          console.log(`[process] ${extraction.line_items.length} line_items saved for invoice ${invoice.id}`);
+        }
+      } catch (supplierErr: any) {
+        console.error('[process] Supplier/line_items error (non-fatal):', supplierErr?.message);
+      }
+    }
+
     console.log(`[process] ✅ Invoice created. id=${invoice.id} type=${finalType} corrected=${classification.was_corrected} status=${processingStatus} confidence=${extraction.extraction_confidence}`);
 
     // Telegram notification is handled by the webhook caller
@@ -338,6 +372,55 @@ function isLikelyMatch(dn: any, inv: any): boolean {
   }
 
   return false;
+}
+
+function normalizeDescription(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 200);
+}
+
+async function findOrCreateSupplier(
+  companyId: string,
+  supplierName: string,
+  supplierTaxId: string | null,
+): Promise<string> {
+  const nameNormalized = normalizeName(supplierName);
+
+  if (supplierTaxId) {
+    const existing = await prisma.supplier.findFirst({
+      where: { company_id: companyId, tax_id: supplierTaxId },
+    });
+    if (existing) {
+      if (existing.name !== supplierName) {
+        await prisma.supplier.update({
+          where: { id: existing.id },
+          data: { name: supplierName, name_normalized: nameNormalized },
+        });
+      }
+      return existing.id;
+    }
+    const created = await prisma.supplier.create({
+      data: { company_id: companyId, name: supplierName, name_normalized: nameNormalized, tax_id: supplierTaxId },
+    });
+    return created.id;
+  }
+
+  // No tax_id — find by normalized name
+  const existing = await prisma.supplier.findFirst({
+    where: { company_id: companyId, name_normalized: nameNormalized },
+  });
+  if (existing) return existing.id;
+
+  const created = await prisma.supplier.create({
+    data: { company_id: companyId, name: supplierName, name_normalized: nameNormalized },
+  });
+  return created.id;
 }
 
 async function sendTelegramStatusUpdate(

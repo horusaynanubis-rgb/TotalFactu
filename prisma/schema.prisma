@@ -94,6 +94,8 @@ model Company {
   telegram_link_codes   TelegramLinkCode[]
   license_packs         LicensePack[]       // gestoria only
   assigned_licenses     License[]           // licenses assigned to this company (client side)
+  suppliers             Supplier[]
+  invoice_lines         InvoiceLine[]
 
   @@index([tax_id])
   @@index([company_type])
@@ -218,17 +220,21 @@ model Invoice {
   notes                  String?
   extraction_confidence  Float
   review_status          String   @default("pending") // pending, approved, rejected
+  supplier_id            String?
   created_at             DateTime @default(now())
   updated_at             DateTime @updatedAt
-  
+
   document               Document       @relation(fields: [document_id], references: [id], onDelete: Cascade)
   company                Company        @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  supplier               Supplier?      @relation(fields: [supplier_id], references: [id], onDelete: SetNull)
   matched_delivery_notes DeliveryNote[]
+  invoice_lines          InvoiceLine[]
 
   @@index([company_id])
   @@index([invoice_type])
   @@index([issue_date])
   @@index([review_status])
+  @@index([supplier_id])
   @@index([invoice_number, supplier_name, issue_date]) // For duplicate detection
 }
 
@@ -335,6 +341,50 @@ model License {
   @@index([pack_id])
   @@index([client_company_id])
   @@index([status])
+}
+
+// --- Supplier price tracking (non-gestoria accounts only) ---
+
+model Supplier {
+  id              String   @id @default(cuid())
+  company_id      String
+  name            String
+  name_normalized String
+  tax_id          String?
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  company       Company       @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  invoices      Invoice[]
+  invoice_lines InvoiceLine[]
+
+  @@index([company_id])
+  @@index([company_id, tax_id])
+  @@index([company_id, name_normalized])
+}
+
+model InvoiceLine {
+  id                     String   @id @default(cuid())
+  company_id             String
+  invoice_id             String
+  supplier_id            String?
+  description            String
+  normalized_description String?
+  quantity               Float?
+  unit_price             Float?
+  tax_rate               Float?
+  total_amount           Float?
+  currency               String?
+  created_at             DateTime @default(now())
+
+  company  Company   @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  invoice  Invoice   @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
+  supplier Supplier? @relation(fields: [supplier_id], references: [id], onDelete: SetNull)
+
+  @@index([company_id])
+  @@index([invoice_id])
+  @@index([supplier_id])
+  @@index([company_id, normalized_description])
 }
 
 model LicenseInvitation {
