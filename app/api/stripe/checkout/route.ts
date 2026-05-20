@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/auth-options';
 import { getStripeKeys, isStripeConfigured, GESTORIA_PACKS, SUBSCRIPTION_PLANS } from '@/lib/stripe-helpers';
+import { prisma } from '@/lib/prisma';
 
 export async function POST(request: NextRequest) {
   try {
@@ -33,6 +34,7 @@ export async function POST(request: NextRequest) {
     let metadata: Record<string, string> = {};
     let successPath: string;
     let cancelPath: string;
+    let subscriptionData: { trial_period_days: number } | undefined;
 
     if (type === 'gestoria_pack') {
       const packInfo = GESTORIA_PACKS[pack_size as keyof typeof GESTORIA_PACKS];
@@ -67,6 +69,10 @@ export async function POST(request: NextRequest) {
       cancelPath = '/dashboard/billing';
 
     } else if (type === 'plan' && plan === 'profesional') {
+      if (!session || !companyId) {
+        return NextResponse.json({ error: 'Debes estar autenticado para mejorar tu plan' }, { status: 401 });
+      }
+
       const planInfo = SUBSCRIPTION_PLANS.profesional;
       lineItems = [{
         price_data: {
@@ -89,6 +95,15 @@ export async function POST(request: NextRequest) {
       successPath = '/dashboard?checkout=success&plan=profesional';
       cancelPath = '/dashboard/billing';
 
+      // Offer 30-day trial only if company has never had a Stripe subscription
+      const existingSub = await prisma.subscription.findFirst({
+        where: { company_id: companyId },
+        select: { stripe_subscription_id: true },
+      });
+      if (!existingSub?.stripe_subscription_id) {
+        subscriptionData = { trial_period_days: 30 };
+      }
+
     } else {
       return NextResponse.json({ error: 'Tipo de checkout no válido' }, { status: 400 });
     }
@@ -100,6 +115,7 @@ export async function POST(request: NextRequest) {
       success_url: `${baseUrl}${successPath}`,
       cancel_url: `${baseUrl}${cancelPath}`,
       customer_email: effectiveEmail,
+      ...(subscriptionData && { subscription_data: subscriptionData }),
     });
 
     console.log(`[stripe/checkout] Session creada: ${checkoutSession.id} para ${effectiveEmail}`);

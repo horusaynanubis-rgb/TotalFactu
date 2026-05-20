@@ -36,12 +36,24 @@ export async function POST(request: NextRequest) {
         await handleCheckoutCompleted(event.data.object as Stripe.Checkout.Session, stripe);
         break;
 
+      case 'customer.subscription.created':
+        await handleSubscriptionCreated(event.data.object as Stripe.Subscription);
+        break;
+
       case 'customer.subscription.updated':
         await handleSubscriptionUpdated(event.data.object as Stripe.Subscription);
         break;
 
       case 'customer.subscription.deleted':
         await handleSubscriptionDeleted(event.data.object as Stripe.Subscription);
+        break;
+
+      case 'invoice.payment_succeeded':
+        await handleInvoicePaymentSucceeded(event.data.object as Stripe.Invoice);
+        break;
+
+      case 'invoice.payment_failed':
+        await handleInvoicePaymentFailed(event.data.object as Stripe.Invoice);
         break;
 
       default:
@@ -285,4 +297,43 @@ async function handleSubscriptionDeleted(stripeSubscription: Stripe.Subscription
   });
 
   console.log(`[stripe/webhook] Subscription ${stripeSubscription.id} cancelled`);
+}
+
+// ─── customer.subscription.created ───────────────────────────────────────────
+// checkout.session.completed handles plan activation; this is a safety-net log.
+
+async function handleSubscriptionCreated(stripeSubscription: Stripe.Subscription) {
+  console.log(`[stripe/webhook] customer.subscription.created: ${stripeSubscription.id} status=${stripeSubscription.status}`);
+}
+
+// ─── invoice.payment_succeeded ────────────────────────────────────────────────
+
+async function handleInvoicePaymentSucceeded(invoice: Stripe.Invoice) {
+  const subscriptionId = typeof invoice.subscription === 'string'
+    ? invoice.subscription
+    : (invoice.subscription as any)?.id;
+  if (!subscriptionId) return;
+
+  await prisma.subscription.updateMany({
+    where: { stripe_subscription_id: subscriptionId },
+    data: { status: 'active' },
+  });
+
+  console.log(`[stripe/webhook] invoice.payment_succeeded: subscription ${subscriptionId} set to active`);
+}
+
+// ─── invoice.payment_failed ───────────────────────────────────────────────────
+
+async function handleInvoicePaymentFailed(invoice: Stripe.Invoice) {
+  const subscriptionId = typeof invoice.subscription === 'string'
+    ? invoice.subscription
+    : (invoice.subscription as any)?.id;
+  if (!subscriptionId) return;
+
+  await prisma.subscription.updateMany({
+    where: { stripe_subscription_id: subscriptionId },
+    data: { status: 'past_due' },
+  });
+
+  console.log(`[stripe/webhook] invoice.payment_failed: subscription ${subscriptionId} set to past_due`);
 }

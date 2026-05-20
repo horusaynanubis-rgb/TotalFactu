@@ -139,11 +139,28 @@ export default function BillingPage() {
                   </p>
                 </div>
                 {currentPlanKey === 'demo' && (
-                  <a href="/signup?plan=profesional">
-                    <Button size="sm">
-                      <Zap className="h-4 w-4 mr-1.5" /> Pasar a Profesional — €14,99/mes
-                    </Button>
-                  </a>
+                  <Button
+                    size="sm"
+                    onClick={async () => {
+                      try {
+                        const res = await fetch('/api/stripe/checkout', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ type: 'plan', plan: 'profesional' }),
+                        });
+                        const data = await res.json();
+                        if (data.url) {
+                          window.location.href = data.url;
+                        } else {
+                          toast.error(data.error || t.billing.stripeKeysRequired);
+                        }
+                      } catch {
+                        toast.error(t.billing.stripeKeysRequired);
+                      }
+                    }}
+                  >
+                    <Zap className="h-4 w-4 mr-1.5" /> Mejorar plan — primer mes gratis
+                  </Button>
                 )}
               </div>
               <div className="mt-6">
@@ -206,6 +223,9 @@ export default function BillingPage() {
                     >
                       <Zap className="h-4 w-4 mr-1.5" /> {t.common.upgrade}
                     </Button>
+                    <p className="text-xs text-center text-muted-foreground mt-3">
+                      Primer mes gratis. Se solicitará un método de pago seguro mediante Stripe. El cobro comenzará automáticamente tras 30 días.
+                    </p>
                   </CardContent>
                 </Card>
               </div>
