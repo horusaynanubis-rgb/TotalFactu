@@ -309,9 +309,9 @@ async function handleSubscriptionCreated(stripeSubscription: Stripe.Subscription
 // ─── invoice.payment_succeeded ────────────────────────────────────────────────
 
 async function handleInvoicePaymentSucceeded(invoice: Stripe.Invoice) {
-  const subscriptionId = typeof invoice.subscription === 'string'
-    ? invoice.subscription
-    : (invoice.subscription as any)?.id;
+  // In Stripe v22 the subscription reference moved to invoice.parent.subscription_details.subscription
+  const subRef = invoice.parent?.subscription_details?.subscription;
+  const subscriptionId = typeof subRef === 'string' ? subRef : subRef?.id;
   if (!subscriptionId) return;
 
   await prisma.subscription.updateMany({
@@ -325,9 +325,9 @@ async function handleInvoicePaymentSucceeded(invoice: Stripe.Invoice) {
 // ─── invoice.payment_failed ───────────────────────────────────────────────────
 
 async function handleInvoicePaymentFailed(invoice: Stripe.Invoice) {
-  const subscriptionId = typeof invoice.subscription === 'string'
-    ? invoice.subscription
-    : (invoice.subscription as any)?.id;
+  // In Stripe v22 the subscription reference moved to invoice.parent.subscription_details.subscription
+  const subRef = invoice.parent?.subscription_details?.subscription;
+  const subscriptionId = typeof subRef === 'string' ? subRef : subRef?.id;
   if (!subscriptionId) return;
 
   await prisma.subscription.updateMany({
