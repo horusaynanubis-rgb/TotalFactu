@@ -163,26 +163,38 @@ async function extractWithGemini(
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => response.statusText);
-    console.error(`[gemini] API error (${response.status}): ${errorText}`);
-    throw new Error(`Gemini API error (${response.status}): ${errorText}`);
+    // Log full error body for debugging but throw a truncated message (body can be huge)
+    console.error(`[gemini] HTTP ${response.status} error body (truncated):`, errorText.slice(0, 500));
+    throw new Error(`Gemini API error (${response.status}): ${errorText.slice(0, 300)}`);
   }
 
   const data = await response.json();
-  console.log(`[gemini] Raw response candidates=${data?.candidates?.length} finishReason=${data?.candidates?.[0]?.finishReason}`);
+  const finishReason: string = data?.candidates?.[0]?.finishReason ?? 'UNKNOWN';
+  console.log(`[gemini] Raw response candidates=${data?.candidates?.length} finishReason=${finishReason}`);
+
+  // Blocked by safety filters or other non-STOP reasons
+  if (finishReason === 'SAFETY') {
+    console.error('[gemini] Response blocked by SAFETY filter');
+    throw new Error('Gemini API error (SAFETY): response blocked by content safety filters');
+  }
+  if (finishReason === 'RECITATION') {
+    console.error('[gemini] Response blocked by RECITATION filter');
+    throw new Error('Gemini API error (RECITATION): response blocked due to recitation');
+  }
 
   const content = data?.candidates?.[0]?.content?.parts?.[0]?.text;
   console.log(`[gemini] Extracted content (first 200 chars): ${String(content ?? '').slice(0, 200)}`);
 
   if (!content) {
-    console.error('[gemini] No content in response. Full data:', JSON.stringify(data));
-    throw new Error('No content in Gemini response');
+    console.error('[gemini] No content in response. finishReason:', finishReason, 'Full data:', JSON.stringify(data).slice(0, 500));
+    throw new Error(`No content in Gemini response (finishReason=${finishReason})`);
   }
 
   let rawJson: any;
   try {
     rawJson = JSON.parse(content);
   } catch (parseErr) {
-    console.error('[gemini] Failed to parse JSON content:', content);
+    console.error('[gemini] Failed to parse JSON content (first 300 chars):', content.slice(0, 300));
     throw new Error('Gemini response is not valid JSON');
   }
 
@@ -337,13 +349,15 @@ export async function extractInvoiceData(
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => response.statusText);
-    throw new Error(`AI API error (${response.status}): ${errorText}`);
+    console.error(`[ai] HTTP ${response.status} error body (truncated):`, errorText.slice(0, 500));
+    throw new Error(`AI API error (${response.status}): ${errorText.slice(0, 300)}`);
   }
 
   const data = await response.json();
   const content = data?.choices?.[0]?.message?.content;
 
   if (!content) {
+    console.error('[ai] No content in response. Choices:', JSON.stringify(data?.choices).slice(0, 300));
     throw new Error('No content in AI response');
   }
 
@@ -351,6 +365,7 @@ export async function extractInvoiceData(
   try {
     rawJson = JSON.parse(content);
   } catch {
+    console.error('[ai] Failed to parse JSON content (first 300 chars):', String(content).slice(0, 300));
     throw new Error('AI response is not valid JSON');
   }
 

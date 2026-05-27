@@ -350,6 +350,10 @@ async function handleFileUpload(
 
   let fileId: string;
   let fileName: string;
+  // originalFileName keeps the user-visible name (with accents/spaces) for DB storage.
+  // fileName may have its extension normalised after MIME detection.
+  // buildTelegramPath() will sanitize the name for the storage key automatically.
+  let originalFileName: string;
   // This is the declared MIME — will be verified against actual bytes after download
   let declaredMime: string;
   let isPhotoMessage = false;
@@ -357,6 +361,7 @@ async function handleFileUpload(
   if (message.document) {
     fileId = message.document.file_id;
     fileName = message.document.file_name || `document_${Date.now()}`;
+    originalFileName = fileName;
     declaredMime = message.document.mime_type || getMimeType(fileName);
 
     if (message.document.file_size && message.document.file_size > 20 * 1024 * 1024) {
@@ -372,6 +377,7 @@ async function handleFileUpload(
     const photo = message.photo[message.photo.length - 1];
     fileId = photo.file_id;
     fileName = `photo_${Date.now()}.jpg`;
+    originalFileName = fileName;
     declaredMime = 'image/jpeg';
     isPhotoMessage = true;
     console.log(`[Telegram upload] Photo: ${message.photo.length} sizes, largest: ${photo.width}x${photo.height} file_size=${photo.file_size ?? 'unknown'}`);
@@ -392,6 +398,9 @@ async function handleFileUpload(
     '📨 <b>Documento recibido</b>\n⏳ Descargando y procesando...',
     { reply_to_message_id: message.message_id }
   );
+
+  let uploadPhase: 'telegram_download' | 'storage_upload' | 'db_insert' | 'ai_process' = 'telegram_download';
+  let documentIdForLog: string | null = null;
 
   try {
     // --- Download from Telegram ---
@@ -444,17 +453,21 @@ async function handleFileUpload(
     }
 
     // --- Upload to Supabase Storage ---
+    // buildTelegramPath() sanitizes the filename automatically (strips accents, spaces, etc.)
+    // originalFileName is preserved as-is for the DB record (human-readable display).
+    uploadPhase = 'storage_upload';
     const cloudStoragePath = buildTelegramPath(link.company_id, fileName);
     await uploadFile(fileBuffer, cloudStoragePath, mimeType);
-    console.log(`[Telegram upload] Uploaded to Supabase: path=${cloudStoragePath}`);
+    console.log(`[Telegram upload] Uploaded to Supabase: path=${cloudStoragePath} (original=${originalFileName})`);
 
     // --- Create Document record ---
+    uploadPhase = 'db_insert';
     const document = await prisma.document.create({
       data: {
         company_id: link.company_id,
         user_id: link.user_id,
         source_channel: 'telegram',
-        original_filename: fileName,
+        original_filename: originalFileName,
         mime_type: mimeType,
         processing_status: 'processing',
         cloud_storage_path: cloudStoragePath,
@@ -463,6 +476,7 @@ async function handleFileUpload(
         telegram_message_id: statusMsg?.message_id ?? null,
       },
     });
+    documentIdForLog = document.id;
 
     console.log(`[Telegram upload] Document created: id=${document.id} company_id=${document.company_id} user_id=${document.user_id} mime=${mimeType} path=${cloudStoragePath}`);
 
@@ -473,6 +487,7 @@ async function handleFileUpload(
     }
 
     // --- Call process endpoint ---
+    uploadPhase = 'ai_process';
     const vercelUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null;
     const baseUrl = process.env.NEXTAUTH_URL || vercelUrl || 'http://localhost:3000';
     const processUrl = `${baseUrl}/api/documents/${document.id}/process`;
@@ -543,14 +558,36 @@ async function handleFileUpload(
       }
     }
   } catch (error: any) {
-    console.error('[Telegram upload] ❌ Error:', error?.message, error?.stack);
-    const errorText = '❌ <b>Error procesando la factura</b>\n\n' +
-      `${error?.message || 'Error inesperado'}\n\n` +
-      'Inténtalo de nuevo o sube la factura desde el panel web.';
-    if (statusMsg) {
-      await editMessage(botToken, chatId, statusMsg.message_id, errorText);
+    console.error(
+      '[Telegram upload] ❌ FAILED',
+      `phase=${uploadPhase}`,
+      `documentId=${documentIdForLog ?? 'none'}`,
+      `original_filename=${originalFileName!}`,
+      `source=telegram`,
+      `mime=${declaredMime!}`,
+      `error=${error?.message}`,
+      '\nStack:', error?.stack,
+    );
+
+    // User-friendly message — never expose raw technical errors
+    let friendlyMsg: string;
+    if (uploadPhase === 'telegram_download') {
+      friendlyMsg = '❌ <b>No se pudo descargar el archivo</b>\n\nTelegram no pudo enviar el archivo correctamente. Inténtalo de nuevo.';
+    } else if (uploadPhase === 'storage_upload') {
+      friendlyMsg = '❌ <b>No se pudo subir el archivo</b>\n\nError al guardar el documento en el servidor. Inténtalo de nuevo o sube la factura desde el panel web.';
     } else {
-      await sendMessage(botToken, chatId, errorText);
+      // ai_process or db_insert — process endpoint handles its own Telegram notification,
+      // but if we ended up here it means the fetch itself failed (network/timeout)
+      friendlyMsg = '❌ <b>Error procesando la factura</b>\n\nNo se pudo completar el análisis. Inténtalo de nuevo o sube la factura desde el panel web.';
+      if (isPhotoMessage) {
+        friendlyMsg += '\n\n💡 <b>Consejo:</b> Envía la foto como <b>archivo</b> (botón de clip → Archivo) para mejor calidad.';
+      }
+    }
+
+    if (statusMsg) {
+      await editMessage(botToken, chatId, statusMsg.message_id, friendlyMsg);
+    } else {
+      await sendMessage(botToken, chatId, friendlyMsg);
     }
   }
 }

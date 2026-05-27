@@ -38,9 +38,12 @@ export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  let processingPhase = 'init';
+
   try {
     const documentId = params.id;
 
+    processingPhase = 'db_load';
     const document = await prisma.document.findUnique({
       where: { id: documentId },
       include: { company: true, invoice: true, delivery_note: true },
@@ -64,6 +67,7 @@ export async function POST(
     });
 
     // Download file from Supabase Storage and convert to base64 for Gemini inline_data
+    processingPhase = 'storage_download';
     const fileUrl = await getFileUrl(document.cloud_storage_path, document.is_public);
     console.log(`[process] documentId=${documentId} storagePath=${document.cloud_storage_path} mimeType=${document.mime_type}`);
     console.log(`[process] Signed URL obtained (length=${fileUrl.length}). Fetching file...`);
@@ -94,6 +98,7 @@ export async function POST(
     };
 
     // AI Extraction — returns validated structured JSON, never writes to DB
+    processingPhase = 'ai_extract';
     const extraction = await extractInvoiceData(
       fileBase64,
       document.mime_type,
@@ -177,6 +182,7 @@ export async function POST(
       },
     });
 
+    processingPhase = 'db_insert';
     const invoiceData = {
       ...mapExtractionToInvoice(extraction, documentId, document.company_id),
       invoice_type: finalType,
@@ -244,8 +250,15 @@ export async function POST(
     // Telegram notification is handled by the webhook caller
     return NextResponse.json({ document: updatedDocument, invoice });
   } catch (error: any) {
-    console.error('[process] ❌ Error:', error?.message);
-    console.error('[process] Stack:', error?.stack);
+    const errorMessage: string = error?.message ?? 'Unknown error';
+
+    console.error(
+      '[process] ❌ FAILED',
+      `documentId=${params.id}`,
+      `phase=${processingPhase}`,
+      `error=${errorMessage}`,
+      '\nStack:', error?.stack,
+    );
 
     try {
       const doc = await prisma.document.update({
@@ -254,18 +267,54 @@ export async function POST(
         include: { company: true },
       });
 
+      // Record structured error in AuditLog for post-mortem analysis
+      await prisma.auditLog.create({
+        data: {
+          company_id: doc.company_id,
+          user_id: null,
+          entity_type: 'document',
+          entity_id: params.id,
+          action: 'process_error',
+          new_values: JSON.stringify({
+            phase: processingPhase,
+            original_filename: doc.original_filename,
+            source_channel: doc.source_channel,
+            mime_type: doc.mime_type,
+            storage_path: doc.cloud_storage_path,
+            error_message: errorMessage.slice(0, 500),
+            error_stack: error?.stack?.slice(0, 1000) ?? null,
+          }),
+        },
+      }).catch((auditErr: any) => {
+        console.error('[process] Failed to write AuditLog:', auditErr?.message);
+      });
+
+      // Determine user-friendly Telegram message based on phase and error type
       const botToken = process.env.TELEGRAM_BOT_TOKEN;
       if (doc.telegram_chat_id && botToken) {
         let msg: string;
-        if (error?.message?.includes('storage fetch failed')) {
-          msg = '❌ <b>Error guardando archivo</b>\n\nNo se pudo acceder al archivo guardado. Inténtalo de nuevo.';
-        } else if (error?.message?.includes('Gemini API error')) {
-          msg = '❌ <b>Error extrayendo datos</b>\n\nLa IA no pudo procesar el archivo. Inténtalo de nuevo.';
-        } else if (error?.message?.includes('No content') || error?.message?.includes('not valid JSON')) {
-          msg = '⚠️ <b>No se detectó factura válida</b>\n\nGemini no encontró datos de factura. Asegúrate de que la imagen sea legible y sea una factura.';
+        const isImage = doc.mime_type.startsWith('image/');
+
+        if (processingPhase === 'storage_download' || errorMessage.includes('storage fetch failed')) {
+          msg = '❌ <b>No se pudo subir el archivo</b>\n\nError al acceder al documento guardado. Inténtalo de nuevo.';
+        } else if (processingPhase === 'ai_extract') {
+          if (errorMessage.includes('SAFETY') || errorMessage.includes('safety')) {
+            msg = '⚠️ <b>Documento bloqueado</b>\n\nEl contenido fue bloqueado por los filtros de seguridad de la IA. Prueba con otro archivo.';
+          } else if (errorMessage.includes('429') || errorMessage.includes('rate limit') || errorMessage.includes('RESOURCE_EXHAUSTED')) {
+            msg = '⏳ <b>Servicio de IA ocupado</b>\n\nDemasiadas solicitudes. Espera unos minutos y vuelve a intentarlo.';
+          } else if (errorMessage.includes('No content') || errorMessage.includes('not valid JSON') || errorMessage.includes('valid JSON')) {
+            msg = isImage
+              ? '⚠️ <b>No se pudo leer la factura</b>\n\nLa imagen no tiene suficiente calidad o resolución. Asegúrate de que el texto sea legible y vuelve a intentarlo como archivo si la enviaste como foto.'
+              : '⚠️ <b>El documento no parece una factura</b>\n\nNo se encontraron datos de factura. Asegúrate de enviar una factura válida.';
+          } else {
+            msg = '❌ <b>Error extrayendo datos</b>\n\nLa IA no pudo procesar el archivo. Inténtalo de nuevo o sube la factura desde el panel web.';
+          }
+        } else if (processingPhase === 'db_insert') {
+          msg = '⚠️ <b>Error al guardar la factura</b>\n\nLos datos se extrajeron pero no se pudieron guardar. Inténtalo de nuevo.';
         } else {
           msg = '❌ <b>Error al procesar la factura</b>\n\nInténtalo de nuevo o sube la factura desde el panel web.';
         }
+
         if (doc.telegram_message_id) {
           await editMessage(botToken, doc.telegram_chat_id, doc.telegram_message_id, msg);
         } else {
@@ -277,7 +326,7 @@ export async function POST(
     }
 
     return NextResponse.json(
-      { message: `Processing failed: ${error?.message}` },
+      { message: `Processing failed: ${errorMessage}` },
       { status: 500 }
     );
   }

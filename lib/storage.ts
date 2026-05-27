@@ -10,6 +10,44 @@
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
+// ---------------------------------------------------------------------------
+// Filename sanitization
+// ---------------------------------------------------------------------------
+
+/**
+ * Produces a storage-safe filename: strips accents, replaces spaces and
+ * non-ASCII chars with hyphens, normalises to a single lowercase extension.
+ *
+ * "Envío Factura A418.PDF.pdf" → "envio-factura-a418.pdf"
+ */
+export function sanitizeFilename(filename: string): string {
+  // 1. Strip diacritics via NFD decomposition
+  const noAccents = filename.normalize('NFD').replace(/[̀-ͯ]/g, '');
+
+  // 2. Split on last dot to get extension (lowercase)
+  const lastDot = noAccents.lastIndexOf('.');
+  let nameOnly = lastDot > 0 ? noAccents.slice(0, lastDot) : noAccents;
+  const lastExt = lastDot > 0 ? noAccents.slice(lastDot).toLowerCase() : '';
+
+  // 3. Collapse double-extensions (e.g. ".PDF.pdf" left after rename): if the
+  //    remaining nameOnly still ends with a known extension, drop it.
+  const innerDot = nameOnly.lastIndexOf('.');
+  if (innerDot > 0) {
+    const innerExt = nameOnly.slice(innerDot).toLowerCase();
+    if (/^\.(pdf|jpg|jpeg|png|webp|gif|tiff?)$/.test(innerExt)) {
+      nameOnly = nameOnly.slice(0, innerDot);
+    }
+  }
+
+  // 4. Lowercase + replace any non-alphanumeric run with a single hyphen
+  const safeName = nameOnly
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'document';
+
+  return safeName + lastExt;
+}
+
 function getClient(): SupabaseClient {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -27,15 +65,15 @@ function bucket(): string {
 // ---------------------------------------------------------------------------
 
 export function buildUploadPath(companyId: string, filename: string): string {
-  return `uploads/${companyId}/${Date.now()}-${filename}`;
+  return `uploads/${companyId}/${Date.now()}-${sanitizeFilename(filename)}`;
 }
 
 export function buildTelegramPath(companyId: string, filename: string): string {
-  return `uploads/telegram/${companyId}/${Date.now()}-${filename}`;
+  return `uploads/telegram/${companyId}/${Date.now()}-${sanitizeFilename(filename)}`;
 }
 
 export function buildExportPath(companyId: string, filename: string): string {
-  return `exports/${companyId}/${Date.now()}-${filename}`;
+  return `exports/${companyId}/${Date.now()}-${sanitizeFilename(filename)}`;
 }
 
 // ---------------------------------------------------------------------------
