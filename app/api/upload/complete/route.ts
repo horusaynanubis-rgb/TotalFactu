@@ -1,7 +1,9 @@
-import { NextRequest, NextResponse, after } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/auth-options';
 import { prisma } from '@/lib/prisma';
+
+export const maxDuration = 90;
 
 export async function POST(request: NextRequest) {
   try {
@@ -62,23 +64,24 @@ export async function POST(request: NextRequest) {
 
     console.log(`[upload/complete] Document created: id=${document.id} company_id=${document.company_id}`);
 
-    // after() keeps the Vercel lambda alive after the response is sent so the
-    // process fetch actually completes. Replaces the old fire-and-forget which
-    // was killed by Vercel as soon as NextResponse was returned.
+    // Await the process call synchronously so Vercel doesn't kill the lambda
+    // before extraction completes. The old fire-and-forget was silently dropped.
     const processUrl = `${request.nextUrl.origin}/api/documents/${document.id}/process`;
-    after(async () => {
-      try {
-        const res = await fetch(processUrl, { method: 'POST' });
-        if (!res.ok) {
-          const body = await res.text().catch(() => '');
-          console.error(`[upload/complete] Process returned ${res.status}:`, body.slice(0, 300));
-        }
-      } catch (err: any) {
-        console.error('[upload/complete] Process trigger error:', err?.message);
+    try {
+      const processRes = await fetch(processUrl, { method: 'POST' });
+      if (!processRes.ok) {
+        const body = await processRes.text().catch(() => '');
+        console.error(`[upload/complete] Process returned ${processRes.status}:`, body.slice(0, 300));
+        // Document was created but processing failed — return the document so the
+        // frontend can show it with status 'failed' rather than silently hanging.
       }
-    });
+    } catch (processErr: any) {
+      console.error('[upload/complete] Process trigger error:', processErr?.message);
+    }
 
-    return NextResponse.json({ document });
+    // Re-read document so the response reflects the final processing_status.
+    const finalDocument = await prisma.document.findUnique({ where: { id: document.id } });
+    return NextResponse.json({ document: finalDocument ?? document });
   } catch (error: any) {
     console.error('[upload/complete] Error:', error);
     return NextResponse.json({ message: 'Failed to complete upload' }, { status: 500 });
