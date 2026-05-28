@@ -69,7 +69,8 @@ export async function POST(
     // Download file from Supabase Storage and convert to base64 for Gemini inline_data
     processingPhase = 'storage_download';
     const fileUrl = await getFileUrl(document.cloud_storage_path, document.is_public);
-    console.log(`[process] documentId=${documentId} storagePath=${document.cloud_storage_path} mimeType=${document.mime_type}`);
+    // DIAG: log stored MIME (comes from browser — may differ from actual file)
+    console.log(`[process:diag] documentId=${documentId} source_channel=${document.source_channel} storagePath=${document.cloud_storage_path} stored_mimeType=${document.mime_type}`);
     console.log(`[process] Signed URL obtained (length=${fileUrl.length}). Fetching file...`);
 
     const fileResponse = await fetch(fileUrl);
@@ -78,7 +79,31 @@ export async function POST(
     }
     const fileBuffer = await fileResponse.arrayBuffer();
     const fileBase64 = Buffer.from(fileBuffer).toString('base64');
-    console.log(`[process] File downloaded. size=${fileBuffer.byteLength} base64Length=${fileBase64.length}`);
+    // DIAG: log file size and actual content-type from storage
+    const storageMime = fileResponse.headers.get('content-type') ?? 'unknown';
+    const fileSizeKb = Math.round(fileBuffer.byteLength / 1024);
+    console.log(`[process:diag] File downloaded. sizeKb=${fileSizeKb} storage_content_type=${storageMime} base64Length=${fileBase64.length}`);
+
+    // DIAG: detect real MIME from magic bytes (PDF=%PDF, PNG=\x89PNG, JPEG=\xFF\xD8)
+    const magic = Buffer.from(fileBuffer).slice(0, 5).toString('hex');
+    const detectedMime =
+      magic.startsWith('255044462d') ? 'application/pdf' :
+      magic.startsWith('89504e47') ? 'image/png' :
+      magic.startsWith('ffd8ff') ? 'image/jpeg' :
+      'unknown';
+    if (detectedMime !== 'unknown' && !document.mime_type.includes(detectedMime.split('/')[1]) && detectedMime !== document.mime_type) {
+      console.warn(`[process:diag] ⚠️ MIME MISMATCH stored=${document.mime_type} detected_from_magic=${detectedMime}`);
+    } else {
+      console.log(`[process:diag] MIME check: stored=${document.mime_type} detected_from_magic=${detectedMime}`);
+    }
+
+    // Use detected MIME if stored one is generic, to improve Gemini accuracy
+    const effectiveMime = document.mime_type === 'application/octet-stream' && detectedMime !== 'unknown'
+      ? detectedMime
+      : document.mime_type;
+    if (effectiveMime !== document.mime_type) {
+      console.log(`[process:diag] Using corrected MIME: ${effectiveMime} (was: ${document.mime_type})`);
+    }
 
     // Build AI provider config
     const companyProvider = document.company?.ai_provider;
@@ -88,8 +113,12 @@ export async function POST(
       !!document.company?.ai_api_endpoint;
     const hasLocalConfig = companyProvider === 'local';
     const resolvedProvider = hasExternalConfig ? 'external' : hasLocalConfig ? 'local' : 'gemini';
+    const resolvedModel = resolvedProvider === 'gemini'
+      ? (process.env.GEMINI_MODEL || 'gemini-2.5-flash-preview-04-17')
+      : (process.env.OLLAMA_MODEL || 'qwen2.5:14b');
 
-    console.log(`[process] AI provider resolved: ${resolvedProvider} (company setting: ${companyProvider})`);
+    // DIAG: log provider + model
+    console.log(`[process:diag] provider=${resolvedProvider} model=${resolvedModel} company_ai_setting=${companyProvider ?? 'null'}`);
 
     const aiConfig = {
       provider: resolvedProvider as 'local' | 'external' | 'gemini',
@@ -101,7 +130,7 @@ export async function POST(
     processingPhase = 'ai_extract';
     const extraction = await extractInvoiceData(
       fileBase64,
-      document.mime_type,
+      effectiveMime,
       document.original_filename,
       aiConfig
     );

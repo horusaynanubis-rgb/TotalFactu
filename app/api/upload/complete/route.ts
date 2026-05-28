@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/auth-options';
 import { prisma } from '@/lib/prisma';
@@ -62,10 +62,21 @@ export async function POST(request: NextRequest) {
 
     console.log(`[upload/complete] Document created: id=${document.id} company_id=${document.company_id}`);
 
-    // Fire-and-forget — the process endpoint updates the document status async
-    fetch(`${request.nextUrl.origin}/api/documents/${document.id}/process`, {
-      method: 'POST',
-    }).catch((err: any) => console.error('[upload/complete] Process trigger error:', err));
+    // after() keeps the Vercel lambda alive after the response is sent so the
+    // process fetch actually completes. Replaces the old fire-and-forget which
+    // was killed by Vercel as soon as NextResponse was returned.
+    const processUrl = `${request.nextUrl.origin}/api/documents/${document.id}/process`;
+    after(async () => {
+      try {
+        const res = await fetch(processUrl, { method: 'POST' });
+        if (!res.ok) {
+          const body = await res.text().catch(() => '');
+          console.error(`[upload/complete] Process returned ${res.status}:`, body.slice(0, 300));
+        }
+      } catch (err: any) {
+        console.error('[upload/complete] Process trigger error:', err?.message);
+      }
+    });
 
     return NextResponse.json({ document });
   } catch (error: any) {
