@@ -68,6 +68,17 @@ export async function POST(request: NextRequest) {
       successPath = '/dashboard/gestoria?checkout=success';
       cancelPath = '/dashboard/billing';
 
+      // Offer 60-day trial only if company has never had a Stripe subscription
+      if (companyId) {
+        const existingGestoriaSub = await prisma.subscription.findFirst({
+          where: { company_id: companyId },
+          select: { stripe_subscription_id: true },
+        });
+        if (!existingGestoriaSub?.stripe_subscription_id) {
+          subscriptionData = { trial_period_days: 60 };
+        }
+      }
+
     } else if (type === 'plan' && plan === 'profesional') {
       if (!session || !companyId) {
         return NextResponse.json({ error: 'Debes estar autenticado para mejorar tu plan' }, { status: 401 });

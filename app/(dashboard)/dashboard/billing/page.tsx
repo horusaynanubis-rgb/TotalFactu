@@ -307,6 +307,9 @@ export default function BillingPage() {
                     </span>
                   )}
                 </Button>
+                <p className="text-xs text-center text-muted-foreground mt-3">
+                  Primeros 2 meses gratis. Se solicitará un método de pago seguro mediante Stripe. El cobro comenzará automáticamente después del periodo de prueba.
+                </p>
               </CardContent>
             </Card>
           ))}
