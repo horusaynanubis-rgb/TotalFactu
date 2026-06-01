@@ -329,8 +329,10 @@ export async function POST(
         } else if (processingPhase === 'ai_extract') {
           if (errorMessage.includes('SAFETY') || errorMessage.includes('safety')) {
             msg = '⚠️ <b>Documento bloqueado</b>\n\nEl contenido fue bloqueado por los filtros de seguridad de la IA. Prueba con otro archivo.';
-          } else if (errorMessage.includes('429') || errorMessage.includes('rate limit') || errorMessage.includes('RESOURCE_EXHAUSTED')) {
-            msg = '⏳ <b>Servicio de IA ocupado</b>\n\nDemasiadas solicitudes. Espera unos minutos y vuelve a intentarlo.';
+          } else if (errorMessage.includes('MAX_TOKENS') || errorMessage.includes('demasiadas líneas')) {
+            msg = '⚠️ <b>Factura demasiado larga</b>\n\nLa factura tiene demasiadas líneas y no se pudo extraer completa.\n\nInténtalo desde el panel web o contacta con soporte.';
+          } else if (errorMessage.includes('429') || errorMessage.includes('503') || errorMessage.includes('rate limit') || errorMessage.includes('RESOURCE_EXHAUSTED') || errorMessage.includes('UNAVAILABLE') || errorMessage.includes('high demand')) {
+            msg = '⏳ <b>Servicio de IA ocupado temporalmente</b>\n\nEl servicio está bajo alta demanda. Inténtalo de nuevo en unos minutos.';
           } else if (errorMessage.includes('No content') || errorMessage.includes('not valid JSON') || errorMessage.includes('valid JSON')) {
             msg = isImage
               ? '⚠️ <b>No se pudo leer la factura</b>\n\nLa imagen no tiene suficiente calidad o resolución. Asegúrate de que el texto sea legible y vuelve a intentarlo como archivo si la enviaste como foto.'

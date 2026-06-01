@@ -130,6 +130,16 @@ function getProviderConfig(config?: AIProviderConfig): { apiUrl: string; apiKey:
   };
 }
 
+// Retry configuration for transient Gemini errors (429 / 503 / UNAVAILABLE)
+const GEMINI_MAX_RETRIES = 3;
+const GEMINI_RETRY_DELAYS_MS = [1000, 3000]; // delay before attempt 2, then attempt 3
+
+function isGeminiRetriableError(status: number, body: string): boolean {
+  if (status === 429 || status === 503) return true;
+  if (body.includes('UNAVAILABLE') || body.includes('high demand') || body.includes('RESOURCE_EXHAUSTED')) return true;
+  return false;
+}
+
 async function extractWithGemini(
   fileBase64: string,
   mimeType: string,
@@ -139,10 +149,11 @@ async function extractWithGemini(
 
   const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash-preview-04-17';
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const maxOutputTokens = 32000;
 
   // DIAG: file size + provider info
   const fileSizeKb = Math.round((fileBase64.length * 3) / 4 / 1024);
-  console.log(`[gemini:diag] provider=gemini model=${model} mimeType=${mimeType} base64Length=${fileBase64.length} estimatedSizeKb=${fileSizeKb}`);
+  console.log(`[gemini:diag] provider=gemini model=${model} mimeType=${mimeType} base64Length=${fileBase64.length} estimatedSizeKb=${fileSizeKb} maxOutputTokens=${maxOutputTokens}`);
 
   const body = {
     contents: [{
@@ -153,70 +164,96 @@ async function extractWithGemini(
     }],
     generationConfig: {
       responseMimeType: 'application/json',
-      maxOutputTokens: 4000,
+      maxOutputTokens,
     },
   };
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  let lastError: Error = new Error('No attempts made');
 
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => response.statusText);
-    // Log full error body for debugging but throw a truncated message (body can be huge)
-    console.error(`[gemini] HTTP ${response.status} error body (truncated):`, errorText.slice(0, 500));
-    throw new Error(`Gemini API error (${response.status}): ${errorText.slice(0, 300)}`);
+  for (let attempt = 1; attempt <= GEMINI_MAX_RETRIES; attempt++) {
+    if (attempt > 1) {
+      const delayMs = GEMINI_RETRY_DELAYS_MS[attempt - 2] ?? 3000;
+      console.log(`[gemini:retry] attempt=${attempt}/${GEMINI_MAX_RETRIES} waiting ${delayMs}ms before retry`);
+      await new Promise(r => setTimeout(r, delayMs));
+    }
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => response.statusText);
+      console.error(`[gemini] HTTP ${response.status} attempt=${attempt}/${GEMINI_MAX_RETRIES} error body (truncated):`, errorText.slice(0, 500));
+
+      const retriable = isGeminiRetriableError(response.status, errorText);
+      lastError = new Error(`Gemini API error (${response.status}): ${errorText.slice(0, 300)}`);
+
+      if (retriable && attempt < GEMINI_MAX_RETRIES) {
+        continue;
+      }
+      throw lastError;
+    }
+
+    const data = await response.json();
+    const finishReason: string = data?.candidates?.[0]?.finishReason ?? 'UNKNOWN';
+    const usageMetadata = data?.usageMetadata ?? null;
+    console.log(`[gemini:diag] candidates=${data?.candidates?.length} finishReason=${finishReason} usage=${JSON.stringify(usageMetadata)}`);
+
+    // MAX_TOKENS: output was truncated → JSON incomplete → no point retrying with same config
+    if (finishReason === 'MAX_TOKENS') {
+      const inputTokens = usageMetadata?.promptTokenCount ?? 'unknown';
+      const outputTokens = usageMetadata?.candidatesTokenCount ?? 'unknown';
+      console.error(
+        `[gemini:diag] ⚠️ finishReason=MAX_TOKENS — output truncated`,
+        `model=${model}`,
+        `maxOutputTokens=${maxOutputTokens}`,
+        `mimeType=${mimeType}`,
+        `inputTokens=${inputTokens}`,
+        `outputTokens=${outputTokens}`,
+      );
+      throw new Error('Gemini:MAX_TOKENS: La factura tiene demasiadas líneas para el límite actual de extracción.');
+    }
+
+    // Blocked by safety or recitation filters — non-retriable
+    if (finishReason === 'SAFETY') {
+      console.error('[gemini:diag] Response blocked by SAFETY filter');
+      throw new Error('Gemini API error (SAFETY): response blocked by content safety filters');
+    }
+    if (finishReason === 'RECITATION') {
+      console.error('[gemini:diag] Response blocked by RECITATION filter');
+      throw new Error('Gemini API error (RECITATION): response blocked due to recitation');
+    }
+
+    const content = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    // DIAG: log first 500 chars of raw AI response
+    console.log(`[gemini:diag] response_first_500: ${String(content ?? '').slice(0, 500)}`);
+
+    if (!content) {
+      console.error('[gemini:diag] No content in response. finishReason:', finishReason, 'Full data:', JSON.stringify(data).slice(0, 500));
+      throw new Error(`No content in Gemini response (finishReason=${finishReason})`);
+    }
+
+    // DIAG: detect if Gemini wrapped JSON in markdown despite responseMimeType=application/json
+    const hasMarkdownFence = content.includes('```');
+    if (hasMarkdownFence) {
+      console.warn('[gemini:diag] ⚠️ Response contains markdown fences — responseMimeType ignored by model');
+    }
+
+    let rawJson: any;
+    try {
+      rawJson = JSON.parse(content);
+    } catch (parseErr) {
+      // DIAG: log full 500 chars + finishReason for diagnosis
+      console.error(`[gemini:diag] JSON parse FAILED finishReason=${finishReason} hasMarkdown=${hasMarkdownFence} content_first_500: ${content.slice(0, 500)}`);
+      throw new Error('Gemini response is not valid JSON');
+    }
+
+    return validateExtraction(rawJson);
   }
 
-  const data = await response.json();
-  const finishReason: string = data?.candidates?.[0]?.finishReason ?? 'UNKNOWN';
-  const usageMetadata = data?.usageMetadata ?? null;
-  console.log(`[gemini:diag] candidates=${data?.candidates?.length} finishReason=${finishReason} usage=${JSON.stringify(usageMetadata)}`);
-
-  // Blocked by safety filters or other non-STOP reasons
-  if (finishReason === 'SAFETY') {
-    console.error('[gemini:diag] Response blocked by SAFETY filter');
-    throw new Error('Gemini API error (SAFETY): response blocked by content safety filters');
-  }
-  if (finishReason === 'RECITATION') {
-    console.error('[gemini:diag] Response blocked by RECITATION filter');
-    throw new Error('Gemini API error (RECITATION): response blocked due to recitation');
-  }
-  // DIAG: MAX_TOKENS means truncated JSON → guaranteed parse failure
-  if (finishReason === 'MAX_TOKENS') {
-    console.error('[gemini:diag] ⚠️ finishReason=MAX_TOKENS — response was truncated, JSON will be incomplete');
-  }
-
-  const content = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  // DIAG: log first 500 chars of raw AI response
-  console.log(`[gemini:diag] response_first_500: ${String(content ?? '').slice(0, 500)}`);
-
-  if (!content) {
-    console.error('[gemini:diag] No content in response. finishReason:', finishReason, 'Full data:', JSON.stringify(data).slice(0, 500));
-    throw new Error(`No content in Gemini response (finishReason=${finishReason})`);
-  }
-
-  // DIAG: detect if Gemini wrapped JSON in markdown despite responseMimeType=application/json
-  const hasMarkdownFence = content.includes('```');
-  if (hasMarkdownFence) {
-    console.warn('[gemini:diag] ⚠️ Response contains markdown fences — responseMimeType ignored by model');
-  }
-
-  let rawJson: any;
-  try {
-    rawJson = JSON.parse(content);
-  } catch (parseErr) {
-    // DIAG: log full 500 chars + finishReason for diagnosis
-    console.error(`[gemini:diag] JSON parse FAILED finishReason=${finishReason} hasMarkdown=${hasMarkdownFence} content_first_500: ${content.slice(0, 500)}`);
-    const reason = finishReason === 'MAX_TOKENS'
-      ? 'Gemini response truncated by token limit (MAX_TOKENS)'
-      : 'Gemini response is not valid JSON';
-    throw new Error(reason);
-  }
-
-  return validateExtraction(rawJson);
+  throw lastError;
 }
 
 /**
