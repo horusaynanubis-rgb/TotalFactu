@@ -18,6 +18,8 @@ import {
   ClipboardList,
   Download,
   Building2,
+  Rocket,
+  Gift,
 } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n/context';
 import { LanguageSelector } from '@/components/language-selector';
@@ -65,6 +67,38 @@ export default function LandingPage() {
           </div>
         </div>
       </header>
+
+      {/* Promotional Banner */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8">
+        <div className="bg-gradient-to-r from-blue-600 via-blue-700 to-indigo-700 rounded-2xl px-6 py-5 text-white shadow-lg shadow-blue-500/30 border border-blue-500/20">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-5">
+            <div className="flex items-center gap-3">
+              <div className="bg-white/20 rounded-xl p-2.5 flex-shrink-0">
+                <Rocket className="h-6 w-6 text-yellow-300" />
+              </div>
+              <div>
+                <div className="text-yellow-300 font-bold text-xs uppercase tracking-widest mb-1">
+                  Promoción de lanzamiento
+                </div>
+                <div className="text-white text-sm sm:text-base font-medium leading-snug">
+                  Prueba TotalFactu sin compromiso y empieza a automatizar tu contabilidad hoy mismo
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 flex-shrink-0">
+              <div className="text-center px-5 py-2.5 bg-white/15 rounded-xl border border-white/25">
+                <div className="text-2xl font-bold text-yellow-300 leading-none">30 días</div>
+                <div className="text-xs text-blue-100 mt-0.5">gratis · autónomos y empresas</div>
+              </div>
+              <div className="text-blue-300 font-light text-xl hidden sm:block">·</div>
+              <div className="text-center px-5 py-2.5 bg-white/15 rounded-xl border border-white/25">
+                <div className="text-2xl font-bold text-yellow-300 leading-none">60 días</div>
+                <div className="text-xs text-blue-100 mt-0.5">gratis · gestorías</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Hero Section */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 text-center">
@@ -216,7 +250,7 @@ export default function LandingPage() {
                 </ul>
                 <Link href="/signup?plan=demo">
                   <Button className="w-full" variant="outline">
-                    {t.common.getStarted}
+                    Probar gratis
                   </Button>
                 </Link>
               </CardContent>
@@ -232,7 +266,13 @@ export default function LandingPage() {
               <CardHeader className="text-center pb-6">
                 <CardTitle className="text-2xl mb-1">Profesional</CardTitle>
                 <CardDescription className="text-sm">Para autónomos y PYMEs</CardDescription>
-                <div className="mt-4">
+                <div className="mt-3 mb-1 flex justify-center">
+                  <span className="inline-flex items-center gap-1.5 bg-green-50 text-green-700 border border-green-200 text-xs font-bold px-3 py-1 rounded-full">
+                    <Gift className="h-3.5 w-3.5" />
+                    30 días GRATIS
+                  </span>
+                </div>
+                <div className="mt-2">
                   <span className="text-4xl font-bold">€14,99</span>
                   <span className="text-gray-600">{t.common.perMonth}</span>
                 </div>
@@ -248,7 +288,7 @@ export default function LandingPage() {
                 </ul>
                 <Link href="/signup?plan=profesional">
                   <Button className="w-full">
-                    {t.common.getStarted}
+                    Empieza gratis <ArrowRight className="ml-1.5 h-4 w-4" />
                   </Button>
                 </Link>
               </CardContent>
@@ -262,7 +302,13 @@ export default function LandingPage() {
                 </div>
                 <CardTitle className="text-2xl mb-1">Gestoría</CardTitle>
                 <CardDescription className="text-sm">Para despachos y gestorías con múltiples clientes</CardDescription>
-                <div className="mt-4">
+                <div className="mt-3 mb-1 flex justify-center">
+                  <span className="inline-flex items-center gap-1.5 bg-blue-50 text-blue-700 border border-blue-200 text-xs font-bold px-3 py-1 rounded-full">
+                    <Rocket className="h-3.5 w-3.5" />
+                    60 días GRATIS
+                  </span>
+                </div>
+                <div className="mt-2">
                   <span className="text-2xl font-bold text-primary">Packs de licencias</span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">10 · 30 · 50 clientes</p>

@@ -12,7 +12,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { CheckCircle, Users, Loader2 } from 'lucide-react';
+import { CheckCircle, Users, Loader2, Rocket } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n/context';
 import toast from 'react-hot-toast';
 
@@ -94,6 +94,17 @@ export function GestoriaContactPopup({ open, onClose }: Props) {
             {t.landing.gestoriaPopupSubtitle}
           </DialogDescription>
         </DialogHeader>
+
+        {/* Promo badge */}
+        <div className="flex items-center gap-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm font-medium px-4 py-3 rounded-xl mt-1">
+          <div className="bg-white/20 rounded-lg p-1.5 flex-shrink-0">
+            <Rocket className="h-4 w-4 text-yellow-300" />
+          </div>
+          <span>
+            <span className="font-bold text-yellow-300">60 días GRATIS</span>
+            {' '}para nuevas gestorías — Promoción de lanzamiento
+          </span>
+        </div>
 
         {/* Contact fields */}
         <div className="grid sm:grid-cols-3 gap-4 mt-2">
