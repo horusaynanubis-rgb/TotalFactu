@@ -68,15 +68,65 @@ export async function POST(request: NextRequest) {
       successPath = '/dashboard/gestoria?checkout=success';
       cancelPath = '/dashboard/billing';
 
-      // Offer 60-day trial only if company has never had a Stripe subscription
+      // ── Trial eligibility for gestoria (60 days) ────────────────────────────
+      // Source of truth: LicensePack table, NOT Subscription.
+      // The webhook writes stripe_subscription_id only to LicensePack for gestoria
+      // checkouts, so checking Subscription.stripe_subscription_id is incorrect here.
+      // An abandoned Stripe session never fires the webhook → no LicensePack created
+      // → correctly treated as eligible.
+      let gestoriaTrialDays = 0;
+      let gestoriaTrialReason = 'skipped_no_identifier';
+      let gestoriaCompanyType = 'unknown';
+
       if (companyId) {
-        const existingGestoriaSub = await prisma.subscription.findFirst({
-          where: { company_id: companyId },
-          select: { stripe_subscription_id: true },
-        });
-        if (!existingGestoriaSub?.stripe_subscription_id) {
-          subscriptionData = { trial_period_days: 60 };
+        // Authenticated: check by companyId directly
+        const [company, existingPackCount] = await Promise.all([
+          prisma.company.findUnique({ where: { id: companyId }, select: { company_type: true } }),
+          prisma.licensePack.count({ where: { gestoria_company_id: companyId } }),
+        ]);
+        gestoriaCompanyType = company?.company_type ?? 'unknown';
+        if (existingPackCount === 0) {
+          gestoriaTrialDays = 60;
+          gestoriaTrialReason = 'eligible_no_prior_pack';
+        } else {
+          gestoriaTrialReason = `blocked_prior_packs:${existingPackCount}`;
         }
+      } else if (contact?.email) {
+        // Unauthenticated (landing page form): look up existing account by contact email
+        const emailUser = await prisma.user.findUnique({
+          where: { email: contact.email },
+          select: { memberships: { take: 1, select: { company_id: true } } },
+        });
+        const emailCompanyId = emailUser?.memberships?.[0]?.company_id ?? null;
+
+        if (emailCompanyId) {
+          const existingPackCount = await prisma.licensePack.count({
+            where: { gestoria_company_id: emailCompanyId },
+          });
+          if (existingPackCount === 0) {
+            gestoriaTrialDays = 60;
+            gestoriaTrialReason = 'eligible_email_lookup_no_prior_pack';
+          } else {
+            gestoriaTrialReason = `blocked_email_lookup_prior_packs:${existingPackCount}`;
+          }
+        } else {
+          // No account found for this email → new customer, grant trial
+          gestoriaTrialDays = 60;
+          gestoriaTrialReason = 'eligible_new_customer_no_account';
+        }
+      } else {
+        // No session and no contact email — grant trial (public form, unverifiable)
+        gestoriaTrialDays = 60;
+        gestoriaTrialReason = 'eligible_no_session_no_email';
+      }
+
+      console.log(
+        `[stripe/checkout] gestoria_pack trial — companyId=${companyId ?? 'none'} companyType=${gestoriaCompanyType}` +
+        ` email=${effectiveEmail ?? 'none'} trialDays=${gestoriaTrialDays} reason=${gestoriaTrialReason}`
+      );
+
+      if (gestoriaTrialDays > 0) {
+        subscriptionData = { trial_period_days: gestoriaTrialDays };
       }
 
     } else if (type === 'plan' && plan === 'profesional') {
@@ -106,13 +156,26 @@ export async function POST(request: NextRequest) {
       successPath = '/dashboard?checkout=success&plan=profesional';
       cancelPath = '/dashboard/billing';
 
-      // Offer 30-day trial only if company has never had a Stripe subscription
+      // ── Trial eligibility for profesional (30 days) ──────────────────────────
+      // Deny if a Stripe subscription was ever completed (stripe_subscription_id set).
+      // An abandoned checkout does not create a subscription → eligible.
       const existingSub = await prisma.subscription.findFirst({
         where: { company_id: companyId },
-        select: { stripe_subscription_id: true },
+        select: { stripe_subscription_id: true, status: true },
       });
-      if (!existingSub?.stripe_subscription_id) {
-        subscriptionData = { trial_period_days: 30 };
+      const profTrialDays = existingSub?.stripe_subscription_id ? 0 : 30;
+      const profTrialReason = existingSub?.stripe_subscription_id
+        ? `blocked_existing_sub_id status:${existingSub.status}`
+        : 'eligible_no_prior_sub_id';
+
+      console.log(
+        `[stripe/checkout] profesional trial — companyId=${companyId}` +
+        ` existingSubStatus=${existingSub?.status ?? 'none'} hasStripeSubId=${!!existingSub?.stripe_subscription_id}` +
+        ` trialDays=${profTrialDays} reason=${profTrialReason}`
+      );
+
+      if (profTrialDays > 0) {
+        subscriptionData = { trial_period_days: profTrialDays };
       }
 
     } else {
@@ -129,7 +192,10 @@ export async function POST(request: NextRequest) {
       ...(subscriptionData && { subscription_data: subscriptionData }),
     });
 
-    console.log(`[stripe/checkout] Session creada: ${checkoutSession.id} para ${effectiveEmail}`);
+    console.log(
+      `[stripe/checkout] Session creada: ${checkoutSession.id}` +
+      ` email=${effectiveEmail} trialDays=${subscriptionData?.trial_period_days ?? 0}`
+    );
     return NextResponse.json({ url: checkoutSession.url });
 
   } catch (error: any) {
