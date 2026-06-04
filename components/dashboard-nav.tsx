@@ -22,6 +22,7 @@ import {
   ClipboardList,
   Mail,
   Truck,
+  Inbox,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useState, useEffect } from 'react';
@@ -41,12 +42,20 @@ export function DashboardNav() {
   const isAdmin = adminEmails.includes(session?.user?.email ?? '');
 
   const [dashboardMode, setDashboardMode] = useState<DashboardMode>('gestoria');
+  const [unreadMessages, setUnreadMessages] = useState(0);
 
   useEffect(() => {
     const stored = localStorage.getItem('totalfactu_dashboard_mode') as DashboardMode | null;
     if (stored === 'empresa' || stored === 'gestoria') {
       setDashboardMode(stored);
     }
+  }, []);
+
+  useEffect(() => {
+    fetch('/api/messages')
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => { if (data?.unreadCount) setUnreadMessages(data.unreadCount); })
+      .catch(() => {});
   }, []);
 
   const handleModeChange = (mode: DashboardMode) => {
@@ -78,6 +87,7 @@ export function DashboardNav() {
         { name: 'Proveedores', href: '/dashboard/suppliers', icon: Truck, matchPrefix: true },
         { name: 'Cola de Revisión', href: '/dashboard/review', icon: ListChecks },
         { name: t.nav.exports, href: '/dashboard/exports', icon: Download },
+        { name: 'Mensajes', href: '/dashboard/messages', icon: Inbox, unreadBadge: unreadMessages > 0 ? unreadMessages : undefined },
         ...(isAdmin ? [{ name: 'Admin Demo', href: '/dashboard/admin/demo', icon: ShieldCheck, adminBadge: true }] : []),
         { name: t.nav.settings, href: '/dashboard/settings', icon: Settings },
         { name: t.nav.billing, href: '/dashboard/billing', icon: CreditCard },
@@ -157,6 +167,11 @@ export function DashboardNav() {
                     {(item as any)?.adminBadge && (
                       <Badge variant="outline" className="ml-2 text-xs px-1.5 py-0 border-orange-400 text-orange-600">
                         ADMIN
+                      </Badge>
+                    )}
+                    {(item as any)?.unreadBadge && (
+                      <Badge className="ml-2 text-xs px-1.5 py-0 bg-red-500 hover:bg-red-500 text-white">
+                        {(item as any).unreadBadge}
                       </Badge>
                     )}
                   </Link>
@@ -281,6 +296,11 @@ export function DashboardNav() {
                     {(item as any)?.adminBadge && (
                       <Badge variant="outline" className="ml-2 text-xs px-1.5 py-0 border-orange-400 text-orange-600">
                         ADMIN
+                      </Badge>
+                    )}
+                    {(item as any)?.unreadBadge && (
+                      <Badge className="ml-2 text-xs px-1.5 py-0 bg-red-500 hover:bg-red-500 text-white">
+                        {(item as any).unreadBadge}
                       </Badge>
                     )}
                   </Link>

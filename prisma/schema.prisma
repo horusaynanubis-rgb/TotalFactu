@@ -96,6 +96,8 @@ model Company {
   assigned_licenses     License[]           // licenses assigned to this company (client side)
   suppliers             Supplier[]
   invoice_lines         InvoiceLine[]
+  sent_messages         GestoriaMessage[]   @relation("SentMessages")
+  received_messages     GestoriaMessage[]   @relation("ReceivedMessages")
 
   @@index([tax_id])
   @@index([company_type])
@@ -404,4 +406,26 @@ model LicenseInvitation {
   @@index([token])
   @@index([email])
   @@index([status])
+}
+
+// --- Gestoria → Client messaging ---
+
+model GestoriaMessage {
+  id                  String    @id @default(cuid())
+  gestoria_company_id String
+  client_company_id   String
+  subject             String    // motivo: General, Revisión factura, etc.
+  body                String
+  read_at             DateTime?
+  email_sent          Boolean   @default(false)
+  telegram_sent       Boolean   @default(false)
+  created_at          DateTime  @default(now())
+
+  gestoria_company Company @relation("SentMessages",     fields: [gestoria_company_id], references: [id], onDelete: Cascade)
+  client_company   Company @relation("ReceivedMessages", fields: [client_company_id],   references: [id], onDelete: Cascade)
+
+  @@index([gestoria_company_id])
+  @@index([client_company_id])
+  @@index([read_at])
+  @@index([created_at])
 }

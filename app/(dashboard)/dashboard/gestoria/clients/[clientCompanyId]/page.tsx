@@ -33,8 +33,10 @@ import {
   Receipt,
   AlertTriangle,
   LayoutDashboard,
+  Inbox,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { SendMessageModal } from '@/components/gestoria/send-message-modal';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -104,6 +106,16 @@ interface ExportRow {
   company: { export_email: string };
 }
 
+interface MessageRow {
+  id: string;
+  subject: string;
+  body: string;
+  read_at: string | null;
+  email_sent: boolean;
+  telegram_sent: boolean;
+  created_at: string;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function docStatusBadge(status: string) {
@@ -171,6 +183,11 @@ export default function ClientDetailPage() {
   const [invoices, setInvoices] = useState<InvoiceRow[] | null>(null);
   const [loadingInvoices, setLoadingInvoices] = useState(false);
 
+  // Messages (lazy — loaded on first activation of Mensajes tab)
+  const [messages, setMessages] = useState<MessageRow[] | null>(null);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [showMessageModal, setShowMessageModal] = useState(false);
+
   // Per-document action loading
   const [actionDocId, setActionDocId] = useState<string | null>(null);
   const [downloadingExportId, setDownloadingExportId] = useState<string | null>(null);
@@ -219,9 +236,20 @@ export default function ClientDetailPage() {
       .finally(() => setLoadingInvoices(false));
   };
 
+  const loadMessages = () => {
+    if (messages !== null || loadingMessages) return;
+    setLoadingMessages(true);
+    fetch(`/api/gestoria/clients/${params.clientCompanyId}/messages`)
+      .then((r) => r.json())
+      .then((data) => setMessages(data.messages ?? []))
+      .catch(() => toast.error('Error cargando mensajes'))
+      .finally(() => setLoadingMessages(false));
+  };
+
   const handleTabChange = (tab: string) => {
     if (tab === 'documentos' || tab === 'revision') loadDocuments();
     if (tab === 'facturas') loadInvoices();
+    if (tab === 'mensajes') loadMessages();
   };
 
   const handleDocumentAction = async (docId: string, mode: 'view' | 'download') => {
@@ -333,6 +361,10 @@ export default function ClientDetailPage() {
                 {pendingReviews}
               </Badge>
             )}
+          </TabsTrigger>
+          <TabsTrigger value="mensajes">
+            <Inbox className="h-4 w-4 mr-1.5" />
+            Mensajes
           </TabsTrigger>
         </TabsList>
 
@@ -724,7 +756,100 @@ export default function ClientDetailPage() {
             </CardContent>
           </Card>
         </TabsContent>
+        {/* ── MENSAJES ────────────────────────────────────────────────────── */}
+        <TabsContent value="mensajes" className="mt-6">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Inbox className="h-4 w-4" />Mensajes enviados
+              </CardTitle>
+              <Button size="sm" onClick={() => setShowMessageModal(true)}>
+                <Send className="h-3.5 w-3.5 mr-1.5" />
+                Nuevo mensaje
+              </Button>
+            </CardHeader>
+            <CardContent className="p-0">
+              {loadingMessages ? (
+                <div className="flex justify-center py-12">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : messages === null || messages.length === 0 ? (
+                <div className="py-12 text-center text-muted-foreground">
+                  <Inbox className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                  <p className="text-sm">Aún no has enviado ningún mensaje a este cliente.</p>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Fecha</TableHead>
+                      <TableHead>Motivo</TableHead>
+                      <TableHead>Mensaje</TableHead>
+                      <TableHead>Entrega</TableHead>
+                      <TableHead>Leído</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {messages.map((msg) => (
+                      <TableRow key={msg.id}>
+                        <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                          {new Date(msg.created_at).toLocaleDateString('es-ES', {
+                            day: '2-digit',
+                            month: '2-digit',
+                            year: 'numeric',
+                          })}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="text-xs">{msg.subject}</Badge>
+                        </TableCell>
+                        <TableCell className="text-sm max-w-xs truncate text-muted-foreground">
+                          {msg.body}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex gap-1">
+                            {msg.email_sent && (
+                              <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 text-xs">Email</Badge>
+                            )}
+                            {msg.telegram_sent && (
+                              <Badge className="bg-sky-100 text-sky-700 hover:bg-sky-100 text-xs">Telegram</Badge>
+                            )}
+                            {!msg.email_sent && !msg.telegram_sent && (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {msg.read_at ? (
+                            <div className="flex items-center gap-1 text-green-600 text-xs">
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              {new Date(msg.read_at).toLocaleDateString('es-ES')}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Pendiente</span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
+
+      {showMessageModal && detail && (
+        <SendMessageModal
+          open={showMessageModal}
+          onClose={() => {
+            setShowMessageModal(false);
+            setMessages(null);
+            loadMessages();
+          }}
+          clientCompanyId={params.clientCompanyId}
+          clientName={detail.company.name}
+        />
+      )}
     </div>
   );
 }

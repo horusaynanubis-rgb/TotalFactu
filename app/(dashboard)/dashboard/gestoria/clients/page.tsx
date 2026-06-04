@@ -29,8 +29,10 @@ import {
   ArrowLeft,
   RotateCcw,
   Download,
+  Send,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { SendMessageModal } from '@/components/gestoria/send-message-modal';
 
 interface ClientRow {
   licenseId: string;
@@ -103,6 +105,7 @@ export default function GestoriaClientsPage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
+  const [messageTarget, setMessageTarget] = useState<{ id: string; name: string } | null>(null);
 
   const companyType = (session?.user as any)?.companyType;
 
@@ -349,6 +352,16 @@ export default function GestoriaClientsPage() {
                             </Link>
                           </Button>
                         )}
+                        {client.company?.id && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setMessageTarget({ id: client.company!.id, name: client.company!.name })}
+                          >
+                            <Send className="h-3.5 w-3.5 mr-1" />
+                            Mensaje
+                          </Button>
+                        )}
                         {!client.acceptedAt && client.email && (
                           <Button
                             variant="ghost"
@@ -375,6 +388,15 @@ export default function GestoriaClientsPage() {
             </Table>
           </CardContent>
         </Card>
+      )}
+
+      {messageTarget && (
+        <SendMessageModal
+          open={!!messageTarget}
+          onClose={() => setMessageTarget(null)}
+          clientCompanyId={messageTarget.id}
+          clientName={messageTarget.name}
+        />
       )}
     </div>
   );
