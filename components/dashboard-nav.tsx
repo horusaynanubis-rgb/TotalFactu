@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { signOut, useSession } from 'next-auth/react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -24,12 +24,15 @@ import {
   Truck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useTranslation } from '@/lib/i18n/context';
 import { LanguageSelector } from '@/components/language-selector';
 
+type DashboardMode = 'empresa' | 'gestoria';
+
 export function DashboardNav() {
   const pathname = usePathname();
+  const router = useRouter();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { t } = useTranslation();
   const { data: session } = useSession();
@@ -37,7 +40,29 @@ export function DashboardNav() {
   const adminEmails = (process.env.NEXT_PUBLIC_ADMIN_EMAILS ?? '').split(',').map((e) => e.trim()).filter(Boolean);
   const isAdmin = adminEmails.includes(session?.user?.email ?? '');
 
-  const navigation = isGestoria
+  const [dashboardMode, setDashboardMode] = useState<DashboardMode>('gestoria');
+
+  useEffect(() => {
+    const stored = localStorage.getItem('totalfactu_dashboard_mode') as DashboardMode | null;
+    if (stored === 'empresa' || stored === 'gestoria') {
+      setDashboardMode(stored);
+    }
+  }, []);
+
+  const handleModeChange = (mode: DashboardMode) => {
+    setDashboardMode(mode);
+    localStorage.setItem('totalfactu_dashboard_mode', mode);
+    setMobileMenuOpen(false);
+    if (mode === 'gestoria') {
+      router.push('/dashboard/gestoria');
+    } else {
+      router.push('/dashboard');
+    }
+  };
+
+  const showGestoriaNav = isGestoria && dashboardMode === 'gestoria';
+
+  const navigation = showGestoriaNav
     ? [
         { name: 'Panel Gestoría', href: '/dashboard/gestoria', icon: Building2 },
         { name: 'Clientes', href: '/dashboard/gestoria/clients', icon: Users, matchPrefix: true },
@@ -71,6 +96,35 @@ export function DashboardNav() {
             <FileText className="h-8 w-8 text-primary" />
             <span className="ml-2 text-xl font-bold">TotalFactu</span>
           </div>
+          {isGestoria && (
+            <div className="px-4 py-3 border-b">
+              <p className="text-xs text-gray-500 mb-2 font-medium">Trabajar como</p>
+              <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
+                <button
+                  onClick={() => handleModeChange('empresa')}
+                  className={cn(
+                    'flex-1 text-xs font-medium px-2 py-1.5 rounded-md transition-all',
+                    dashboardMode === 'empresa'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-800'
+                  )}
+                >
+                  Empresa
+                </button>
+                <button
+                  onClick={() => handleModeChange('gestoria')}
+                  className={cn(
+                    'flex-1 text-xs font-medium px-2 py-1.5 rounded-md transition-all',
+                    dashboardMode === 'gestoria'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-800'
+                  )}
+                >
+                  Gestoría
+                </button>
+              </div>
+            </div>
+          )}
           <div className="flex-grow flex flex-col">
             <nav className="flex-1 px-2 py-4 space-y-1">
               {navigation.map((item: any) => {
@@ -166,6 +220,35 @@ export function DashboardNav() {
 
         {mobileMenuOpen && (
           <div className="fixed inset-0 z-40 bg-white pt-16">
+            {isGestoria && (
+              <div className="px-4 py-3 border-b">
+                <p className="text-xs text-gray-500 mb-2 font-medium">Trabajar como</p>
+                <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
+                  <button
+                    onClick={() => handleModeChange('empresa')}
+                    className={cn(
+                      'flex-1 text-sm font-medium px-3 py-2 rounded-md transition-all',
+                      dashboardMode === 'empresa'
+                        ? 'bg-white text-gray-900 shadow-sm'
+                        : 'text-gray-600 hover:text-gray-800'
+                    )}
+                  >
+                    Empresa
+                  </button>
+                  <button
+                    onClick={() => handleModeChange('gestoria')}
+                    className={cn(
+                      'flex-1 text-sm font-medium px-3 py-2 rounded-md transition-all',
+                      dashboardMode === 'gestoria'
+                        ? 'bg-white text-gray-900 shadow-sm'
+                        : 'text-gray-600 hover:text-gray-800'
+                    )}
+                  >
+                    Gestoría
+                  </button>
+                </div>
+              </div>
+            )}
             <nav className="px-2 py-4 space-y-1">
               {navigation.map((item: any) => {
                 const isActive = item?.matchPrefix

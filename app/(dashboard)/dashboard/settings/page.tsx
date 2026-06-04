@@ -20,7 +20,6 @@ export default function SettingsPage() {
   const { t } = useTranslation();
   const { data: session } = useSession();
   const isAdmin = Boolean(session?.user?.email && ADMIN_EMAILS.includes(session.user.email));
-  const isGestoria = (session?.user as any)?.companyType === 'gestoria';
 
   const [formData, setFormData] = useState({
     name: '',
@@ -232,7 +231,7 @@ export default function SettingsPage() {
         </Card>
 
         {/* Telegram — Bot oficial único */}
-        {!isGestoria && <Card className="border-blue-200 bg-blue-50/30">
+        <Card className="border-blue-200 bg-blue-50/30">
           <CardHeader>
             <CardTitle className="flex items-center">
               <Bot className="h-5 w-5 mr-2 text-blue-600" />
@@ -337,7 +336,7 @@ export default function SettingsPage() {
               </div>
             )}
           </CardContent>
-        </Card>}
+        </Card>
 
         {/* Admin: Telegram Webhook Diagnostic */}
         {isAdmin && (
@@ -415,9 +414,8 @@ export default function SettingsPage() {
           </Card>
         )}
 
-        {/* Correo para exportaciones — solo usuarios finales */}
-        {!isGestoria && (
-          <Card>
+        {/* Correo para exportaciones */}
+        <Card>
             <CardHeader>
               <CardTitle className="flex items-center">
                 <Mail className="h-5 w-5 mr-2" />
@@ -448,7 +446,6 @@ export default function SettingsPage() {
               </div>
             </CardContent>
           </Card>
-        )}
 
         <div className="flex justify-end">
           <Button type="submit" disabled={saving}>

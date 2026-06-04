@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/auth-options';
 import { prisma } from '@/lib/prisma';
 import { DashboardContent } from '@/components/dashboard-content';
+import { GestoriaRedirectGuard } from '@/components/gestoria-redirect-guard';
 
 export const dynamic = 'force-dynamic';
 
@@ -68,10 +69,6 @@ export default async function DashboardPage() {
     redirect('/login');
   }
 
-  if ((session?.user as any)?.companyType === 'gestoria') {
-    redirect('/dashboard/gestoria');
-  }
-
   const data = await getDashboardData(session.user.id);
 
   if (!data) {
@@ -79,11 +76,14 @@ export default async function DashboardPage() {
   }
 
   return (
-    <DashboardContent
-      company={data.company}
-      stats={data.stats}
-      recentDocs={data.recentDocs}
-      subscription={data.subscription}
-    />
+    <>
+      <GestoriaRedirectGuard />
+      <DashboardContent
+        company={data.company}
+        stats={data.stats}
+        recentDocs={data.recentDocs}
+        subscription={data.subscription}
+      />
+    </>
   );
 }
