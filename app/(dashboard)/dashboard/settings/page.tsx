@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Building2, Mail, CheckCircle, Bot, ExternalLink, Loader2, RefreshCw, Unlink, Copy, AlertTriangle, ShieldCheck, Wrench } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useTranslation } from '@/lib/i18n/context';
+import { CompanyAliases } from '@/components/settings/company-aliases';
 
 const BOT_USERNAME = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME || 'totalfactu_helper_bot';
 
@@ -453,6 +454,9 @@ export default function SettingsPage() {
           </Button>
         </div>
       </form>
+
+      {/* Alias section — outside form, its own CRUD lifecycle */}
+      <CompanyAliases />
     </div>
   );
 }

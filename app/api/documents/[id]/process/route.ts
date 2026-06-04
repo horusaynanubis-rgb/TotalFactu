@@ -186,11 +186,40 @@ export async function POST(
       extraction.needs_review = true;
     }
 
+    // Fetch active aliases for this company (used by classifier as fallback)
+    const companyAliases = await prisma.companyAlias.findMany({
+      where: { company_id: document.company_id, active: true },
+      select: { alias_normalized: true, alias_type: true },
+    });
+
     // Post-process: verify invoice_type against company identity (AI can be wrong)
     const classification = classifyInvoiceType(extraction, {
       name: document.company.name,
       tax_id: document.company.tax_id,
+      aliases: companyAliases,
     });
+
+    // Confidence bonus when identity is confirmed via alias
+    const ALIAS_CONFIDENCE_BONUS = 0.15;
+    if (classification.matched_via_alias) {
+      extraction.extraction_confidence = Math.min(
+        extraction.extraction_confidence + ALIAS_CONFIDENCE_BONUS,
+        0.95,
+      );
+      // Re-evaluate needs_review: if the only reason was low confidence, clear it
+      if (extraction.extraction_confidence >= 0.7) {
+        const hasStructuralIssues =
+          !extraction.invoice_number ||
+          !extraction.issue_date ||
+          !extraction.supplier_name ||
+          !extraction.customer_name ||
+          extraction.total_amount <= 0;
+        extraction.needs_review = hasStructuralIssues;
+      }
+      console.log(
+        `[process] ✅ Alias match — confidence boosted to ${extraction.extraction_confidence.toFixed(2)}. Reason: ${classification.correction_reason}`,
+      );
+    }
 
     const finalType    = classification.invoice_type;
     const needsReview  = classification.needs_review || extraction.needs_review;

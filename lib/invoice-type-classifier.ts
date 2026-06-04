@@ -65,6 +65,22 @@ function namesMatch(a: string, b: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Alias matching helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Compares a user-defined alias (already normalised) against a name extracted
+ * from an invoice (also normalised). The alias is the short/colloquial form
+ * that appears on invoices; the invoice name may contain it as a substring.
+ *
+ * Minimum alias length: 3 chars to prevent accidental single-word matches.
+ */
+function aliasNamesMatch(aliasNorm: string, invoiceNameNorm: string): boolean {
+  if (!aliasNorm || !invoiceNameNorm || aliasNorm.length < 3) return false;
+  return invoiceNameNorm.includes(aliasNorm);
+}
+
+// ---------------------------------------------------------------------------
 // Public interface
 // ---------------------------------------------------------------------------
 
@@ -77,11 +93,20 @@ export interface ClassificationResult {
   correction_reason: string | null;
   /** Whether the invoice still needs human review */
   needs_review: boolean;
+  /** True when identity was confirmed via a company alias (triggers confidence bonus) */
+  matched_via_alias: boolean;
+}
+
+export interface AliasEntry {
+  alias_normalized: string;
+  alias_type: string;
 }
 
 export interface CompanyIdentity {
   name: string;
   tax_id: string;
+  /** Active company aliases to try when direct name/tax_id match fails */
+  aliases?: AliasEntry[];
 }
 
 /**
@@ -118,6 +143,7 @@ export function classifyInvoiceType(
           ? `Tax ID match: ${company.tax_id} found as supplier tax ID → overriding AI type '${aiType}' to 'issued'`
           : null,
         needs_review: extraction.needs_review,
+        matched_via_alias: false,
       };
     }
 
@@ -130,6 +156,7 @@ export function classifyInvoiceType(
           ? `Tax ID match: ${company.tax_id} found as customer tax ID → overriding AI type '${aiType}' to 'received'`
           : null,
         needs_review: extraction.needs_review,
+        matched_via_alias: false,
       };
     }
   }
@@ -147,6 +174,7 @@ export function classifyInvoiceType(
           ? `Name match: '${company.name}' recognized as supplier ('${extraction.supplier_name}') → overriding AI type '${aiType}' to 'issued'`
           : null,
         needs_review: extraction.needs_review,
+        matched_via_alias: false,
       };
     }
 
@@ -159,17 +187,50 @@ export function classifyInvoiceType(
           ? `Name match: '${company.name}' recognized as customer ('${extraction.customer_name}') → overriding AI type '${aiType}' to 'received'`
           : null,
         needs_review: extraction.needs_review,
+        matched_via_alias: false,
       };
     }
   }
 
   // ------------------------------------------------------------------
-  // 3. No match — keep AI type, flag for review
+  // 3. Alias match — user-defined alternative names
+  // ------------------------------------------------------------------
+  if (company.aliases && company.aliases.length > 0) {
+    for (const entry of company.aliases) {
+      const aliasNorm = entry.alias_normalized;
+
+      if (aliasNamesMatch(aliasNorm, supplierNameNorm)) {
+        const corrected = aiType !== 'issued';
+        return {
+          invoice_type: 'issued',
+          was_corrected: corrected,
+          correction_reason: `Alias match (${entry.alias_type}): alias '${aliasNorm}' found in supplier name '${extraction.supplier_name}'`,
+          needs_review: extraction.needs_review,
+          matched_via_alias: true,
+        };
+      }
+
+      if (aliasNamesMatch(aliasNorm, customerNameNorm)) {
+        const corrected = aiType !== 'received';
+        return {
+          invoice_type: 'received',
+          was_corrected: corrected,
+          correction_reason: `Alias match (${entry.alias_type}): alias '${aliasNorm}' found in customer name '${extraction.customer_name}'`,
+          needs_review: extraction.needs_review,
+          matched_via_alias: true,
+        };
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // 4. No match — keep AI type, flag for review
   // ------------------------------------------------------------------
   return {
     invoice_type: aiType,
     was_corrected: false,
     correction_reason: null,
     needs_review: true, // cannot confirm without match → always review
+    matched_via_alias: false,
   };
 }

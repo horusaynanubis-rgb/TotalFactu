@@ -98,6 +98,7 @@ model Company {
   invoice_lines         InvoiceLine[]
   sent_messages         GestoriaMessage[]   @relation("SentMessages")
   received_messages     GestoriaMessage[]   @relation("ReceivedMessages")
+  aliases               CompanyAlias[]
 
   @@index([tax_id])
   @@index([company_type])
@@ -409,6 +410,25 @@ model LicenseInvitation {
 }
 
 // --- Gestoria → Client messaging ---
+
+// --- Company name aliases (fiscal, commercial, brand) ---
+
+model CompanyAlias {
+  id               String   @id @default(cuid())
+  company_id       String
+  alias            String
+  alias_normalized String   // normalised for comparison (lowercase, no accents, no legal suffixes)
+  alias_type       String   @default("otro") // fiscal | comercial | marca | otro
+  active           Boolean  @default(true)
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+
+  company Company @relation(fields: [company_id], references: [id], onDelete: Cascade)
+
+  @@index([company_id])
+  @@index([company_id, alias_normalized])
+  @@index([active])
+}
 
 model GestoriaMessage {
   id                  String    @id @default(cuid())
