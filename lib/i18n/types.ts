@@ -412,5 +412,6 @@ export interface Translations {
     demo: string[];
     profesional: string[];
     gestoria: string[];
+    beta: string[];
   };
 }

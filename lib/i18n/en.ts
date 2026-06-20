@@ -416,5 +416,14 @@ export const en: Translations = {
       'Custom export schedules',
       '24/7 priority support',
     ],
+    beta: [
+      'Unlimited invoices',
+      'Advanced AI extraction',
+      'Monthly & Quarterly exports',
+      'Telegram & Email integration',
+      'Suppliers & Delivery Notes access',
+      'Advanced OCR',
+      'Full platform access',
+    ],
   },
 };

@@ -80,6 +80,7 @@ model Company {
   ai_api_key               String?
   ai_api_endpoint          String?
   company_type             String         @default("individual") // individual | gestoria
+  is_beta                  Boolean        @default(false)
   created_at               DateTime       @default(now())
   updated_at               DateTime       @updatedAt
 

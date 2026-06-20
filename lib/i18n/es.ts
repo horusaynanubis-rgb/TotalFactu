@@ -416,5 +416,14 @@ export const es: Translations = {
       'Programación de exportaciones personalizada',
       'Soporte prioritario 24/7',
     ],
+    beta: [
+      'Facturas ilimitadas',
+      'Extracción con IA avanzada',
+      'Exportaciones mensuales y trimestrales',
+      'Integración con Telegram y correo',
+      'Acceso a Proveedores y Albaranes',
+      'OCR avanzado',
+      'Acceso completo a la plataforma',
+    ],
   },
 };

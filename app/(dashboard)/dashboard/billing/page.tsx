@@ -5,7 +5,7 @@ import { useSession } from 'next-auth/react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { CreditCard, CheckCircle, Building2, Users, Package, Zap } from 'lucide-react';
+import { CreditCard, CheckCircle, Building2, Users, Package, Zap, Star } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import toast from 'react-hot-toast';
 import { useTranslation } from '@/lib/i18n/context';
@@ -38,11 +38,13 @@ const GESTORIA_PACKS = [
 const PLAN_PRICES: Record<string, number> = {
   demo: 0,
   profesional: 14.99,
+  beta: 0,
 };
 const PLAN_NAMES: Record<string, string> = {
   demo: 'Demo',
   profesional: 'Profesional',
   gestoria: 'Gestoría',
+  beta: 'Beta Tester',
 };
 
 export default function BillingPage() {
@@ -80,8 +82,9 @@ export default function BillingPage() {
 
   const currentPlanKey = (subscription?.plan_name || 'demo') as keyof typeof PLAN_PRICES;
   const currentPlanFeatures = t.planFeatures[currentPlanKey as keyof typeof t.planFeatures] || t.planFeatures.demo;
+  const isBeta = currentPlanKey === 'beta';
   // Only show "Available Plans" section when there's an upgrade path (demo → profesional).
-  // Profesional users have no higher plan, so we hide the section to avoid showing Demo as a "downgrade" option.
+  // Profesional and Beta users have no upgrade path — hide the section.
   const showAvailablePlans = !isGestoria && currentPlanKey === 'demo';
 
   return (
@@ -91,8 +94,41 @@ export default function BillingPage() {
         <p className="text-gray-600 mt-1">{t.billing.subtitle}</p>
       </div>
 
-      {/* Estado actual — gestoría */}
-      {isGestoria ? (
+      {/* Cuenta Beta Tester */}
+      {isBeta && (
+        <Card className="border-2 border-amber-400 bg-amber-50">
+          <CardHeader>
+            <CardTitle className="flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <Star className="h-5 w-5 text-amber-500" />
+                Cuenta Beta Tester
+              </span>
+              <Badge className="bg-amber-500 text-white">Beta activa</Badge>
+            </CardTitle>
+            <CardDescription>
+              Acceso completo a todas las funcionalidades de TotalFactu sin coste.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <p className="text-3xl font-bold text-amber-600">Gratis</p>
+            <p className="text-sm text-muted-foreground mt-1">Sin suscripción ni tarjeta de crédito requerida.</p>
+            <div className="mt-6">
+              <p className="text-sm font-medium text-gray-700 mb-3">{t.billing.planFeatures}</p>
+              <ul className="space-y-2">
+                {currentPlanFeatures.map((feature: string, idx: number) => (
+                  <li key={idx} className="flex items-start">
+                    <CheckCircle className="h-5 w-5 text-amber-500 mr-2 flex-shrink-0 mt-0.5" />
+                    <span className="text-sm text-gray-600">{feature}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Estado actual — gestoría / individual (oculto para beta) */}
+      {!isBeta && (isGestoria ? (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
@@ -232,7 +268,7 @@ export default function BillingPage() {
             </div>
           )}
         </>
-      )}
+      ))}
 
       {/* Packs Gestoría — solo para cuentas gestoria */}
       {isGestoria && <div id="gestoria-packs">
