@@ -178,10 +178,14 @@ export default function ClientDetailPage() {
   // Documents (lazy — loaded on first activation of Documentos or Revisión tab)
   const [documents, setDocuments] = useState<DocRow[] | null>(null);
   const [loadingDocs, setLoadingDocs] = useState(false);
+  const [loadingMoreDocs, setLoadingMoreDocs] = useState(false);
+  const [docsHasMore, setDocsHasMore] = useState(false);
 
   // Invoices (lazy — loaded on first activation of Facturas tab)
   const [invoices, setInvoices] = useState<InvoiceRow[] | null>(null);
   const [loadingInvoices, setLoadingInvoices] = useState(false);
+  const [loadingMoreInvoices, setLoadingMoreInvoices] = useState(false);
+  const [invoicesHasMore, setInvoicesHasMore] = useState(false);
 
   // Messages (lazy — loaded on first activation of Mensajes tab)
   const [messages, setMessages] = useState<MessageRow[] | null>(null);
@@ -219,21 +223,53 @@ export default function ClientDetailPage() {
   const loadDocuments = () => {
     if (documents !== null || loadingDocs) return;
     setLoadingDocs(true);
-    fetch(`/api/gestoria/clients/${params.clientCompanyId}/documents`)
+    fetch(`/api/gestoria/clients/${params.clientCompanyId}/documents?limit=50&offset=0`)
       .then((r) => r.json())
-      .then((data) => setDocuments(data.documents ?? []))
+      .then((data) => {
+        setDocuments(data.documents ?? []);
+        setDocsHasMore(data.hasMore ?? false);
+      })
       .catch(() => toast.error('Error cargando documentos'))
       .finally(() => setLoadingDocs(false));
+  };
+
+  const loadMoreDocuments = () => {
+    if (!documents || loadingMoreDocs) return;
+    setLoadingMoreDocs(true);
+    fetch(`/api/gestoria/clients/${params.clientCompanyId}/documents?limit=50&offset=${documents.length}`)
+      .then((r) => r.json())
+      .then((data) => {
+        setDocuments((prev) => [...(prev ?? []), ...(data.documents ?? [])]);
+        setDocsHasMore(data.hasMore ?? false);
+      })
+      .catch(() => toast.error('Error cargando más documentos'))
+      .finally(() => setLoadingMoreDocs(false));
   };
 
   const loadInvoices = () => {
     if (invoices !== null || loadingInvoices) return;
     setLoadingInvoices(true);
-    fetch(`/api/gestoria/clients/${params.clientCompanyId}/invoices`)
+    fetch(`/api/gestoria/clients/${params.clientCompanyId}/invoices?limit=50&offset=0`)
       .then((r) => r.json())
-      .then((data) => setInvoices(data.invoices ?? []))
+      .then((data) => {
+        setInvoices(data.invoices ?? []);
+        setInvoicesHasMore(data.hasMore ?? false);
+      })
       .catch(() => toast.error('Error cargando facturas'))
       .finally(() => setLoadingInvoices(false));
+  };
+
+  const loadMoreInvoices = () => {
+    if (!invoices || loadingMoreInvoices) return;
+    setLoadingMoreInvoices(true);
+    fetch(`/api/gestoria/clients/${params.clientCompanyId}/invoices?limit=50&offset=${invoices.length}`)
+      .then((r) => r.json())
+      .then((data) => {
+        setInvoices((prev) => [...(prev ?? []), ...(data.invoices ?? [])]);
+        setInvoicesHasMore(data.hasMore ?? false);
+      })
+      .catch(() => toast.error('Error cargando más facturas'))
+      .finally(() => setLoadingMoreInvoices(false));
   };
 
   const loadMessages = () => {
@@ -440,6 +476,7 @@ export default function ClientDetailPage() {
                 <p className={`text-2xl font-bold ${pendingReviews > 0 ? 'text-yellow-600' : ''}`}>
                   {pendingReviews}
                 </p>
+                <p className="text-xs text-muted-foreground mt-1">Total acumulado (histórico)</p>
               </CardContent>
             </Card>
           </div>
@@ -530,8 +567,15 @@ export default function ClientDetailPage() {
         <TabsContent value="documentos" className="mt-6">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <FileText className="h-4 w-4" />Documentos del cliente
+              <CardTitle className="text-base flex items-center justify-between">
+                <span className="flex items-center gap-2">
+                  <FileText className="h-4 w-4" />Documentos del cliente
+                </span>
+                {documents && documents.length > 0 && (
+                  <span className="text-sm font-normal text-muted-foreground">
+                    {documents.length} documento{documents.length !== 1 ? 's' : ''}{docsHasMore ? '+' : ''}
+                  </span>
+                )}
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
@@ -545,6 +589,7 @@ export default function ClientDetailPage() {
                   <p className="text-sm">Sin documentos todavía.</p>
                 </div>
               ) : (
+                <>
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -600,6 +645,15 @@ export default function ClientDetailPage() {
                     ))}
                   </TableBody>
                 </Table>
+                {docsHasMore && (
+                  <div className="p-4 flex justify-center border-t">
+                    <Button variant="outline" size="sm" onClick={loadMoreDocuments} disabled={loadingMoreDocs}>
+                      {loadingMoreDocs ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                      Cargar más documentos
+                    </Button>
+                  </div>
+                )}
+                </>
               )}
             </CardContent>
           </Card>
@@ -609,8 +663,15 @@ export default function ClientDetailPage() {
         <TabsContent value="facturas" className="mt-6">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <Receipt className="h-4 w-4" />Facturas del cliente
+              <CardTitle className="text-base flex items-center justify-between">
+                <span className="flex items-center gap-2">
+                  <Receipt className="h-4 w-4" />Facturas del cliente
+                </span>
+                {invoices && invoices.length > 0 && (
+                  <span className="text-sm font-normal text-muted-foreground">
+                    {invoices.length} factura{invoices.length !== 1 ? 's' : ''}{invoicesHasMore ? '+' : ''}
+                  </span>
+                )}
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
@@ -624,6 +685,7 @@ export default function ClientDetailPage() {
                   <p className="text-sm">Sin facturas todavía.</p>
                 </div>
               ) : (
+                <>
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -668,6 +730,15 @@ export default function ClientDetailPage() {
                     ))}
                   </TableBody>
                 </Table>
+                {invoicesHasMore && (
+                  <div className="p-4 flex justify-center border-t">
+                    <Button variant="outline" size="sm" onClick={loadMoreInvoices} disabled={loadingMoreInvoices}>
+                      {loadingMoreInvoices ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                      Cargar más facturas
+                    </Button>
+                  </div>
+                )}
+                </>
               )}
             </CardContent>
           </Card>

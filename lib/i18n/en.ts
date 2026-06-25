@@ -154,10 +154,10 @@ export const en: Translations = {
   dashboard: {
     title: 'Dashboard',
     welcomeBack: "Welcome back! Here's what's happening with",
-    invoicesThisMonth: 'Invoices This Month',
-    documentsUploaded: 'Documents uploaded',
+    invoicesThisMonth: 'Documents This Month',
+    documentsUploaded: 'Documents uploaded this month',
     pendingReview: 'Pending Review',
-    needsAttention: 'Needs attention',
+    needsAttention: 'Total pending (all time)',
     totalVatMonth: 'Total VAT (This Month)',
     taxDetected: 'Tax detected',
     exportsGenerated: 'Exports Generated',

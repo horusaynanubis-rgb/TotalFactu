@@ -11,10 +11,14 @@ import toast from 'react-hot-toast';
 import { useTranslation } from '@/lib/i18n/context';
 import { DocumentPreviewModal } from '@/components/document-preview-modal';
 
+const PAGE_SIZE = 50;
+
 export default function DocumentsPage() {
   const [documents, setDocuments] = useState<any[]>([]);
   const [uploading, setUploading] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterChannel, setFilterChannel] = useState<string>('all');
@@ -23,24 +27,36 @@ export default function DocumentsPage() {
   const [previewDocId, setPreviewDocId] = useState<string | null>(null);
   const { t } = useTranslation();
 
-  const fetchDocuments = useCallback(async () => {
+  const fetchDocuments = useCallback(async (offset: number, replace: boolean) => {
+    if (replace) setLoading(true);
+    else setLoadingMore(true);
     try {
       const params = new URLSearchParams();
       if (filterStatus !== 'all') params.append('status', filterStatus);
       if (filterChannel !== 'all') params.append('channel', filterChannel);
+      params.append('limit', String(PAGE_SIZE));
+      params.append('offset', String(offset));
 
       const response = await fetch(`/api/documents?${params.toString()}`);
       const data = await response.json();
-      setDocuments(data?.documents ?? []);
+      const incoming = data?.documents ?? [];
+
+      if (replace) {
+        setDocuments(incoming);
+      } else {
+        setDocuments((prev) => [...prev, ...incoming]);
+      }
+      setHasMore(data?.hasMore ?? false);
     } catch (error: any) {
       toast.error(t.documents.fetchFailed);
     } finally {
-      setLoading(false);
+      if (replace) setLoading(false);
+      else setLoadingMore(false);
     }
   }, [filterStatus, filterChannel, t]);
 
   useEffect(() => {
-    fetchDocuments();
+    fetchDocuments(0, true);
   }, [fetchDocuments]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -109,7 +125,7 @@ export default function DocumentsPage() {
       }
 
       toast.success(t.documents.uploadSuccess);
-      fetchDocuments();
+      fetchDocuments(0, true);
 
       if (e?.target) {
         e.target.value = '';
@@ -133,7 +149,7 @@ export default function DocumentsPage() {
         const data = await response.json();
         toast.error(`${t.documents.retryFailed}: ${data?.message || ''}`);
       }
-      fetchDocuments();
+      fetchDocuments(0, true);
     } catch (error: any) {
       toast.error(t.documents.retryFailed);
     } finally {
@@ -153,7 +169,7 @@ export default function DocumentsPage() {
         throw new Error(data?.message ?? t.documents.deleteFailed);
       }
       toast.success(t.documents.deleteSuccess);
-      fetchDocuments();
+      fetchDocuments(0, true);
     } catch (error: any) {
       toast.error(error?.message ?? t.documents.deleteFailed);
     } finally {
@@ -232,7 +248,14 @@ export default function DocumentsPage() {
       {/* Documents List */}
       <Card>
         <CardHeader>
-          <CardTitle>{t.documents.uploadedDocuments}</CardTitle>
+          <CardTitle className="flex items-center justify-between">
+            <span>{t.documents.uploadedDocuments}</span>
+            {!loading && documents.length > 0 && (
+              <span className="text-sm font-normal text-gray-500">
+                {documents.length} documento{documents.length !== 1 ? 's' : ''}{hasMore ? '+' : ''}
+              </span>
+            )}
+          </CardTitle>
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -309,6 +332,17 @@ export default function DocumentsPage() {
             </div>
           ) : (
             <p className="text-center text-gray-500 py-8">{t.documents.noDocuments}</p>
+          )}
+          {hasMore && (
+            <div className="pt-4 flex justify-center">
+              <Button
+                variant="outline"
+                onClick={() => fetchDocuments(documents.length, false)}
+                disabled={loadingMore}
+              >
+                {loadingMore ? t.common.loading : 'Cargar más documentos'}
+              </Button>
+            </div>
           )}
         </CardContent>
       </Card>

@@ -40,6 +40,9 @@ async function fetchDocuments(request: NextRequest, companyId: string) {
   const status = searchParams.get('status');
   const channel = searchParams.get('channel');
 
+  const limit = Math.min(parseInt(searchParams.get('limit') ?? '50', 10), 100);
+  const offset = parseInt(searchParams.get('offset') ?? '0', 10);
+
   const where: any = { company_id: companyId };
   if (status && status !== 'all') where.processing_status = status;
   if (channel && channel !== 'all') where.source_channel = channel;
@@ -47,8 +50,12 @@ async function fetchDocuments(request: NextRequest, companyId: string) {
   const documents = await prisma.document.findMany({
     where,
     orderBy: { upload_timestamp: 'desc' },
-    take: 100,
+    take: limit + 1,
+    skip: offset,
   });
 
-  return NextResponse.json({ documents });
+  const hasMore = documents.length > limit;
+  if (hasMore) documents.pop();
+
+  return NextResponse.json({ documents, hasMore });
 }

@@ -12,9 +12,13 @@ import toast from 'react-hot-toast';
 import { useTranslation } from '@/lib/i18n/context';
 import { DocumentPreviewModal } from '@/components/document-preview-modal';
 
+const PAGE_SIZE = 50;
+
 export default function InvoicesPage() {
   const [invoices, setInvoices] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [filterType, setFilterType] = useState<string>('all');
   const [filterReview, setFilterReview] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -27,25 +31,37 @@ export default function InvoicesPage() {
   const [previewDocId, setPreviewDocId] = useState<string | null>(null);
   const { t } = useTranslation();
 
-  const fetchInvoices = useCallback(async () => {
+  const fetchInvoices = useCallback(async (offset: number, replace: boolean) => {
+    if (replace) setLoading(true);
+    else setLoadingMore(true);
     try {
       const params = new URLSearchParams();
       if (filterType !== 'all') params.append('type', filterType);
       if (filterReview !== 'all') params.append('review', filterReview);
       if (searchQuery) params.append('search', searchQuery);
+      params.append('limit', String(PAGE_SIZE));
+      params.append('offset', String(offset));
 
       const response = await fetch(`/api/invoices?${params.toString()}`);
       const data = await response.json();
-      setInvoices(data?.invoices ?? []);
+      const incoming = data?.invoices ?? [];
+
+      if (replace) {
+        setInvoices(incoming);
+      } else {
+        setInvoices((prev) => [...prev, ...incoming]);
+      }
+      setHasMore(data?.hasMore ?? false);
     } catch (error: any) {
       toast.error(t.invoices.fetchFailed);
     } finally {
-      setLoading(false);
+      if (replace) setLoading(false);
+      else setLoadingMore(false);
     }
   }, [filterType, filterReview, searchQuery, t]);
 
   useEffect(() => {
-    fetchInvoices();
+    fetchInvoices(0, true);
   }, [fetchInvoices]);
 
   // Detect potential duplicates: same invoice_number + supplier_tax_id + total_amount + issue_date
@@ -66,6 +82,10 @@ export default function InvoicesPage() {
     return ids;
   }, [invoices]);
 
+  const handleLoadMore = () => {
+    fetchInvoices(invoices.length, false);
+  };
+
   const handleApprove = async (invoiceId: string) => {
     try {
       await fetch(`/api/invoices/${invoiceId}`, {
@@ -74,7 +94,7 @@ export default function InvoicesPage() {
         body: JSON.stringify({ review_status: 'approved' }),
       });
       toast.success(t.invoices.approveSuccess);
-      fetchInvoices();
+      fetchInvoices(0, true);
     } catch (error: any) {
       toast.error(t.invoices.approveFailed);
     }
@@ -88,7 +108,7 @@ export default function InvoicesPage() {
         body: JSON.stringify({ review_status: 'rejected' }),
       });
       toast.success(t.invoices.approveSuccess);
-      fetchInvoices();
+      fetchInvoices(0, true);
     } catch (error: any) {
       toast.error(t.invoices.approveFailed);
     }
@@ -134,7 +154,7 @@ export default function InvoicesPage() {
       if (!response.ok) throw new Error();
       toast.success(t.invoices.editSuccess);
       setEditInvoice(null);
-      fetchInvoices();
+      fetchInvoices(0, true);
     } catch (error: any) {
       toast.error(t.invoices.editFailed);
     } finally {
@@ -155,7 +175,7 @@ export default function InvoicesPage() {
         throw new Error(data?.message ?? t.invoices.deleteFailed);
       }
       toast.success(t.invoices.deleteSuccess);
-      fetchInvoices();
+      fetchInvoices(0, true);
     } catch (error: any) {
       toast.error(error?.message ?? t.invoices.deleteFailed);
     } finally {
@@ -226,7 +246,14 @@ export default function InvoicesPage() {
       {/* Invoices Table */}
       <Card>
         <CardHeader>
-          <CardTitle>{t.invoices.invoiceList}</CardTitle>
+          <CardTitle className="flex items-center justify-between">
+            <span>{t.invoices.invoiceList}</span>
+            {!loading && invoices.length > 0 && (
+              <span className="text-sm font-normal text-gray-500">
+                {invoices.length} factura{invoices.length !== 1 ? 's' : ''}{hasMore ? '+' : ''}
+              </span>
+            )}
+          </CardTitle>
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -343,6 +370,17 @@ export default function InvoicesPage() {
             </div>
           ) : (
             <p className="text-center text-gray-500 py-8">{t.invoices.noInvoices}</p>
+          )}
+          {hasMore && (
+            <div className="pt-4 flex justify-center">
+              <Button
+                variant="outline"
+                onClick={handleLoadMore}
+                disabled={loadingMore}
+              >
+                {loadingMore ? t.common.loading : 'Cargar más facturas'}
+              </Button>
+            </div>
           )}
         </CardContent>
       </Card>

@@ -25,7 +25,7 @@ async function resolveGestoriaAccess(userId: string, clientCompanyId: string) {
 }
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: { clientCompanyId: string } },
 ) {
   const session = await getServerSession(authOptions);
@@ -38,10 +38,15 @@ export async function GET(
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
+  const { searchParams } = new URL(request.url);
+  const limit = Math.min(parseInt(searchParams.get('limit') ?? '50', 10), 100);
+  const offset = parseInt(searchParams.get('offset') ?? '0', 10);
+
   const invoices = await prisma.invoice.findMany({
     where: { company_id: params.clientCompanyId },
     orderBy: { issue_date: 'desc' },
-    take: 200,
+    take: limit + 1,
+    skip: offset,
     select: {
       id: true,
       invoice_number: true,
@@ -59,5 +64,8 @@ export async function GET(
     },
   });
 
-  return NextResponse.json({ invoices });
+  const hasMore = invoices.length > limit;
+  if (hasMore) invoices.pop();
+
+  return NextResponse.json({ invoices, hasMore });
 }

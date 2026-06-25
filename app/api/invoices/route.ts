@@ -41,14 +41,21 @@ export async function GET(request: NextRequest) {
       ];
     }
 
+    const limit = Math.min(parseInt(searchParams.get('limit') ?? '50', 10), 100);
+    const offset = parseInt(searchParams.get('offset') ?? '0', 10);
+
     const invoices = await prisma.invoice.findMany({
       where,
       include: { document: true },
       orderBy: { issue_date: 'desc' },
-      take: 100,
+      take: limit + 1,
+      skip: offset,
     });
 
-    return NextResponse.json({ invoices });
+    const hasMore = invoices.length > limit;
+    if (hasMore) invoices.pop();
+
+    return NextResponse.json({ invoices, hasMore });
   } catch (error: any) {
     console.error('[invoices] GET error:', error);
     return NextResponse.json({ message: 'Failed to fetch invoices' }, { status: 500 });
