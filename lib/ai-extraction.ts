@@ -32,6 +32,12 @@ export interface InvoiceExtraction {
   extraction_confidence: number;
   needs_review: boolean;
   line_items: InvoiceLineItem[];
+  // Internal audit fields — logged during processing, not persisted to DB
+  issuer_name: string | null;
+  issuer_tax_id: string | null;
+  recipient_name: string | null;
+  recipient_tax_id: string | null;
+  role_reasoning_summary: string | null;
 }
 
 export interface AIProviderConfig {
@@ -40,8 +46,50 @@ export interface AIProviderConfig {
   apiEndpoint?: string | null;
 }
 
-const EXTRACTION_PROMPT = `You are a document data extraction system. Extract structured data from this document.
+/** Company identity passed to Gemini as context for role determination */
+export interface CompanyContext {
+  name: string;
+  tax_id: string;
+  aliases?: string[]; // readable alias values (e.g. ["BYOU", "Cafetería BYOU"])
+}
+
+// ---------------------------------------------------------------------------
+// Prompt builder — injects company context when available
+// ---------------------------------------------------------------------------
+
+function buildExtractionPrompt(ctx?: CompanyContext): string {
+  const contextBlock = ctx
+    ? `
+ACCOUNT OWNER CONTEXT — use this to determine invoice roles:
+  Legal name: ${ctx.name}
+  Tax ID (CIF/NIF): ${ctx.tax_id}${ctx.aliases && ctx.aliases.length > 0 ? `
+  Known aliases: ${ctx.aliases.join(', ')}` : ''}
+
+  - If the account owner appears as RECIPIENT/CUSTOMER → invoice_type = "received"
+  - If the account owner appears as ISSUER/SUPPLIER → invoice_type = "issued"
+  - Tax ID match takes priority over name match.
+`
+    : '';
+
+  return `You are a document data extraction system. Extract structured data from this document.
 Support multilingual documents (Spanish, English, French, German, Italian, Portuguese).
+${contextBlock}
+ROLE IDENTIFICATION RULES — apply these carefully before setting supplier_name and customer_name:
+
+1. ISSUER/SUPPLIER (emisor/proveedor) is the company that:
+   - Appears in the document HEADER with its logo, full address, phone, web, and fiscal registration data
+   - Is listed near fields like "Razón Social:", "Emisor:", "Proveedor:", "CIF/NIF:" in the header section
+   - Is NOT inside any labeled block such as "Cliente:", "Centro:", "Destinatario:", "Facturar a:", "Enviar a:", "Dirección de entrega"
+
+2. RECIPIENT/CUSTOMER (receptor/cliente) is the company that:
+   - Appears inside a block explicitly labeled: "Cliente:", "Centro:", "Destinatario:", "Facturar a:", "Enviar a:", "Dirección de envío"
+   - Even if the same name appears elsewhere, a name INSIDE a "Cliente:" or "Centro:" block is ALWAYS the recipient
+
+3. CRITICAL: A company name inside a "Cliente:", "Centro:", or "Destinatario:" block is NEVER the issuer/supplier, even if it appears multiple times elsewhere in the document.
+
+4. If a company has a prominent header position with logo/web/phone/address, that company is the issuer regardless of other mentions.
+
+5. supplier_name must be the ISSUER (header company). customer_name must be the RECIPIENT (Cliente/Centro block).
 
 Rules:
 - Do NOT hallucinate or invent values. If a field is not found, use null or empty string.
@@ -52,6 +100,11 @@ Rules:
 - invoice_type: "received" if this is an invoice received from a supplier, "issued" if sent to a customer. Use "received" for delivery_note documents.
 - extraction_confidence: a number between 0 and 1 indicating overall extraction quality.
 - needs_review: true if confidence < 0.7 or if critical fields are missing.
+- issuer_name: the exact company name found in the document header/logo area (emisor real del documento)
+- issuer_tax_id: tax ID (CIF/NIF) of the issuer, or null
+- recipient_name: the exact company name found inside a Cliente/Centro/Destinatario block (receptor real)
+- recipient_tax_id: tax ID (CIF/NIF) of the recipient, or null
+- role_reasoning_summary: one sentence explaining how you identified the issuer vs recipient
 
 Respond with raw JSON only (no markdown, no code blocks). Use this exact structure:
 {
@@ -61,9 +114,9 @@ Respond with raw JSON only (no markdown, no code blocks). Use this exact structu
   "invoice_number": "string or empty",
   "issue_date": "YYYY-MM-DD or empty",
   "due_date": "YYYY-MM-DD or null",
-  "supplier_name": "string or empty",
+  "supplier_name": "ISSUER company name (from header/logo area — NOT from Cliente block)",
   "supplier_tax_id": "string or null",
-  "customer_name": "string or empty",
+  "customer_name": "RECIPIENT company name (from Cliente/Centro/Destinatario block)",
   "customer_tax_id": "string or null",
   "subtotal": 0.00,
   "tax_amount": 0.00,
@@ -75,6 +128,11 @@ Respond with raw JSON only (no markdown, no code blocks). Use this exact structu
   "notes": null,
   "extraction_confidence": 0.95,
   "needs_review": false,
+  "issuer_name": "company name found in document header/logo area",
+  "issuer_tax_id": null,
+  "recipient_name": "company name found in Cliente/Centro/Destinatario block",
+  "recipient_tax_id": null,
+  "role_reasoning_summary": "brief explanation of how issuer vs recipient was determined",
   "line_items": [
     {
       "description": "Product or service name as shown on the document",
@@ -92,14 +150,273 @@ Rules for line_items:
 - Do NOT invent or estimate lines. Only include what is explicitly shown.
 - quantity, unit_price, tax_rate, total_amount can be null if not visible for a line.
 - description must be non-empty for each item.`;
+}
+
+// ---------------------------------------------------------------------------
+// Role ambiguity detection
+// ---------------------------------------------------------------------------
+
+export interface RoleAmbiguityResult {
+  isSuspicious: boolean;
+  reason: string | null;
+  correctedSupplierName: string | null;
+  correctedCustomerName: string | null;
+  correctedSupplierTaxId: string | null;
+  correctedCustomerTaxId: string | null;
+  correctedInvoiceType: 'received' | 'issued' | null;
+}
+
+const LEGAL_SUFFIXES_RE =
+  /[\s,]+(s\.?l\.?u?\.?|s\.?a\.?u?\.?|s\.?l\.?|ltd\.?|limited|inc\.?|llc\.?|gmbh|b\.?v\.?|n\.?v\.?|a\.?s\.?)\s*$/i;
+
+function normForCmp(s: string | null | undefined): string {
+  if (!s) return '';
+  return s
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(LEGAL_SUFFIXES_RE, '')
+    .replace(/[.,]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normTaxId(s: string | null | undefined): string {
+  if (!s) return '';
+  return s.replace(/[\s.\-]/g, '').toUpperCase();
+}
+
+function nameContains(haystack: string, needle: string): boolean {
+  if (!haystack || !needle || needle.length < 3) return false;
+  return haystack.includes(needle);
+}
+
+function namesOverlap(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
+  return shorter.length >= 4 && longer.includes(shorter);
+}
+
+function matchesCompany(
+  name: string,
+  taxId: string,
+  company: { nameNorm: string; taxId: string; aliasNorms: string[] },
+): boolean {
+  if (company.taxId && taxId && company.taxId === taxId) return true;
+  if (company.nameNorm && namesOverlap(company.nameNorm, name)) return true;
+  if (company.aliasNorms.some(a => a.length >= 3 && nameContains(name, a))) return true;
+  return false;
+}
+
+/**
+ * Detects when the AI may have confused issuer and recipient roles.
+ * Returns suggested corrections when possible (using issuer_name/recipient_name audit fields).
+ */
+export function detectRoleAmbiguity(
+  extraction: InvoiceExtraction,
+  company: { name: string; tax_id: string; aliases?: string[] },
+): RoleAmbiguityResult {
+  const noAmbiguity: RoleAmbiguityResult = {
+    isSuspicious: false,
+    reason: null,
+    correctedSupplierName: null,
+    correctedCustomerName: null,
+    correctedSupplierTaxId: null,
+    correctedCustomerTaxId: null,
+    correctedInvoiceType: null,
+  };
+
+  const cmp = {
+    nameNorm: normForCmp(company.name),
+    taxId: normTaxId(company.tax_id),
+    aliasNorms: (company.aliases ?? []).map(normForCmp),
+  };
+
+  const supplierNorm = normForCmp(extraction.supplier_name);
+  const customerNorm = normForCmp(extraction.customer_name);
+  const supplierTaxId = normTaxId(extraction.supplier_tax_id);
+  const customerTaxId = normTaxId(extraction.customer_tax_id);
+
+  const companyIsSupplier = matchesCompany(supplierNorm, supplierTaxId, cmp);
+  const companyIsCustomer = matchesCompany(customerNorm, customerTaxId, cmp);
+
+  // Case 1: same tax_id on both sides → clear data error
+  if (supplierTaxId && customerTaxId && supplierTaxId === customerTaxId) {
+    return {
+      isSuspicious: true,
+      reason: `supplier_tax_id equals customer_tax_id (${supplierTaxId}): same entity on both sides`,
+      correctedSupplierName: null,
+      correctedCustomerName: null,
+      correctedSupplierTaxId: null,
+      correctedCustomerTaxId: null,
+      correctedInvoiceType: null,
+    };
+  }
+
+  // Case 2: supplier == customer (normalized) → likely a duplicate extraction error
+  if (supplierNorm && customerNorm && supplierNorm === customerNorm) {
+    return {
+      isSuspicious: true,
+      reason: `supplier_name equals customer_name: "${extraction.supplier_name}"`,
+      correctedSupplierName: null,
+      correctedCustomerName: null,
+      correctedSupplierTaxId: null,
+      correctedCustomerTaxId: null,
+      correctedInvoiceType: null,
+    };
+  }
+
+  // Case 3: company appears as supplier — use issuer/recipient fields to check correctness
+  if (companyIsSupplier) {
+    const issuerNorm = normForCmp(extraction.issuer_name);
+    const issuerTaxId = normTaxId(extraction.issuer_tax_id);
+    const issuerMatchesCompany = issuerNorm
+      ? matchesCompany(issuerNorm, issuerTaxId, cmp)
+      : true; // no issuer field → trust existing
+
+    if (!issuerMatchesCompany && issuerNorm.length >= 3) {
+      // issuer_name field says the REAL issuer is someone else → role was swapped
+      const suggestedType = 'received';
+      return {
+        isSuspicious: true,
+        reason: `supplier_name matches account owner but issuer_name="${extraction.issuer_name}" is different → likely received invoice`,
+        correctedSupplierName: extraction.issuer_name,
+        correctedCustomerName: extraction.recipient_name || extraction.customer_name || company.name,
+        correctedSupplierTaxId: extraction.issuer_tax_id,
+        correctedCustomerTaxId: extraction.recipient_tax_id || extraction.customer_tax_id,
+        correctedInvoiceType: suggestedType,
+      };
+    }
+
+    // If company is supplier AND also customer (both sides confused)
+    if (companyIsCustomer) {
+      if (extraction.issuer_name && extraction.recipient_name) {
+        const issNorm = normForCmp(extraction.issuer_name);
+        const issMatchesOwner = matchesCompany(issNorm, normTaxId(extraction.issuer_tax_id), cmp);
+        return {
+          isSuspicious: true,
+          reason: `Both supplier and customer match account owner. Using issuer/recipient fields for correction.`,
+          correctedSupplierName: extraction.issuer_name,
+          correctedCustomerName: extraction.recipient_name,
+          correctedSupplierTaxId: extraction.issuer_tax_id,
+          correctedCustomerTaxId: extraction.recipient_tax_id,
+          correctedInvoiceType: issMatchesOwner ? 'issued' : 'received',
+        };
+      }
+      return {
+        isSuspicious: true,
+        reason: 'Emisor y receptor ambiguos: ambos parecen ser la empresa propietaria',
+        correctedSupplierName: null,
+        correctedCustomerName: null,
+        correctedSupplierTaxId: null,
+        correctedCustomerTaxId: null,
+        correctedInvoiceType: null,
+      };
+    }
+  }
+
+  return noAmbiguity;
+}
+
+// ---------------------------------------------------------------------------
+// Second-pass: lightweight role clarification call
+// ---------------------------------------------------------------------------
+
+export interface RoleClarification {
+  issuer_name: string | null;
+  issuer_tax_id: string | null;
+  recipient_name: string | null;
+  recipient_tax_id: string | null;
+  invoice_type: 'received' | 'issued';
+  reasoning: string | null;
+}
+
+/**
+ * Makes a lightweight second Gemini call to clarify issuer/recipient roles.
+ * Only called when the first-pass extraction shows suspicious role data AND
+ * issuer_name/recipient_name fields were not populated in the first pass.
+ * Returns null on any error (best-effort, non-fatal).
+ */
+export async function clarifyRolesWithGemini(
+  fileBase64: string,
+  mimeType: string,
+  companyContext?: CompanyContext,
+): Promise<RoleClarification | null> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+
+  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash-preview-04-17';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+  const contextLine = companyContext
+    ? `Account owner: ${companyContext.name} (${companyContext.tax_id})${companyContext.aliases?.length ? `, aliases: ${companyContext.aliases.join(', ')}` : ''}. If account owner is RECIPIENT → invoice_type="received". If account owner is ISSUER → invoice_type="issued".`
+    : '';
+
+  const prompt = `Look at this invoice document. Answer ONLY these role questions as JSON.
+
+RULES:
+- ISSUER = company in document header/logo area (their letterhead, address, phone, logo at top)
+- RECIPIENT = company in a block labeled "Cliente:", "Centro:", "Destinatario:", "Facturar a:"
+- A name INSIDE a "Cliente:" or "Centro:" labeled block is ALWAYS the recipient, never the issuer
+${contextLine ? `- ${contextLine}` : ''}
+
+Respond with raw JSON only (no markdown):
+{
+  "issuer_name": "exact company name from document header/logo (emisor)",
+  "issuer_tax_id": "CIF/NIF of issuer or null",
+  "recipient_name": "exact company name from Cliente/Centro block (receptor)",
+  "recipient_tax_id": "CIF/NIF of recipient or null",
+  "invoice_type": "received or issued",
+  "reasoning": "one sentence"
+}`;
+
+  try {
+    const body = {
+      contents: [{ parts: [{ inlineData: { mimeType, data: fileBase64 } }, { text: prompt }] }],
+      generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 512 },
+    };
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      console.warn(`[gemini:clarify] HTTP ${response.status} — skipping second pass`);
+      return null;
+    }
+
+    const data = await response.json();
+    const content = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!content) return null;
+
+    const parsed = JSON.parse(content);
+    const invoiceType = parsed.invoice_type === 'issued' ? 'issued' : 'received';
+    return {
+      issuer_name: parsed.issuer_name ?? null,
+      issuer_tax_id: parsed.issuer_tax_id ?? null,
+      recipient_name: parsed.recipient_name ?? null,
+      recipient_tax_id: parsed.recipient_tax_id ?? null,
+      invoice_type: invoiceType,
+      reasoning: parsed.reasoning ?? null,
+    };
+  } catch (err: any) {
+    console.error('[gemini:clarify] Second-pass role clarification failed:', err?.message);
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Provider helpers (unchanged)
+// ---------------------------------------------------------------------------
 
 function isGeminiProvider(config?: AIProviderConfig): boolean {
-  // Gemini is the default when API key is configured, unless forced local
   const forceLocal = process.env.FORCE_LOCAL_AI === 'true' || process.env.AI_FORCE_LOCAL === '1';
   if (forceLocal) return false;
   if (config?.provider === 'gemini') return true;
   if (config?.provider === 'local' || config?.provider === 'external') return false;
-  // Default: use Gemini if key is available
   return !!process.env.GEMINI_API_KEY;
 }
 
@@ -132,7 +449,7 @@ function getProviderConfig(config?: AIProviderConfig): { apiUrl: string; apiKey:
 
 // Retry configuration for transient Gemini errors (429 / 503 / UNAVAILABLE)
 const GEMINI_MAX_RETRIES = 3;
-const GEMINI_RETRY_DELAYS_MS = [1000, 3000]; // delay before attempt 2, then attempt 3
+const GEMINI_RETRY_DELAYS_MS = [1000, 3000];
 
 function isGeminiRetriableError(status: number, body: string): boolean {
   if (status === 429 || status === 503) return true;
@@ -143,6 +460,7 @@ function isGeminiRetriableError(status: number, body: string): boolean {
 async function extractWithGemini(
   fileBase64: string,
   mimeType: string,
+  companyContext?: CompanyContext,
 ): Promise<InvoiceExtraction> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
@@ -151,15 +469,16 @@ async function extractWithGemini(
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
   const maxOutputTokens = 32000;
 
-  // DIAG: file size + provider info
   const fileSizeKb = Math.round((fileBase64.length * 3) / 4 / 1024);
-  console.log(`[gemini:diag] provider=gemini model=${model} mimeType=${mimeType} base64Length=${fileBase64.length} estimatedSizeKb=${fileSizeKb} maxOutputTokens=${maxOutputTokens}`);
+  console.log(`[gemini:diag] provider=gemini model=${model} mimeType=${mimeType} base64Length=${fileBase64.length} estimatedSizeKb=${fileSizeKb} maxOutputTokens=${maxOutputTokens} hasCompanyCtx=${!!companyContext}`);
+
+  const prompt = buildExtractionPrompt(companyContext);
 
   const body = {
     contents: [{
       parts: [
         { inlineData: { mimeType, data: fileBase64 } },
-        { text: EXTRACTION_PROMPT },
+        { text: prompt },
       ],
     }],
     generationConfig: {
@@ -201,7 +520,6 @@ async function extractWithGemini(
     const usageMetadata = data?.usageMetadata ?? null;
     console.log(`[gemini:diag] candidates=${data?.candidates?.length} finishReason=${finishReason} usage=${JSON.stringify(usageMetadata)}`);
 
-    // MAX_TOKENS: output was truncated → JSON incomplete → no point retrying with same config
     if (finishReason === 'MAX_TOKENS') {
       const inputTokens = usageMetadata?.promptTokenCount ?? 'unknown';
       const outputTokens = usageMetadata?.candidatesTokenCount ?? 'unknown';
@@ -216,7 +534,6 @@ async function extractWithGemini(
       throw new Error('Gemini:MAX_TOKENS: La factura tiene demasiadas líneas para el límite actual de extracción.');
     }
 
-    // Blocked by safety or recitation filters — non-retriable
     if (finishReason === 'SAFETY') {
       console.error('[gemini:diag] Response blocked by SAFETY filter');
       throw new Error('Gemini API error (SAFETY): response blocked by content safety filters');
@@ -227,7 +544,6 @@ async function extractWithGemini(
     }
 
     const content = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    // DIAG: log first 500 chars of raw AI response
     console.log(`[gemini:diag] response_first_500: ${String(content ?? '').slice(0, 500)}`);
 
     if (!content) {
@@ -235,7 +551,6 @@ async function extractWithGemini(
       throw new Error(`No content in Gemini response (finishReason=${finishReason})`);
     }
 
-    // DIAG: detect if Gemini wrapped JSON in markdown despite responseMimeType=application/json
     const hasMarkdownFence = content.includes('```');
     if (hasMarkdownFence) {
       console.warn('[gemini:diag] ⚠️ Response contains markdown fences — responseMimeType ignored by model');
@@ -245,7 +560,6 @@ async function extractWithGemini(
     try {
       rawJson = JSON.parse(content);
     } catch (parseErr) {
-      // DIAG: log full 500 chars + finishReason for diagnosis
       console.error(`[gemini:diag] JSON parse FAILED finishReason=${finishReason} hasMarkdown=${hasMarkdownFence} content_first_500: ${content.slice(0, 500)}`);
       throw new Error('Gemini response is not valid JSON');
     }
@@ -262,7 +576,6 @@ async function extractWithGemini(
  * This function NEVER touches the database.
  */
 export function validateExtraction(raw: any): InvoiceExtraction {
-  // Safely coerce types
   const safeString = (v: any, fallback = ''): string => {
     if (v === null || v === undefined) return fallback;
     return String(v).trim();
@@ -279,16 +592,13 @@ export function validateExtraction(raw: any): InvoiceExtraction {
     return String(v).trim();
   };
 
-  // Normalize date to YYYY-MM-DD or empty
   const normalizeDate = (v: any): string => {
     if (!v) return '';
     const s = String(v).trim();
-    // Try parsing
     const d = new Date(s);
     if (!isNaN(d.getTime())) {
       return d.toISOString().split('T')[0];
     }
-    // Return as-is if it looks like a date pattern
     if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
     return '';
   };
@@ -303,7 +613,6 @@ export function validateExtraction(raw: any): InvoiceExtraction {
     ? safeString(raw.invoice_type)
     : 'received';
 
-  // Validate line items — reject items without a description
   const rawLineItems: any[] = Array.isArray(raw.line_items) ? raw.line_items : [];
   const line_items: InvoiceLineItem[] = rawLineItems
     .filter((item: any) => item && typeof item.description === 'string' && item.description.trim())
@@ -335,11 +644,16 @@ export function validateExtraction(raw: any): InvoiceExtraction {
     category: safeNullString(raw.category),
     notes: safeNullString(raw.notes),
     extraction_confidence: Math.max(0, Math.min(1, safeNumber(raw.extraction_confidence ?? raw.confidence_score, 0.5))),
-    needs_review: false, // Will be computed below
+    needs_review: false, // computed below
     line_items,
+    // Audit fields
+    issuer_name: safeNullString(raw.issuer_name),
+    issuer_tax_id: safeNullString(raw.issuer_tax_id),
+    recipient_name: safeNullString(raw.recipient_name),
+    recipient_tax_id: safeNullString(raw.recipient_tax_id),
+    role_reasoning_summary: safeNullString(raw.role_reasoning_summary),
   };
 
-  // Compute needs_review based on business rules
   extraction.needs_review = shouldRequireReview(extraction);
 
   return extraction;
@@ -350,14 +664,11 @@ export function validateExtraction(raw: any): InvoiceExtraction {
  */
 export function shouldRequireReview(extraction: InvoiceExtraction): boolean {
   if (extraction.extraction_confidence < 0.7) return true;
-
-  // Critical fields must be present
   if (!extraction.invoice_number) return true;
   if (!extraction.issue_date) return true;
   if (!extraction.supplier_name) return true;
   if (!extraction.customer_name) return true;
   if (extraction.total_amount <= 0) return true;
-
   return false;
 }
 
@@ -369,11 +680,11 @@ export async function extractInvoiceData(
   fileBase64: string,
   mimeType: string,
   filename: string,
-  providerConfig?: AIProviderConfig
+  providerConfig?: AIProviderConfig,
+  companyContext?: CompanyContext,
 ): Promise<InvoiceExtraction> {
-  // Use Gemini when available (default provider)
   if (isGeminiProvider(providerConfig)) {
-    return extractWithGemini(fileBase64, mimeType);
+    return extractWithGemini(fileBase64, mimeType, companyContext);
   }
 
   // Fallback: OpenAI-compatible (Ollama or external)
@@ -383,9 +694,11 @@ export async function extractInvoiceData(
     throw new Error('No AI API key configured');
   }
 
+  const prompt = buildExtractionPrompt(companyContext);
+
   const userContent: any[] = [
     { type: 'image_url', image_url: { url: `data:${mimeType};base64,${fileBase64}` } },
-    { type: 'text', text: EXTRACTION_PROMPT },
+    { type: 'text', text: prompt },
   ];
 
   const response = await fetch(apiUrl, {

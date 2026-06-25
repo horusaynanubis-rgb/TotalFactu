@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getFileUrl } from '@/lib/storage';
-import { extractInvoiceData, InvoiceExtraction } from '@/lib/ai-extraction';
+import { extractInvoiceData, detectRoleAmbiguity, clarifyRolesWithGemini, InvoiceExtraction, CompanyContext } from '@/lib/ai-extraction';
 import { classifyInvoiceType } from '@/lib/invoice-type-classifier';
 import { sendMessage, editMessage } from '@/lib/telegram';
 import { normalizeDescription } from '@/lib/supplier-analysis';
@@ -126,16 +126,31 @@ export async function POST(
       apiEndpoint: document.company?.ai_api_endpoint,
     };
 
+    // Fetch aliases early so they can be passed as company context to Gemini
+    const companyAliases = await prisma.companyAlias.findMany({
+      where: { company_id: document.company_id, active: true },
+      select: { alias: true, alias_normalized: true, alias_type: true },
+    });
+
+    const companyContext: CompanyContext = {
+      name: document.company.name,
+      tax_id: document.company.tax_id,
+      aliases: companyAliases.map(a => a.alias),
+    };
+
     // AI Extraction — returns validated structured JSON, never writes to DB
     processingPhase = 'ai_extract';
     const extraction = await extractInvoiceData(
       fileBase64,
       effectiveMime,
       document.original_filename,
-      aiConfig
+      aiConfig,
+      companyContext,
     );
 
     console.log(`[process] document_type=${extraction.document_type} confidence=${extraction.extraction_confidence}`);
+    console.log(`[process:roles] issuer="${extraction.issuer_name ?? 'n/a'}" recipient="${extraction.recipient_name ?? 'n/a'}" reasoning="${extraction.role_reasoning_summary ?? 'n/a'}"`);
+    console.log(`[process:roles] supplier_name="${extraction.supplier_name}" customer_name="${extraction.customer_name}" invoice_type=${extraction.invoice_type}`);
 
     // ── DELIVERY NOTE path ─────────────────────────────────────────────────
     if (extraction.document_type === 'delivery_note') {
@@ -186,11 +201,63 @@ export async function POST(
       extraction.needs_review = true;
     }
 
-    // Fetch active aliases for this company (used by classifier as fallback)
-    const companyAliases = await prisma.companyAlias.findMany({
-      where: { company_id: document.company_id, active: true },
-      select: { alias_normalized: true, alias_type: true },
+    // ── Role ambiguity detection ───────────────────────────────────────────
+    // Checks for cases where the AI confused issuer/recipient roles (e.g. BYOU
+    // appearing in a "Cliente:" block but being extracted as supplier_name).
+    const ambiguity = detectRoleAmbiguity(extraction, {
+      name: document.company.name,
+      tax_id: document.company.tax_id,
+      aliases: companyAliases.map(a => a.alias),
     });
+
+    if (ambiguity.isSuspicious) {
+      console.warn(
+        `[process:ambiguity] ⚠️ documentId=${document.id} filename="${document.original_filename}"`,
+        `company="${document.company.name}" (${document.company.tax_id})`,
+        `supplier_detected="${extraction.supplier_name}" customer_detected="${extraction.customer_name}"`,
+        `issuer_field="${extraction.issuer_name ?? 'n/a'}" recipient_field="${extraction.recipient_name ?? 'n/a'}"`,
+        `invoiceType=${extraction.invoice_type} reason="${ambiguity.reason}"`,
+      );
+
+      if (ambiguity.correctedSupplierName) {
+        // Auto-correct using issuer/recipient audit fields from the first pass
+        console.log(
+          `[process:ambiguity] Auto-correcting: supplier="${ambiguity.correctedSupplierName}"`,
+          `customer="${ambiguity.correctedCustomerName}" type=${ambiguity.correctedInvoiceType}`,
+        );
+        extraction.supplier_name = ambiguity.correctedSupplierName;
+        extraction.customer_name = ambiguity.correctedCustomerName ?? extraction.customer_name;
+        extraction.supplier_tax_id = ambiguity.correctedSupplierTaxId ?? extraction.supplier_tax_id;
+        extraction.customer_tax_id = ambiguity.correctedCustomerTaxId ?? extraction.customer_tax_id;
+        if (ambiguity.correctedInvoiceType) {
+          extraction.invoice_type = ambiguity.correctedInvoiceType;
+        }
+      } else {
+        // No correction possible from first pass — try second Gemini call
+        console.log(`[process:ambiguity] No auto-correction available — attempting second-pass role clarification`);
+        const clarification = await clarifyRolesWithGemini(fileBase64, effectiveMime, companyContext);
+        if (clarification) {
+          console.log(
+            `[process:ambiguity] Second-pass result: issuer="${clarification.issuer_name}"`,
+            `recipient="${clarification.recipient_name}" type=${clarification.invoice_type}`,
+            `reasoning="${clarification.reasoning}"`,
+          );
+          if (clarification.issuer_name) {
+            extraction.supplier_name = clarification.issuer_name;
+            extraction.supplier_tax_id = clarification.issuer_tax_id ?? extraction.supplier_tax_id;
+          }
+          if (clarification.recipient_name) {
+            extraction.customer_name = clarification.recipient_name;
+            extraction.customer_tax_id = clarification.recipient_tax_id ?? extraction.customer_tax_id;
+          }
+          extraction.invoice_type = clarification.invoice_type;
+          extraction.issuer_name = clarification.issuer_name;
+          extraction.recipient_name = clarification.recipient_name;
+        }
+        // Force review regardless — human should confirm when we had to use second pass
+        extraction.needs_review = true;
+      }
+    }
 
     // Post-process: verify invoice_type against company identity (AI can be wrong)
     const classification = classifyInvoiceType(extraction, {
