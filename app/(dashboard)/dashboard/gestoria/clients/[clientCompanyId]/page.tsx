@@ -34,8 +34,10 @@ import {
   AlertTriangle,
   LayoutDashboard,
   Inbox,
+  Archive,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { Input } from '@/components/ui/input';
 import { SendMessageModal } from '@/components/gestoria/send-message-modal';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -106,6 +108,22 @@ interface ExportRow {
   email_sent_at: string | null;
   created_at: string;
   company: { export_email: string };
+}
+
+interface BatchInfo {
+  batchIndex: number;
+  fromItem: number;
+  toItem: number;
+  documentCount: number;
+  estimatedSizeMB: number;
+  token: string;
+}
+
+interface ExportPlan {
+  totalDocuments: number;
+  totalEstimatedSizeMB: number;
+  batchCount: number;
+  batches: BatchInfo[];
 }
 
 interface MessageRow {
@@ -198,6 +216,14 @@ export default function ClientDetailPage() {
   const [actionDocId, setActionDocId] = useState<string | null>(null);
   const [downloadingExportId, setDownloadingExportId] = useState<string | null>(null);
 
+  // A3 document export
+  const [exportFrom, setExportFrom] = useState('');
+  const [exportTo, setExportTo] = useState('');
+  const [exportType, setExportType] = useState('all');
+  const [exportStatus, setExportStatus] = useState('processed');
+  const [exportPlan, setExportPlan] = useState<ExportPlan | null>(null);
+  const [loadingExportPlan, setLoadingExportPlan] = useState(false);
+
   const companyType = (session?.user as any)?.companyType;
 
   useEffect(() => {
@@ -272,6 +298,49 @@ export default function ClientDetailPage() {
       })
       .catch(() => toast.error('Error cargando más facturas'))
       .finally(() => setLoadingMoreInvoices(false));
+  };
+
+  const handlePrepareExport = async () => {
+    if (!exportFrom || !exportTo) {
+      toast.error('Selecciona un rango de fechas');
+      return;
+    }
+    if (exportFrom > exportTo) {
+      toast.error('La fecha de inicio debe ser anterior a la fecha de fin');
+      return;
+    }
+    setLoadingExportPlan(true);
+    setExportPlan(null);
+    try {
+      const res = await fetch(
+        `/api/gestoria/clients/${params.clientCompanyId}/documents/export-plan`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ from: exportFrom, to: exportTo, type: exportType, status: exportStatus }),
+        },
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        if (data.error === 'TOO_MANY_DOCUMENTS') {
+          toast.error(
+            `Demasiados documentos (${(data.totalDocuments as number).toLocaleString('es-ES')}). Reduce el rango de fechas o divide por meses.`,
+          );
+        } else {
+          toast.error(data.error || 'Error al preparar la exportación');
+        }
+        return;
+      }
+      if (data.totalDocuments === 0) {
+        toast('No hay documentos para el periodo seleccionado.', { icon: 'ℹ️' });
+        return;
+      }
+      setExportPlan(data as ExportPlan);
+    } catch {
+      toast.error('Error al preparar la exportación');
+    } finally {
+      setLoadingExportPlan(false);
+    }
   };
 
   const loadMessages = () => {
@@ -399,6 +468,10 @@ export default function ClientDetailPage() {
                 {pendingReviews}
               </Badge>
             )}
+          </TabsTrigger>
+          <TabsTrigger value="exportaciones">
+            <Archive className="h-4 w-4 mr-1.5" />
+            Exportar A3
           </TabsTrigger>
           <TabsTrigger value="mensajes">
             <Inbox className="h-4 w-4 mr-1.5" />
@@ -858,6 +931,155 @@ export default function ClientDetailPage() {
             </CardContent>
           </Card>
         </TabsContent>
+        {/* ── EXPORTAR A3 ─────────────────────────────────────────────────── */}
+        <TabsContent value="exportaciones" className="mt-6 space-y-6">
+          {/* Form */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Archive className="h-4 w-4" />
+                Exportar documentos originales para A3
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Descarga los documentos originales (PDF/imagen) agrupados en archivos ZIP independientes,
+                listos para importar en A3. Cada ZIP es completo y no necesitas unirlos.
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-sm font-medium">Desde</label>
+                  <Input
+                    type="date"
+                    value={exportFrom}
+                    onChange={(e) => { setExportFrom(e.target.value); setExportPlan(null); }}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium">Hasta</label>
+                  <Input
+                    type="date"
+                    value={exportTo}
+                    onChange={(e) => { setExportTo(e.target.value); setExportPlan(null); }}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium">Tipo de factura</label>
+                  <select
+                    value={exportType}
+                    onChange={(e) => { setExportType(e.target.value); setExportPlan(null); }}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <option value="all">Todas</option>
+                    <option value="received">Solo recibidas</option>
+                    <option value="issued">Solo emitidas</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium">Estado</label>
+                  <select
+                    value={exportStatus}
+                    onChange={(e) => { setExportStatus(e.target.value); setExportPlan(null); }}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <option value="processed">Todas las procesadas</option>
+                    <option value="approved_only">Solo aprobadas</option>
+                  </select>
+                </div>
+              </div>
+
+              <Button
+                onClick={handlePrepareExport}
+                disabled={loadingExportPlan || !exportFrom || !exportTo}
+                className="w-full sm:w-auto"
+              >
+                {loadingExportPlan ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Calculando lotes…
+                  </>
+                ) : (
+                  <>
+                    <Archive className="h-4 w-4 mr-2" />
+                    Preparar descarga
+                  </>
+                )}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Results */}
+          {exportPlan && exportPlan.totalDocuments > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-green-500" />
+                  Documentos preparados
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="rounded-lg bg-muted/50 p-4 text-sm space-y-1">
+                  <p>
+                    <span className="font-medium">Total documentos:</span>{' '}
+                    {exportPlan.totalDocuments.toLocaleString('es-ES')}
+                  </p>
+                  <p>
+                    <span className="font-medium">Tamaño estimado:</span>{' '}
+                    {exportPlan.totalEstimatedSizeMB} MB (aprox.)
+                  </p>
+                  <p>
+                    <span className="font-medium">Archivos ZIP:</span>{' '}
+                    {exportPlan.batchCount}
+                  </p>
+                </div>
+
+                {exportPlan.batchCount > 1 && (
+                  <p className="text-sm text-muted-foreground rounded-md border border-blue-200 bg-blue-50 p-3">
+                    Los documentos se han dividido en <strong>{exportPlan.batchCount} archivos ZIP independientes</strong>.
+                    Cada ZIP es completo y se abre directamente. <strong>No necesitas unirlos ni descomprimirlos juntos.</strong>
+                  </p>
+                )}
+
+                <div className="space-y-2">
+                  {exportPlan.batches.map((batch) => {
+                    const zipUrl =
+                      `/api/gestoria/clients/${params.clientCompanyId}/documents/export-zip` +
+                      `?token=${encodeURIComponent(batch.token)}`;
+                    return (
+                      <div
+                        key={batch.batchIndex}
+                        className="flex items-center justify-between rounded-md border p-3 gap-3"
+                      >
+                        <div className="text-sm">
+                          <span className="font-medium">ZIP {batch.batchIndex + 1}</span>
+                          <span className="text-muted-foreground ml-2">
+                            Documentos {batch.fromItem}–{batch.toItem}
+                            {' · '}
+                            {batch.documentCount} archivos
+                            {' · '}
+                            ~{batch.estimatedSizeMB} MB
+                          </span>
+                        </div>
+                        <a href={zipUrl} download>
+                          <Button variant="outline" size="sm">
+                            <Download className="h-3.5 w-3.5 mr-1.5" />
+                            Descargar ZIP {batch.batchIndex + 1}
+                          </Button>
+                        </a>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <p className="text-xs text-muted-foreground">
+                  Los enlaces son válidos durante 1 hora. Pasado ese tiempo, pulsa de nuevo "Preparar descarga".
+                </p>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
         {/* ── MENSAJES ────────────────────────────────────────────────────── */}
         <TabsContent value="mensajes" className="mt-6">
           <Card>
