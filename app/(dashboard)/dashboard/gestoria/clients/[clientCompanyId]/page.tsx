@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
@@ -18,6 +18,9 @@ import {
 } from '@/components/ui/table';
 import {
   ArrowLeft,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
   Loader2,
   Building2,
   Mail,
@@ -35,6 +38,8 @@ import {
   LayoutDashboard,
   Inbox,
   Archive,
+  Search,
+  X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Input } from '@/components/ui/input';
@@ -184,6 +189,52 @@ function invoiceTypeLabel(type: string) {
 
 const LOW_CONFIDENCE_THRESHOLD = 0.7;
 
+function SortableHead({
+  col, label, sortBy, sortDir, onClick, className,
+}: {
+  col: string; label: string; sortBy: string; sortDir: 'asc' | 'desc';
+  onClick: () => void; className?: string;
+}) {
+  const active = sortBy === col;
+  return (
+    <TableHead
+      className={`cursor-pointer select-none hover:bg-muted/30 whitespace-nowrap ${className ?? ''}`}
+      onClick={onClick}
+    >
+      <div className="flex items-center gap-1">
+        {label}
+        {active ? (
+          sortDir === 'asc'
+            ? <ArrowUp className="h-3 w-3 text-primary" />
+            : <ArrowDown className="h-3 w-3 text-primary" />
+        ) : (
+          <ArrowUpDown className="h-3 w-3 opacity-30" />
+        )}
+      </div>
+    </TableHead>
+  );
+}
+
+const INVOICE_CHIP_TYPES = [
+  { v: 'all', l: 'Todas' },
+  { v: 'received', l: 'Recibidas' },
+  { v: 'issued', l: 'Emitidas' },
+] as const;
+
+const INVOICE_CHIP_STATUSES = [
+  { v: 'all', l: 'Todos estados' },
+  { v: 'approved', l: 'Aprobadas' },
+  { v: 'pending', l: 'Pendientes' },
+] as const;
+
+const INVOICE_CHIP_PERIODS = [
+  { v: 'all', l: 'Todo' },
+  { v: 'this_month', l: 'Este mes' },
+  { v: 'last_3_months', l: 'Últimos 3m' },
+  { v: 'this_year', l: 'Este año' },
+  { v: 'custom', l: 'Personalizado' },
+] as const;
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function ClientDetailPage() {
@@ -206,6 +257,22 @@ export default function ClientDetailPage() {
   const [loadingInvoices, setLoadingInvoices] = useState(false);
   const [loadingMoreInvoices, setLoadingMoreInvoices] = useState(false);
   const [invoicesHasMore, setInvoicesHasMore] = useState(false);
+
+  // Invoice filters & sorting
+  const [invoiceSearch, setInvoiceSearch] = useState('');
+  const [invoiceType, setInvoiceType] = useState('all');
+  const [invoiceStatus, setInvoiceStatus] = useState('all');
+  const [invoicePeriod, setInvoicePeriod] = useState('all');
+  const [invoiceFrom, setInvoiceFrom] = useState('');
+  const [invoiceTo, setInvoiceTo] = useState('');
+  const [invoiceSortBy, setInvoiceSortBy] = useState('issue_date');
+  const [invoiceSortDir, setInvoiceSortDir] = useState<'asc' | 'desc'>('desc');
+  const invoiceSearchRef = useRef('');
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const invoicesTabActivated = useRef(false);
+
+  // Document search (client-side)
+  const [docSearch, setDocSearch] = useState('');
 
   // Messages (lazy — loaded on first activation of Mensajes tab)
   const [messages, setMessages] = useState<MessageRow[] | null>(null);
@@ -274,30 +341,130 @@ export default function ClientDetailPage() {
       .finally(() => setLoadingMoreDocs(false));
   };
 
-  const loadInvoices = () => {
-    if (invoices !== null || loadingInvoices) return;
-    setLoadingInvoices(true);
-    fetch(`/api/gestoria/clients/${params.clientCompanyId}/invoices?limit=50&offset=0`)
+  function doFetchInvoices(
+    replace: boolean,
+    overrides?: {
+      search?: string; type?: string; status?: string;
+      period?: string; from?: string; to?: string;
+      sortBy?: string; sortDir?: 'asc' | 'desc';
+    },
+  ) {
+    const search = overrides?.search ?? invoiceSearchRef.current;
+    const type = overrides?.type ?? invoiceType;
+    const status = overrides?.status ?? invoiceStatus;
+    const period = overrides?.period ?? invoicePeriod;
+    const from = overrides?.from ?? invoiceFrom;
+    const to = overrides?.to ?? invoiceTo;
+    const sortBy = overrides?.sortBy ?? invoiceSortBy;
+    const sortDir = overrides?.sortDir ?? invoiceSortDir;
+    const offset = replace ? 0 : (invoices?.length ?? 0);
+
+    if (replace) {
+      setLoadingInvoices(true);
+      setInvoices(null);
+      setInvoicesHasMore(false);
+    } else {
+      if (loadingMoreInvoices) return;
+      setLoadingMoreInvoices(true);
+    }
+
+    const sp = new URLSearchParams();
+    sp.set('limit', '50');
+    sp.set('offset', String(offset));
+    if (search.trim()) sp.set('q', search.trim());
+    if (type !== 'all') sp.set('type', type);
+    if (status !== 'all') sp.set('status', status);
+
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10);
+    if (period === 'this_month') {
+      sp.set('from', new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10));
+      sp.set('to', todayStr);
+    } else if (period === 'last_3_months') {
+      const d = new Date(now); d.setMonth(d.getMonth() - 3);
+      sp.set('from', d.toISOString().slice(0, 10));
+      sp.set('to', todayStr);
+    } else if (period === 'this_year') {
+      sp.set('from', new Date(now.getFullYear(), 0, 1).toISOString().slice(0, 10));
+      sp.set('to', todayStr);
+    } else if (period === 'custom') {
+      if (from) sp.set('from', from);
+      if (to) sp.set('to', to);
+    }
+
+    sp.set('sortBy', sortBy);
+    sp.set('sortDir', sortDir);
+
+    fetch(`/api/gestoria/clients/${params.clientCompanyId}/invoices?${sp}`)
       .then((r) => r.json())
       .then((data) => {
-        setInvoices(data.invoices ?? []);
+        if (replace) setInvoices(data.invoices ?? []);
+        else setInvoices((prev) => [...(prev ?? []), ...(data.invoices ?? [])]);
         setInvoicesHasMore(data.hasMore ?? false);
       })
       .catch(() => toast.error('Error cargando facturas'))
-      .finally(() => setLoadingInvoices(false));
+      .finally(() => {
+        if (replace) setLoadingInvoices(false);
+        else setLoadingMoreInvoices(false);
+      });
+  }
+
+  const handleSearchChange = (val: string) => {
+    setInvoiceSearch(val);
+    invoiceSearchRef.current = val;
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => doFetchInvoices(true, { search: val }), 300);
   };
 
-  const loadMoreInvoices = () => {
-    if (!invoices || loadingMoreInvoices) return;
-    setLoadingMoreInvoices(true);
-    fetch(`/api/gestoria/clients/${params.clientCompanyId}/invoices?limit=50&offset=${invoices.length}`)
-      .then((r) => r.json())
-      .then((data) => {
-        setInvoices((prev) => [...(prev ?? []), ...(data.invoices ?? [])]);
-        setInvoicesHasMore(data.hasMore ?? false);
-      })
-      .catch(() => toast.error('Error cargando más facturas'))
-      .finally(() => setLoadingMoreInvoices(false));
+  const handleTypeChange = (val: string) => {
+    setInvoiceType(val);
+    doFetchInvoices(true, { type: val });
+  };
+
+  const handleStatusChange = (val: string) => {
+    setInvoiceStatus(val);
+    doFetchInvoices(true, { status: val });
+  };
+
+  const handlePeriodChange = (val: string) => {
+    setInvoicePeriod(val);
+    doFetchInvoices(true, { period: val });
+  };
+
+  const handleInvoiceFromChange = (val: string) => {
+    setInvoiceFrom(val);
+    setInvoicePeriod('custom');
+    doFetchInvoices(true, { period: 'custom', from: val });
+  };
+
+  const handleInvoiceToChange = (val: string) => {
+    setInvoiceTo(val);
+    setInvoicePeriod('custom');
+    doFetchInvoices(true, { period: 'custom', to: val });
+  };
+
+  const handleInvoiceSortChange = (col: string) => {
+    const newDir = invoiceSortBy === col && invoiceSortDir === 'desc' ? 'asc' : 'desc';
+    setInvoiceSortBy(col);
+    setInvoiceSortDir(newDir);
+    doFetchInvoices(true, { sortBy: col, sortDir: newDir });
+  };
+
+  const clearInvoiceFilters = () => {
+    setInvoiceSearch('');
+    invoiceSearchRef.current = '';
+    setInvoiceType('all');
+    setInvoiceStatus('all');
+    setInvoicePeriod('all');
+    setInvoiceFrom('');
+    setInvoiceTo('');
+    setInvoiceSortBy('issue_date');
+    setInvoiceSortDir('desc');
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    doFetchInvoices(true, {
+      search: '', type: 'all', status: 'all', period: 'all',
+      from: '', to: '', sortBy: 'issue_date', sortDir: 'desc',
+    });
   };
 
   const handlePrepareExport = async () => {
@@ -355,7 +522,10 @@ export default function ClientDetailPage() {
 
   const handleTabChange = (tab: string) => {
     if (tab === 'documentos' || tab === 'revision') loadDocuments();
-    if (tab === 'facturas') loadInvoices();
+    if (tab === 'facturas' && !invoicesTabActivated.current) {
+      invoicesTabActivated.current = true;
+      doFetchInvoices(true);
+    }
     if (tab === 'mensajes') loadMessages();
   };
 
@@ -409,6 +579,18 @@ export default function ClientDetailPage() {
   if (!detail) return null;
 
   const { company, license, telegramLinked, invoicesThisMonth, pendingReviews, totalExports, recentExports } = detail;
+
+  const hasActiveInvoiceFilters =
+    invoiceSearch !== '' ||
+    invoiceType !== 'all' ||
+    invoiceStatus !== 'all' ||
+    invoicePeriod !== 'all';
+
+  const filteredDocs = docSearch.trim()
+    ? (documents ?? []).filter((d) =>
+        d.original_filename.toLowerCase().includes(docSearch.toLowerCase()),
+      )
+    : (documents ?? []);
 
   const reviewDocs = documents?.filter(
     (d) =>
@@ -641,18 +823,39 @@ export default function ClientDetailPage() {
         {/* ── DOCUMENTOS ──────────────────────────────────────────────────── */}
         <TabsContent value="documentos" className="mt-6">
           <Card>
-            <CardHeader>
+            <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center justify-between">
                 <span className="flex items-center gap-2">
                   <FileText className="h-4 w-4" />Documentos del cliente
                 </span>
-                {documents && documents.length > 0 && (
+                {documents && (
                   <span className="text-sm font-normal text-muted-foreground">
-                    {documents.length} documento{documents.length !== 1 ? 's' : ''}{docsHasMore ? '+' : ''}
+                    {filteredDocs.length}{!docSearch && docsHasMore ? '+' : ''} documento{filteredDocs.length !== 1 ? 's' : ''}
                   </span>
                 )}
               </CardTitle>
             </CardHeader>
+            {documents && documents.length > 0 && (
+              <div className="px-6 pb-4 border-b">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Buscar por nombre de archivo..."
+                    value={docSearch}
+                    onChange={(e) => setDocSearch(e.target.value)}
+                    className="pl-9 pr-9"
+                  />
+                  {docSearch && (
+                    <button
+                      onClick={() => setDocSearch('')}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
             <CardContent className="p-0">
               {loadingDocs ? (
                 <div className="flex justify-center py-12">
@@ -662,6 +865,14 @@ export default function ClientDetailPage() {
                 <div className="py-12 text-center text-muted-foreground">
                   <FileText className="h-8 w-8 mx-auto mb-2 opacity-30" />
                   <p className="text-sm">Sin documentos todavía.</p>
+                </div>
+              ) : filteredDocs.length === 0 ? (
+                <div className="py-12 text-center text-muted-foreground">
+                  <FileText className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                  <p className="text-sm">No hay documentos que coincidan con la búsqueda.</p>
+                  <button onClick={() => setDocSearch('')} className="mt-2 text-xs text-primary hover:underline">
+                    Limpiar búsqueda
+                  </button>
                 </div>
               ) : (
                 <>
@@ -677,7 +888,7 @@ export default function ClientDetailPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {documents.map((doc) => (
+                    {filteredDocs.map((doc) => (
                       <TableRow key={doc.id}>
                         <TableCell className="font-medium text-sm max-w-xs truncate">
                           {doc.original_filename}
@@ -720,7 +931,7 @@ export default function ClientDetailPage() {
                     ))}
                   </TableBody>
                 </Table>
-                {docsHasMore && (
+                {!docSearch && docsHasMore && (
                   <div className="p-4 flex justify-center border-t">
                     <Button variant="outline" size="sm" onClick={loadMoreDocuments} disabled={loadingMoreDocs}>
                       {loadingMoreDocs ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
@@ -737,67 +948,195 @@ export default function ClientDetailPage() {
         {/* ── FACTURAS ────────────────────────────────────────────────────── */}
         <TabsContent value="facturas" className="mt-6">
           <Card>
-            <CardHeader>
+            <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center justify-between">
                 <span className="flex items-center gap-2">
                   <Receipt className="h-4 w-4" />Facturas del cliente
                 </span>
-                {invoices && invoices.length > 0 && (
+                {invoices !== null && (
                   <span className="text-sm font-normal text-muted-foreground">
-                    {invoices.length} factura{invoices.length !== 1 ? 's' : ''}{invoicesHasMore ? '+' : ''}
+                    {invoices.length}{invoicesHasMore ? '+' : ''} factura{invoices.length !== 1 ? 's' : ''}
                   </span>
                 )}
               </CardTitle>
             </CardHeader>
+
+            {/* ── Filter bar ──────────────────────────────────────────────── */}
+            <div className="px-6 pb-4 space-y-3 border-b">
+              {/* Search input */}
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar por proveedor, nº factura, importe..."
+                  value={invoiceSearch}
+                  onChange={(e) => handleSearchChange(e.target.value)}
+                  className="pl-9 pr-9"
+                />
+                {invoiceSearch && (
+                  <button
+                    onClick={() => handleSearchChange('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    aria-label="Limpiar búsqueda"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+
+              {/* Filter chips */}
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Type */}
+                <div className="flex gap-1">
+                  {INVOICE_CHIP_TYPES.map(({ v, l }) => (
+                    <button
+                      key={v}
+                      onClick={() => handleTypeChange(v)}
+                      className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                        invoiceType === v
+                          ? 'bg-primary text-primary-foreground border-primary'
+                          : 'bg-background text-muted-foreground border-border hover:border-primary/50'
+                      }`}
+                    >
+                      {l}
+                    </button>
+                  ))}
+                </div>
+
+                <span className="h-5 w-px bg-border" />
+
+                {/* Status */}
+                <div className="flex gap-1">
+                  {INVOICE_CHIP_STATUSES.map(({ v, l }) => (
+                    <button
+                      key={v}
+                      onClick={() => handleStatusChange(v)}
+                      className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                        invoiceStatus === v
+                          ? 'bg-primary text-primary-foreground border-primary'
+                          : 'bg-background text-muted-foreground border-border hover:border-primary/50'
+                      }`}
+                    >
+                      {l}
+                    </button>
+                  ))}
+                </div>
+
+                <span className="h-5 w-px bg-border" />
+
+                {/* Period */}
+                <div className="flex gap-1 flex-wrap">
+                  {INVOICE_CHIP_PERIODS.map(({ v, l }) => (
+                    <button
+                      key={v}
+                      onClick={() => handlePeriodChange(v)}
+                      className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                        invoicePeriod === v
+                          ? 'bg-primary text-primary-foreground border-primary'
+                          : 'bg-background text-muted-foreground border-border hover:border-primary/50'
+                      }`}
+                    >
+                      {l}
+                    </button>
+                  ))}
+                </div>
+
+                {hasActiveInvoiceFilters && (
+                  <button
+                    onClick={clearInvoiceFilters}
+                    className="ml-auto text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+                  >
+                    <X className="h-3 w-3" />
+                    Limpiar filtros
+                  </button>
+                )}
+              </div>
+
+              {/* Custom date range */}
+              {invoicePeriod === 'custom' && (
+                <div className="flex gap-3 items-center max-w-sm">
+                  <Input
+                    type="date"
+                    value={invoiceFrom}
+                    onChange={(e) => handleInvoiceFromChange(e.target.value)}
+                    className="h-8 text-sm"
+                  />
+                  <span className="text-sm text-muted-foreground shrink-0">—</span>
+                  <Input
+                    type="date"
+                    value={invoiceTo}
+                    onChange={(e) => handleInvoiceToChange(e.target.value)}
+                    className="h-8 text-sm"
+                  />
+                </div>
+              )}
+            </div>
+
             <CardContent className="p-0">
               {loadingInvoices ? (
                 <div className="flex justify-center py-12">
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                 </div>
-              ) : invoices === null || invoices.length === 0 ? (
+              ) : invoices === null ? (
+                <div className="flex justify-center py-12">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : invoices.length === 0 ? (
                 <div className="py-12 text-center text-muted-foreground">
                   <Receipt className="h-8 w-8 mx-auto mb-2 opacity-30" />
-                  <p className="text-sm">Sin facturas todavía.</p>
+                  <p className="text-sm">
+                    {hasActiveInvoiceFilters
+                      ? 'No hay facturas que coincidan con los filtros.'
+                      : 'Sin facturas todavía.'}
+                  </p>
+                  {hasActiveInvoiceFilters && (
+                    <button
+                      onClick={clearInvoiceFilters}
+                      className="mt-2 text-xs text-primary hover:underline"
+                    >
+                      Limpiar filtros
+                    </button>
+                  )}
                 </div>
               ) : (
                 <>
+                <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead>Nº Factura</TableHead>
                       <TableHead>Tipo</TableHead>
-                      <TableHead>Proveedor</TableHead>
-                      <TableHead>Fecha</TableHead>
+                      <SortableHead col="supplier_name" label="Proveedor" sortBy={invoiceSortBy} sortDir={invoiceSortDir} onClick={() => handleInvoiceSortChange('supplier_name')} />
+                      <SortableHead col="issue_date" label="Fecha" sortBy={invoiceSortBy} sortDir={invoiceSortDir} onClick={() => handleInvoiceSortChange('issue_date')} />
                       <TableHead className="text-right">Base</TableHead>
                       <TableHead className="text-right">IVA</TableHead>
-                      <TableHead className="text-right">Total</TableHead>
-                      <TableHead>Confianza IA</TableHead>
-                      <TableHead>Estado</TableHead>
+                      <SortableHead col="total_amount" label="Total" sortBy={invoiceSortBy} sortDir={invoiceSortDir} onClick={() => handleInvoiceSortChange('total_amount')} className="text-right" />
+                      <SortableHead col="extraction_confidence" label="Confianza IA" sortBy={invoiceSortBy} sortDir={invoiceSortDir} onClick={() => handleInvoiceSortChange('extraction_confidence')} />
+                      <SortableHead col="review_status" label="Estado" sortBy={invoiceSortBy} sortDir={invoiceSortDir} onClick={() => handleInvoiceSortChange('review_status')} />
                       <TableHead className="text-right">Acciones</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {invoices.map((inv) => (
                       <TableRow key={inv.id}>
-                        <TableCell className="font-medium text-sm">{inv.invoice_number}</TableCell>
+                        <TableCell className="font-medium text-sm whitespace-nowrap">{inv.invoice_number}</TableCell>
                         <TableCell>
-                          <Badge variant="outline" className="text-xs">
+                          <Badge variant="outline" className="text-xs whitespace-nowrap">
                             {invoiceTypeLabel(inv.invoice_type)}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-sm max-w-[180px] truncate">
                           {inv.supplier_name}
                         </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
+                        <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                           {new Date(inv.issue_date).toLocaleDateString('es-ES')}
                         </TableCell>
-                        <TableCell className="text-right text-sm">
+                        <TableCell className="text-right text-sm whitespace-nowrap">
                           {inv.subtotal.toFixed(2)} {inv.currency}
                         </TableCell>
-                        <TableCell className="text-right text-sm text-muted-foreground">
+                        <TableCell className="text-right text-sm text-muted-foreground whitespace-nowrap">
                           {inv.tax_amount.toFixed(2)} {inv.currency}
                         </TableCell>
-                        <TableCell className="text-right text-sm font-medium">
+                        <TableCell className="text-right text-sm font-medium whitespace-nowrap">
                           {inv.total_amount.toFixed(2)} {inv.currency}
                         </TableCell>
                         <TableCell>{confidenceBadge(inv.extraction_confidence)}</TableCell>
@@ -834,9 +1173,10 @@ export default function ClientDetailPage() {
                     ))}
                   </TableBody>
                 </Table>
+                </div>
                 {invoicesHasMore && (
                   <div className="p-4 flex justify-center border-t">
-                    <Button variant="outline" size="sm" onClick={loadMoreInvoices} disabled={loadingMoreInvoices}>
+                    <Button variant="outline" size="sm" onClick={() => doFetchInvoices(false)} disabled={loadingMoreInvoices}>
                       {loadingMoreInvoices ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                       Cargar más facturas
                     </Button>

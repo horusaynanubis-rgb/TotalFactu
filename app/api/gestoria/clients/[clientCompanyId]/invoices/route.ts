@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/auth-options';
 import { prisma } from '@/lib/prisma';
+import { Prisma } from '@prisma/client';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,6 +25,14 @@ async function resolveGestoriaAccess(userId: string, clientCompanyId: string) {
   return { gestoriaCompanyId: membership.company_id };
 }
 
+const VALID_SORT_FIELDS: Record<string, string> = {
+  issue_date: 'issue_date',
+  supplier_name: 'supplier_name',
+  total_amount: 'total_amount',
+  extraction_confidence: 'extraction_confidence',
+  review_status: 'review_status',
+};
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { clientCompanyId: string } },
@@ -39,12 +48,75 @@ export async function GET(
   }
 
   const { searchParams } = new URL(request.url);
+
   const limit = Math.min(parseInt(searchParams.get('limit') ?? '50', 10), 100);
   const offset = parseInt(searchParams.get('offset') ?? '0', 10);
+  const q = searchParams.get('q')?.trim() ?? '';
+  const type = searchParams.get('type') ?? 'all';
+  const status = searchParams.get('status') ?? 'all';
+  const from = searchParams.get('from') ?? '';
+  const to = searchParams.get('to') ?? '';
+  const sortByRaw = searchParams.get('sortBy') ?? 'issue_date';
+  const sortDir = searchParams.get('sortDir') === 'asc' ? 'asc' : 'desc';
+  const sortBy = VALID_SORT_FIELDS[sortByRaw] ?? 'issue_date';
+
+  // Build where clause
+  const where: Prisma.InvoiceWhereInput = {
+    company_id: params.clientCompanyId,
+  };
+
+  // Type filter
+  if (type === 'received' || type === 'issued') {
+    where.invoice_type = type;
+  }
+
+  // Status filter
+  if (status === 'approved') {
+    where.review_status = 'approved';
+  } else if (status === 'pending') {
+    where.review_status = 'pending';
+  } else if (status === 'needs_review') {
+    where.review_status = { notIn: ['approved', 'rejected'] };
+  }
+
+  // Date range filter
+  if (from || to) {
+    where.issue_date = {};
+    if (from) (where.issue_date as any).gte = new Date(from);
+    if (to) {
+      const toDate = new Date(to);
+      toDate.setUTCHours(23, 59, 59, 999);
+      (where.issue_date as any).lte = toDate;
+    }
+  }
+
+  // Full-text search
+  if (q) {
+    const searchConditions: Prisma.InvoiceWhereInput[] = [
+      { invoice_number: { contains: q, mode: 'insensitive' } },
+      { supplier_name: { contains: q, mode: 'insensitive' } },
+      { customer_name: { contains: q, mode: 'insensitive' } },
+      { supplier_tax_id: { contains: q, mode: 'insensitive' } },
+    ];
+    // If q looks like a number, add total_amount exact match
+    const qNum = parseFloat(q);
+    if (!isNaN(qNum) && qNum > 0) {
+      searchConditions.push({ total_amount: qNum });
+    }
+    where.OR = searchConditions;
+  }
+
+  // Build orderBy
+  const orderBy: Prisma.InvoiceOrderByWithRelationInput[] = [
+    { [sortBy]: sortDir },
+    // Secondary sort for determinism
+    ...(sortBy !== 'issue_date' ? [{ issue_date: 'desc' as const }] : []),
+    { id: 'asc' },
+  ];
 
   const invoices = await prisma.invoice.findMany({
-    where: { company_id: params.clientCompanyId },
-    orderBy: { issue_date: 'desc' },
+    where,
+    orderBy,
     take: limit + 1,
     skip: offset,
     select: {
