@@ -5,6 +5,10 @@ export interface InvoiceWithDocument extends Invoice {
   document: Document;
 }
 
+// Semicolon delimiter for Excel compatibility with Spanish/European locale.
+// Spanish Excel uses ";" as the list separator (regional setting).
+const CSV_DELIMITER = ';';
+
 export function generateCSV(invoices: InvoiceWithDocument[]): string {
   const headers = [
     'invoice_type',
@@ -50,21 +54,26 @@ export function generateCSV(invoices: InvoiceWithDocument[]): string {
     escapeCSV(inv.document?.source_channel || '')
   ]);
 
-  const csvContent = [
-    headers.join(','),
-    ...rows.map((row: any[]) => row.join(','))
-  ].join('\n');
+  // UTF-8 BOM (﻿) tells Excel to read the file as UTF-8, preventing
+  // characters like ñ and accents from being corrupted (shown as ÃÂ¡, etc.).
+  // CRLF line endings are required by RFC 4180 and expected by Excel on Windows.
+  const csvContent =
+    '﻿' +
+    [
+      headers.join(CSV_DELIMITER),
+      ...rows.map((row: any[]) => row.join(CSV_DELIMITER))
+    ].join('\r\n');
 
   return csvContent;
 }
 
 function escapeCSV(value: string): string {
   if (!value) return '';
-  const stringValue = String(value);
-  if (stringValue.includes(',') || stringValue.includes('"') || stringValue.includes('\n')) {
-    return `"${stringValue.replace(/"/g, '""')}"`;
+  const s = String(value);
+  if (s.includes(CSV_DELIMITER) || s.includes('"') || s.includes('\n') || s.includes('\r')) {
+    return `"${s.replace(/"/g, '""')}"`;
   }
-  return stringValue;
+  return s;
 }
 
 export function getDateRange(type: 'monthly' | 'quarterly', date: Date = new Date()): { start: Date; end: Date } {

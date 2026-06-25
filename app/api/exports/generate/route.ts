@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
     const filename = `${exportType}-export-${start.toISOString().split('T')[0]}-${end.toISOString().split('T')[0]}.csv`;
     const cloud_storage_path = buildExportPath(membership.company_id, filename);
 
-    await uploadFile(Buffer.from(csvContent, 'utf-8'), cloud_storage_path, 'text/csv');
+    await uploadFile(Buffer.from(csvContent, 'utf-8'), cloud_storage_path, 'text/csv; charset=utf-8');
 
     const exportRecord = await prisma.export.create({
       data: {
