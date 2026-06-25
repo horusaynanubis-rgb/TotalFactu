@@ -80,6 +80,7 @@ interface DocRow {
 
 interface InvoiceRow {
   id: string;
+  document_id: string;
   invoice_number: string;
   invoice_type: string;
   supplier_name: string;
@@ -92,6 +93,7 @@ interface InvoiceRow {
   currency: string;
   extraction_confidence: number;
   review_status: string;
+  document: { original_filename: string } | null;
 }
 
 interface ExportRow {
@@ -698,6 +700,7 @@ export default function ClientDetailPage() {
                       <TableHead className="text-right">Total</TableHead>
                       <TableHead>Confianza IA</TableHead>
                       <TableHead>Estado</TableHead>
+                      <TableHead className="text-right">Acciones</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -726,6 +729,34 @@ export default function ClientDetailPage() {
                         </TableCell>
                         <TableCell>{confidenceBadge(inv.extraction_confidence)}</TableCell>
                         <TableCell>{invoiceStatusBadge(inv.review_status)}</TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={!inv.document_id || actionDocId === inv.document_id}
+                              title={inv.document_id ? `Ver: ${inv.document?.original_filename ?? 'documento'}` : 'Documento no disponible'}
+                              onClick={() => inv.document_id && handleDocumentAction(inv.document_id, 'view')}
+                            >
+                              {actionDocId === inv.document_id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Eye className="h-3.5 w-3.5" />
+                              )}
+                              <span className="ml-1 hidden sm:inline">Ver</span>
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={!inv.document_id || actionDocId === inv.document_id}
+                              title={inv.document_id ? `Descargar: ${inv.document?.original_filename ?? 'documento'}` : 'Documento no disponible'}
+                              onClick={() => inv.document_id && handleDocumentAction(inv.document_id, 'download')}
+                            >
+                              <Download className="h-3.5 w-3.5" />
+                              <span className="ml-1 hidden sm:inline">Descargar</span>
+                            </Button>
+                          </div>
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

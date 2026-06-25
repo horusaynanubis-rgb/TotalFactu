@@ -49,6 +49,7 @@ export async function GET(
     skip: offset,
     select: {
       id: true,
+      document_id: true,
       invoice_number: true,
       invoice_type: true,
       supplier_name: true,
@@ -61,6 +62,7 @@ export async function GET(
       currency: true,
       extraction_confidence: true,
       review_status: true,
+      document: { select: { original_filename: true } },
     },
   });
 
