@@ -5,10 +5,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { DocumentPreviewModal } from '@/components/document-preview-modal';
 import {
   Banknote, CreditCard, Smartphone, ArrowLeftRight, PackagePlus,
   Plus, Pencil, Trash2, Loader2, X, ChevronLeft, ChevronRight,
-  Download, FileSpreadsheet,
+  Download, FileSpreadsheet, Bot, User2, FileImage, CheckCircle, XCircle,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -26,6 +27,11 @@ interface DailyCashRegister {
   other_amount: string | number;
   total_amount: string | number;
   notes: string | null;
+  source: 'manual' | 'ai';
+  status: 'confirmed' | 'pending_review';
+  document_id: string | null;
+  ai_raw_data: string | null;
+  document: { id: string; cloud_storage_path: string } | null;
 }
 
 interface MonthlySummary {
@@ -119,12 +125,16 @@ function registerToForm(r: DailyCashRegister): FormState {
   };
 }
 
+function getAiRawData(r: DailyCashRegister): Record<string, any> {
+  try { return r.ai_raw_data ? JSON.parse(r.ai_raw_data) : {}; } catch { return {}; }
+}
+
 // ---------------------------------------------------------------------------
 // CSV / Excel export helpers
 // ---------------------------------------------------------------------------
 
 function exportCSV(registers: DailyCashRegister[], year: number, month: number) {
-  const header = 'Fecha,Efectivo,TPV,Bizum,Transferencias,Otros,Total,Observaciones';
+  const header = 'Fecha,Efectivo,TPV,Bizum,Transferencias,Otros,Total,Origen,Observaciones';
   const rows = registers.map((r) => [
     new Date(r.date).toLocaleDateString('es-ES'),
     Number(r.cash_amount).toFixed(2),
@@ -133,6 +143,7 @@ function exportCSV(registers: DailyCashRegister[], year: number, month: number) 
     Number(r.transfer_amount).toFixed(2),
     Number(r.other_amount).toFixed(2),
     Number(r.total_amount).toFixed(2),
+    r.source === 'ai' ? 'IA' : 'Manual',
     `"${(r.notes ?? '').replace(/"/g, '""')}"`,
   ].join(','));
 
@@ -147,8 +158,7 @@ function exportCSV(registers: DailyCashRegister[], year: number, month: number) 
 }
 
 function exportXLSX(registers: DailyCashRegister[], year: number, month: number) {
-  // Tab-separated values in an HTML table — Excel opens it directly
-  const header = ['Fecha','Efectivo','TPV','Bizum','Transferencias','Otros','Total','Observaciones'];
+  const header = ['Fecha','Efectivo','TPV','Bizum','Transferencias','Otros','Total','Origen','Observaciones'];
   const rows = registers.map((r) => [
     new Date(r.date).toLocaleDateString('es-ES'),
     Number(r.cash_amount).toFixed(2),
@@ -157,6 +167,7 @@ function exportXLSX(registers: DailyCashRegister[], year: number, month: number)
     Number(r.transfer_amount).toFixed(2),
     Number(r.other_amount).toFixed(2),
     Number(r.total_amount).toFixed(2),
+    r.source === 'ai' ? 'IA' : 'Manual',
     r.notes ?? '',
   ]);
 
@@ -323,6 +334,134 @@ function RegisterForm({
 }
 
 // ---------------------------------------------------------------------------
+// Pending AI Card (single)
+// ---------------------------------------------------------------------------
+
+function PendingAICard({
+  register,
+  onConfirm,
+  onEdit,
+  onReject,
+  onViewDoc,
+  acting,
+}: {
+  register: DailyCashRegister;
+  onConfirm: () => void;
+  onEdit: () => void;
+  onReject: () => void;
+  onViewDoc: () => void;
+  acting: boolean;
+}) {
+  const raw = getAiRawData(register);
+
+  return (
+    <div className="border border-teal-200 rounded-xl p-4 bg-teal-50/40 space-y-3">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          <Bot className="h-4 w-4 text-teal-600 shrink-0" />
+          <span className="text-sm font-semibold text-teal-800">Cierre detectado por IA</span>
+          <span className="text-xs text-teal-600 bg-teal-100 px-2 py-0.5 rounded-full">Pendiente de confirmar</span>
+        </div>
+        <div className="text-xs text-gray-500 text-right">
+          {raw.business_name && <p className="font-medium text-gray-700">{raw.business_name}</p>}
+          {raw.terminal_id   && <p>Terminal: {raw.terminal_id}</p>}
+          {raw.batch_number  && <p>Lote: {raw.batch_number}</p>}
+        </div>
+      </div>
+
+      {/* Date + Amounts */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-1 text-sm">
+        <div>
+          <span className="text-xs text-gray-400 block">Fecha</span>
+          <span className="font-medium">{fmtDate(register.date)}</span>
+        </div>
+        {Number(register.card_amount) > 0 && (
+          <div>
+            <span className="text-xs text-gray-400 block">TPV</span>
+            <span>{fmtCurrency(register.card_amount)}</span>
+          </div>
+        )}
+        {Number(register.cash_amount) > 0 && (
+          <div>
+            <span className="text-xs text-gray-400 block">Efectivo</span>
+            <span>{fmtCurrency(register.cash_amount)}</span>
+          </div>
+        )}
+        {Number(register.bizum_amount) > 0 && (
+          <div>
+            <span className="text-xs text-gray-400 block">Bizum</span>
+            <span>{fmtCurrency(register.bizum_amount)}</span>
+          </div>
+        )}
+        {Number(register.transfer_amount) > 0 && (
+          <div>
+            <span className="text-xs text-gray-400 block">Transferencias</span>
+            <span>{fmtCurrency(register.transfer_amount)}</span>
+          </div>
+        )}
+        {Number(register.other_amount) > 0 && (
+          <div>
+            <span className="text-xs text-gray-400 block">Otros</span>
+            <span>{fmtCurrency(register.other_amount)}</span>
+          </div>
+        )}
+        <div>
+          <span className="text-xs text-gray-400 block">Total</span>
+          <span className="text-base font-bold text-gray-900">{fmtCurrency(register.total_amount)}</span>
+        </div>
+      </div>
+
+      {register.notes && (
+        <p className="text-xs text-gray-500 italic">{register.notes}</p>
+      )}
+
+      {/* Actions */}
+      <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-teal-100">
+        {register.document_id && (
+          <button
+            onClick={onViewDoc}
+            className="inline-flex items-center gap-1.5 px-3 h-8 rounded-md text-xs font-medium text-gray-600 border hover:bg-gray-50 transition-colors"
+          >
+            <FileImage className="h-3.5 w-3.5" />
+            Ver justificante
+          </button>
+        )}
+        <Button
+          size="sm"
+          className="bg-teal-600 hover:bg-teal-700 text-white h-8 text-xs"
+          disabled={acting}
+          onClick={onConfirm}
+        >
+          {acting ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <CheckCircle className="h-3.5 w-3.5 mr-1" />}
+          Confirmar
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 text-xs"
+          disabled={acting}
+          onClick={onEdit}
+        >
+          <Pencil className="h-3.5 w-3.5 mr-1" />
+          Editar y confirmar
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 text-xs border-red-200 text-red-600 hover:bg-red-50"
+          disabled={acting}
+          onClick={onReject}
+        >
+          <XCircle className="h-3.5 w-3.5 mr-1" />
+          Descartar
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
@@ -332,6 +471,7 @@ export default function CajaCobrosPage() {
   const [month, setMonth] = useState(today.getMonth() + 1);
 
   const [registers, setRegisters]   = useState<DailyCashRegister[]>([]);
+  const [pendingAI, setPendingAI]   = useState<DailyCashRegister[]>([]);
   const [summary, setSummary]       = useState<MonthlySummary | null>(null);
   const [loading, setLoading]       = useState(true);
 
@@ -340,6 +480,9 @@ export default function CajaCobrosPage() {
   const [form, setForm]               = useState<FormState>(emptyForm());
   const [saving, setSaving]           = useState(false);
   const [deletingId, setDeletingId]   = useState<string | null>(null);
+  const [actingId, setActingId]       = useState<string | null>(null);
+
+  const [previewDocId, setPreviewDocId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -348,6 +491,7 @@ export default function CajaCobrosPage() {
       if (!res.ok) throw new Error();
       const data = await res.json();
       setRegisters(data.registers ?? []);
+      setPendingAI(data.pendingAI ?? []);
       setSummary(data.summary ?? null);
     } catch {
       toast.error('Error al cargar los registros');
@@ -389,6 +533,26 @@ export default function CajaCobrosPage() {
     setSaving(true);
     try {
       const body = formToBody(form);
+
+      // If editing a pending AI record, confirm it via the confirm endpoint
+      if (editId) {
+        const pendingRecord = pendingAI.find(r => r.id === editId);
+        if (pendingRecord) {
+          const res = await fetch(`/api/caja-cobros/${editId}/confirm`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'confirm', ...body }),
+          });
+          const data = await res.json();
+          if (!res.ok) { toast.error(data.error ?? 'Error al confirmar'); return; }
+          toast.success('Registro confirmado');
+          setShowForm(false);
+          setEditId(null);
+          load();
+          return;
+        }
+      }
+
       const url    = editId ? `/api/caja-cobros/${editId}` : '/api/caja-cobros';
       const method = editId ? 'PUT' : 'POST';
 
@@ -398,10 +562,7 @@ export default function CajaCobrosPage() {
         body: JSON.stringify(body),
       });
       const data = await res.json();
-      if (!res.ok) {
-        toast.error(data.error ?? 'Error al guardar');
-        return;
-      }
+      if (!res.ok) { toast.error(data.error ?? 'Error al guardar'); return; }
       toast.success(editId ? 'Registro actualizado' : 'Registro guardado');
       setShowForm(false);
       setEditId(null);
@@ -425,6 +586,44 @@ export default function CajaCobrosPage() {
       toast.error('Error al eliminar');
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const handleAIConfirm = async (id: string) => {
+    setActingId(id);
+    try {
+      const res = await fetch(`/api/caja-cobros/${id}/confirm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'confirm' }),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error ?? 'Error'); return; }
+      toast.success('Registro confirmado');
+      load();
+    } catch {
+      toast.error('Error inesperado');
+    } finally {
+      setActingId(null);
+    }
+  };
+
+  const handleAIReject = async (id: string) => {
+    if (!confirm('¿Descartar este registro detectado por IA?')) return;
+    setActingId(id);
+    try {
+      const res = await fetch(`/api/caja-cobros/${id}/confirm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reject' }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success('Registro descartado');
+      load();
+    } catch {
+      toast.error('Error inesperado');
+    } finally {
+      setActingId(null);
     }
   };
 
@@ -470,6 +669,34 @@ export default function CajaCobrosPage() {
         </button>
       </div>
 
+      {/* ─── Pending AI Detections ─── */}
+      {pendingAI.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Bot className="h-4 w-4 text-teal-600" />
+            <h2 className="text-sm font-semibold text-teal-800">
+              Cierres detectados por IA — pendientes de confirmar
+            </h2>
+            <span className="text-xs bg-teal-100 text-teal-700 px-2 py-0.5 rounded-full font-medium">
+              {pendingAI.length}
+            </span>
+          </div>
+          <div className="space-y-3">
+            {pendingAI.map((r) => (
+              <PendingAICard
+                key={r.id}
+                register={r}
+                acting={actingId === r.id}
+                onConfirm={() => handleAIConfirm(r.id)}
+                onEdit={() => { openEdit(r); }}
+                onReject={() => handleAIReject(r.id)}
+                onViewDoc={() => setPreviewDocId(r.document_id)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* KPI Summary */}
       {summary && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -498,7 +725,7 @@ export default function CajaCobrosPage() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between pb-3">
           <CardTitle className="text-base">
-            Registros — {MONTH_NAMES[month - 1]} {year}
+            Registros confirmados — {MONTH_NAMES[month - 1]} {year}
             {!loading && (
               <span className="ml-2 text-sm font-normal text-gray-400">({registers.length})</span>
             )}
@@ -534,7 +761,7 @@ export default function CajaCobrosPage() {
           ) : registers.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 gap-3 text-gray-400">
               <Banknote className="h-10 w-10 opacity-30" />
-              <p className="text-sm">No hay registros para este mes</p>
+              <p className="text-sm">No hay registros confirmados para este mes</p>
               <Button variant="outline" size="sm" onClick={openCreate}>
                 <Plus className="h-4 w-4 mr-1.5" />
                 Crear el primero
@@ -545,6 +772,7 @@ export default function CajaCobrosPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-gray-50 text-xs text-gray-500 font-medium">
+                    <th className="px-3 py-3 text-left w-8"></th>
                     <th className="px-4 py-3 text-left">Fecha</th>
                     <th className="px-4 py-3 text-right">Efectivo</th>
                     <th className="px-4 py-3 text-right">TPV</th>
@@ -559,8 +787,26 @@ export default function CajaCobrosPage() {
                 <tbody className="divide-y">
                   {registers.map((r) => (
                     <tr key={r.id} className="hover:bg-gray-50 transition-colors">
+                      {/* Source icon */}
+                      <td className="px-3 py-3">
+                        <span title={r.source === 'ai' ? 'Detectado por IA' : 'Introducido manualmente'}>
+                          {r.source === 'ai'
+                            ? <Bot className="h-3.5 w-3.5 text-teal-500" />
+                            : <User2 className="h-3.5 w-3.5 text-gray-300" />}
+                        </span>
+                      </td>
                       <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">
                         {fmtDate(r.date)}
+                        {/* Justificante link */}
+                        {r.document_id && (
+                          <button
+                            onClick={() => setPreviewDocId(r.document_id)}
+                            title="Ver justificante"
+                            className="ml-2 text-gray-300 hover:text-teal-500 transition-colors"
+                          >
+                            <FileImage className="h-3.5 w-3.5 inline" />
+                          </button>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-right text-gray-700">{fmt(r.cash_amount)}</td>
                       <td className="px-4 py-3 text-right text-gray-700">{fmt(r.card_amount)}</td>
@@ -602,6 +848,7 @@ export default function CajaCobrosPage() {
                 {/* Totals row */}
                 <tfoot>
                   <tr className="border-t bg-gray-50 font-semibold text-sm text-gray-700">
+                    <td className="px-3 py-3" />
                     <td className="px-4 py-3">Total</td>
                     <td className="px-4 py-3 text-right">{summary ? fmt(summary.cash_amount)     : '—'}</td>
                     <td className="px-4 py-3 text-right">{summary ? fmt(summary.card_amount)     : '—'}</td>
@@ -627,6 +874,12 @@ export default function CajaCobrosPage() {
           Próximamente: conciliación automática entre cobros registrados y facturas emitidas del mismo período.
         </span>
       </div>
+
+      {/* Document Preview Modal */}
+      <DocumentPreviewModal
+        documentId={previewDocId}
+        onClose={() => setPreviewDocId(null)}
+      />
 
     </div>
   );

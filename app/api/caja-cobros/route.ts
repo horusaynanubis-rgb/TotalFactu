@@ -13,7 +13,7 @@ async function getCompanyId(userId: string): Promise<string | null> {
   return membership?.company_id ?? null;
 }
 
-// GET — list registers with optional month filter + monthly summary
+// GET — list registers with optional month filter + monthly summary + pending AI records
 export async function GET(request: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -26,15 +26,17 @@ export async function GET(request: NextRequest) {
   const month = parseInt(searchParams.get('month') ?? String(new Date().getMonth() + 1));
 
   const from = new Date(year, month - 1, 1);
-  const to   = new Date(year, month, 1);   // exclusive upper bound
+  const to   = new Date(year, month, 1); // exclusive upper bound
 
-  const [registers, summary] = await Promise.all([
+  // Only show confirmed registers in the main list/summary
+  const [registers, summary, pendingAI] = await Promise.all([
     prisma.dailyCashRegister.findMany({
-      where: { company_id: companyId, date: { gte: from, lt: to } },
+      where: { company_id: companyId, date: { gte: from, lt: to }, status: 'confirmed' },
       orderBy: { date: 'desc' },
+      include: { document: { select: { id: true, cloud_storage_path: true } } },
     }),
     prisma.dailyCashRegister.aggregate({
-      where: { company_id: companyId, date: { gte: from, lt: to } },
+      where: { company_id: companyId, date: { gte: from, lt: to }, status: 'confirmed' },
       _sum: {
         cash_amount:     true,
         card_amount:     true,
@@ -44,10 +46,17 @@ export async function GET(request: NextRequest) {
         total_amount:    true,
       },
     }),
+    // All pending_review registers regardless of month (user must action them)
+    prisma.dailyCashRegister.findMany({
+      where: { company_id: companyId, status: 'pending_review' },
+      orderBy: { created_at: 'desc' },
+      include: { document: { select: { id: true, cloud_storage_path: true } } },
+    }),
   ]);
 
   return NextResponse.json({
     registers,
+    pendingAI,
     summary: {
       cash_amount:     Number(summary._sum.cash_amount     ?? 0),
       card_amount:     Number(summary._sum.card_amount     ?? 0),
@@ -59,7 +68,7 @@ export async function GET(request: NextRequest) {
   });
 }
 
-// POST — create a new daily register
+// POST — create a new daily register (manual entry, always confirmed)
 export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -106,6 +115,8 @@ export async function POST(request: NextRequest) {
         other_amount:    other,
         total_amount:    total,
         notes:           body.notes?.trim() || null,
+        source:          'manual',
+        status:          'confirmed',
       },
     });
     return NextResponse.json({ register }, { status: 201 });

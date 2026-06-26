@@ -36,6 +36,7 @@ export async function PUT(
     transfer_amount?: number;
     other_amount?: number;
     notes?: string;
+    status?: string; // 'confirmed' | 'pending_review' — for AI confirmation flow
   };
   try {
     body = await request.json();
@@ -65,6 +66,9 @@ export async function PUT(
         other_amount:    other,
         total_amount:    total,
         notes:           'notes' in body ? (body.notes?.trim() || null) : register.notes,
+        ...(body.status === 'confirmed' || body.status === 'pending_review'
+          ? { status: body.status }
+          : {}),
       },
     });
     return NextResponse.json({ register: updated });

@@ -503,10 +503,29 @@ async function handleFileUpload(
       const doc = result.document;
       const invoice = result.invoice;
       const deliveryNote = result.delivery_note;
+      const cashRegister = result.cash_register;
 
       let finalText = '';
 
-      if (deliveryNote) {
+      if (cashRegister) {
+        // Cash register closure path
+        const fmtAmt = (v: number) => v.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        finalText = '🏧 <b>Cierre de caja/TPV detectado</b>\n\n';
+        if (cashRegister.business_name) finalText += `🏪 ${cashRegister.business_name}\n`;
+        if (cashRegister.terminal_id)   finalText += `📟 Terminal: ${cashRegister.terminal_id}\n`;
+        finalText += `📅 Fecha: ${new Date(cashRegister.date).toLocaleDateString('es-ES')}\n\n`;
+        if (cashRegister.card_amount    > 0) finalText += `💳 TPV:            ${fmtAmt(cashRegister.card_amount)} €\n`;
+        if (cashRegister.cash_amount    > 0) finalText += `💵 Efectivo:       ${fmtAmt(cashRegister.cash_amount)} €\n`;
+        if (cashRegister.bizum_amount   > 0) finalText += `📱 Bizum:          ${fmtAmt(cashRegister.bizum_amount)} €\n`;
+        if (cashRegister.transfer_amount > 0) finalText += `🏦 Transferencias: ${fmtAmt(cashRegister.transfer_amount)} €\n`;
+        if (cashRegister.other_amount   > 0) finalText += `📦 Otros:          ${fmtAmt(cashRegister.other_amount)} €\n`;
+        finalText += `─────────────────────\n`;
+        finalText += `📊 <b>Total: ${fmtAmt(cashRegister.total_amount)} €</b>\n\n`;
+        if (cashRegister.has_conflict) {
+          finalText += '⚠️ <b>Ya existe un registro para este día.</b> Ambos quedan pendientes de revisión.\n\n';
+        }
+        finalText += '⏳ Pendiente de confirmar en <b>Caja y Cobros</b> en TotalFactu.';
+      } else if (deliveryNote) {
         // Delivery note path
         finalText = '📦 <b>Albarán recibido y guardado</b>\n\n';
         finalText += `🏢 ${deliveryNote.supplier_name}\n`;

@@ -165,10 +165,11 @@ model Document {
   created_at           DateTime @default(now())
   updated_at           DateTime @updatedAt
 
-  company       Company       @relation(fields: [company_id], references: [id], onDelete: Cascade)
-  user          User?         @relation(fields: [user_id], references: [id], onDelete: SetNull)
-  invoice       Invoice?
-  delivery_note DeliveryNote?
+  company             Company            @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  user                User?              @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  invoice             Invoice?
+  delivery_note       DeliveryNote?
+  daily_cash_register DailyCashRegister?
 
   @@index([company_id])
   @@index([processing_status])
@@ -539,13 +540,20 @@ model DailyCashRegister {
   other_amount     Decimal  @default(0) @db.Decimal(12, 2)
   total_amount     Decimal  @default(0) @db.Decimal(12, 2)
   notes            String?
+  // AI automation fields
+  source           String   @default("manual") // manual | ai
+  status           String   @default("confirmed") // confirmed | pending_review
+  document_id      String?  @unique  // original image/PDF justificante
+  ai_raw_data      String?           // JSON: terminal_id, batch_number, operation_count, etc.
   created_at       DateTime @default(now())
   updated_at       DateTime @updatedAt
 
-  company Company @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  company  Company   @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  document Document? @relation(fields: [document_id], references: [id], onDelete: SetNull)
 
   @@unique([company_id, date])
   @@index([company_id])
   @@index([date])
   @@index([company_id, date])
+  @@index([status])
 }

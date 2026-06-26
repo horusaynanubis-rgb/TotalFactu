@@ -10,8 +10,27 @@ export interface InvoiceLineItem {
   total_amount: number | null;
 }
 
+// ─── Cash Register (Cierre TPV / Cierre Caja) ────────────────────────────────
+
+export interface CashRegisterExtraction {
+  date: string;               // YYYY-MM-DD — date of the closure
+  time: string | null;        // HH:MM or null
+  business_name: string | null;
+  terminal_id: string | null; // TPV terminal number
+  batch_number: string | null;
+  operation_count: number | null;
+  cash_amount: number;
+  card_amount: number;        // TPV/card payments
+  bizum_amount: number;
+  transfer_amount: number;
+  other_amount: number;
+  total_amount: number;
+  notes: string | null;
+  extraction_confidence: number;
+}
+
 export interface InvoiceExtraction {
-  document_type: 'invoice' | 'delivery_note' | 'unknown';
+  document_type: 'invoice' | 'delivery_note' | 'cash_register' | 'unknown';
   delivery_note_number: string | null;
   invoice_type: string;
   invoice_number: string;
@@ -95,7 +114,7 @@ Rules:
 - Do NOT hallucinate or invent values. If a field is not found, use null or empty string.
 - Dates must be in YYYY-MM-DD format when possible. If only partial date is found, normalize it.
 - All monetary amounts must be numbers (not strings).
-- document_type: "invoice" if it is a tax invoice (factura), "delivery_note" if it is a delivery note / albaran / albarán / bon de livraison / Lieferschein (NOT a fiscal document), "unknown" if unclear.
+- document_type: "invoice" if it is a tax invoice (factura), "delivery_note" if it is a delivery note / albaran / albarán / bon de livraison / Lieferschein (NOT a fiscal document), "cash_register" if it is a daily TPV/cash closure report (cierre de caja, cierre TPV, informe de lote, Z-report, X-report, batch report, liquidación del día, resumen de ventas del día), "unknown" if unclear.
 - delivery_note_number: the delivery note number if document_type is "delivery_note", otherwise null.
 - invoice_type: "received" if this is an invoice received from a supplier, "issued" if sent to a customer. Use "received" for delivery_note documents.
 - extraction_confidence: a number between 0 and 1 indicating overall extraction quality.
@@ -108,7 +127,7 @@ Rules:
 
 Respond with raw JSON only (no markdown, no code blocks). Use this exact structure:
 {
-  "document_type": "invoice" or "delivery_note" or "unknown",
+  "document_type": "invoice" or "delivery_note" or "cash_register" or "unknown",
   "delivery_note_number": null,
   "invoice_type": "received" or "issued",
   "invoice_number": "string or empty",
@@ -604,9 +623,9 @@ export function validateExtraction(raw: any): InvoiceExtraction {
   };
 
   const rawDocType = safeString(raw.document_type);
-  const documentType: 'invoice' | 'delivery_note' | 'unknown' =
-    ['invoice', 'delivery_note', 'unknown'].includes(rawDocType)
-      ? (rawDocType as 'invoice' | 'delivery_note' | 'unknown')
+  const documentType: 'invoice' | 'delivery_note' | 'cash_register' | 'unknown' =
+    ['invoice', 'delivery_note', 'cash_register', 'unknown'].includes(rawDocType)
+      ? (rawDocType as 'invoice' | 'delivery_note' | 'cash_register' | 'unknown')
       : 'invoice';
 
   const invoiceType = ['received', 'issued'].includes(safeString(raw.invoice_type))
@@ -738,4 +757,144 @@ export async function extractInvoiceData(
   }
 
   return validateExtraction(rawJson);
+}
+
+// ---------------------------------------------------------------------------
+// Cash Register (Cierre TPV / Cierre Caja) — specialized Gemini extraction
+// ---------------------------------------------------------------------------
+
+const CASH_REGISTER_PROMPT = `You are analyzing a TPV/cash register daily closure report (cierre de caja, cierre TPV, Z-report, informe de lote, resumen ventas del día).
+
+Extract the following data from this document. Many fields may be absent depending on the TPV model — only return fields explicitly shown.
+
+Rules:
+- date: closure date in YYYY-MM-DD format. Look for "FECHA:", "Date:", "Fecha cierre:", or any date near the totals.
+- time: closure time as HH:MM or null if not shown.
+- business_name: the name of the business/commerce shown on the receipt (razón social, nombre comercio).
+- terminal_id: TPV terminal identifier (Nº terminal, Terminal ID, TID).
+- batch_number: batch/lote number (Lote nº, Batch, Nº lote).
+- operation_count: total number of operations/transactions (Nº operaciones, Transactions).
+- cash_amount: total cash payments (Efectivo, Cash). Use 0 if not shown.
+- card_amount: total card/TPV payments (Tarjeta, Card, TPV, Visa/MC total). Use 0 if not shown.
+- bizum_amount: total Bizum payments. Use 0 if not shown.
+- transfer_amount: total bank transfers. Use 0 if not shown.
+- other_amount: any other payment method totals not covered above. Use 0 if not shown.
+- total_amount: grand total of all collections for the day (Total, Gran Total, Total día). If not explicit, sum cash+card+bizum+transfer+other.
+- notes: any relevant remarks (e.g. "Anulaciones: 3", "Lote forzado", etc.) or null.
+- extraction_confidence: 0.0–1.0 confidence in the extraction quality.
+
+Respond with raw JSON only (no markdown, no code blocks):
+{
+  "date": "YYYY-MM-DD",
+  "time": "HH:MM or null",
+  "business_name": "string or null",
+  "terminal_id": "string or null",
+  "batch_number": "string or null",
+  "operation_count": null,
+  "cash_amount": 0.00,
+  "card_amount": 0.00,
+  "bizum_amount": 0.00,
+  "transfer_amount": 0.00,
+  "other_amount": 0.00,
+  "total_amount": 0.00,
+  "notes": null,
+  "extraction_confidence": 0.85
+}`;
+
+/**
+ * Specialized Gemini extraction for TPV/cash closure reports.
+ * Called after the main extraction identifies document_type === 'cash_register'.
+ * Returns null on failure (non-fatal — caller falls back to summary data from main extraction).
+ */
+export async function extractCashRegisterData(
+  fileBase64: string,
+  mimeType: string,
+): Promise<CashRegisterExtraction | null> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    console.warn('[gemini:cash_register] GEMINI_API_KEY not configured — skipping specialized extraction');
+    return null;
+  }
+
+  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash-preview-04-17';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+  const body = {
+    contents: [{
+      parts: [
+        { inlineData: { mimeType, data: fileBase64 } },
+        { text: CASH_REGISTER_PROMPT },
+      ],
+    }],
+    generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 1024 },
+  };
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    if (attempt > 1) await new Promise(r => setTimeout(r, attempt === 2 ? 1000 : 3000));
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        if ((response.status === 429 || response.status === 503) && attempt < 3) continue;
+        console.error(`[gemini:cash_register] HTTP ${response.status} attempt=${attempt}:`, text.slice(0, 300));
+        return null;
+      }
+
+      const data = await response.json();
+      const content = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!content) return null;
+
+      const raw = JSON.parse(content);
+
+      const safeNum = (v: any): number => { const n = Number(v); return isNaN(n) ? 0 : Math.max(0, n); };
+      const safeStr = (v: any): string | null => (v != null && String(v).trim() ? String(v).trim() : null);
+
+      const cash     = safeNum(raw.cash_amount);
+      const card     = safeNum(raw.card_amount);
+      const bizum    = safeNum(raw.bizum_amount);
+      const transfer = safeNum(raw.transfer_amount);
+      const other    = safeNum(raw.other_amount);
+      const total    = raw.total_amount ? safeNum(raw.total_amount) : cash + card + bizum + transfer + other;
+
+      // Normalize date
+      let date = '';
+      if (raw.date) {
+        const d = new Date(String(raw.date).trim());
+        if (!isNaN(d.getTime())) date = d.toISOString().split('T')[0];
+        else if (/^\d{4}-\d{2}-\d{2}$/.test(String(raw.date).trim())) date = String(raw.date).trim();
+      }
+      if (!date) date = new Date().toISOString().split('T')[0]; // fallback to today
+
+      const confidence = Math.max(0, Math.min(1, safeNum(raw.extraction_confidence || 0.7)));
+
+      console.log(`[gemini:cash_register] ✅ extracted date=${date} total=${total} confidence=${confidence}`);
+
+      return {
+        date,
+        time:            safeStr(raw.time),
+        business_name:   safeStr(raw.business_name),
+        terminal_id:     safeStr(raw.terminal_id),
+        batch_number:    safeStr(raw.batch_number),
+        operation_count: raw.operation_count != null ? Math.round(safeNum(raw.operation_count)) : null,
+        cash_amount:     cash,
+        card_amount:     card,
+        bizum_amount:    bizum,
+        transfer_amount: transfer,
+        other_amount:    other,
+        total_amount:    total,
+        notes:           safeStr(raw.notes),
+        extraction_confidence: confidence,
+      };
+    } catch (err: any) {
+      console.error(`[gemini:cash_register] attempt=${attempt} error:`, err?.message);
+      if (attempt === 3) return null;
+    }
+  }
+  return null;
 }
