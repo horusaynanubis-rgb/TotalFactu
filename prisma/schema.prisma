@@ -63,8 +63,10 @@ model User {
   audit_logs           AuditLog[]
   telegram_links       TelegramLink[]
   telegram_link_codes  TelegramLinkCode[]
-  gestoria_reviews     InvoiceReviewLog[] @relation("ReviewLogUser")
-  gestoria_reviewed    Invoice[]          @relation("GestoriaReviewer")
+  gestoria_reviews     InvoiceReviewLog[]           @relation("ReviewLogUser")
+  gestoria_reviewed    Invoice[]                     @relation("GestoriaReviewer")
+  proposed_corrections InvoiceCorrectionProposal[]  @relation("CorrectionProposer")
+  responded_corrections InvoiceCorrectionProposal[] @relation("CorrectionResponder")
 
   @@index([email])
 }
@@ -102,8 +104,10 @@ model Company {
   sent_messages         GestoriaMessage[]   @relation("SentMessages")
   received_messages     GestoriaMessage[]   @relation("ReceivedMessages")
   aliases               CompanyAlias[]
-  review_logs_client    InvoiceReviewLog[]  @relation("ReviewLogClient")
-  review_logs_gestoria  InvoiceReviewLog[]  @relation("ReviewLogGestoria")
+  review_logs_client    InvoiceReviewLog[]          @relation("ReviewLogClient")
+  review_logs_gestoria  InvoiceReviewLog[]          @relation("ReviewLogGestoria")
+  corrections_client    InvoiceCorrectionProposal[] @relation("CorrectionClient")
+  corrections_gestoria  InvoiceCorrectionProposal[] @relation("CorrectionGestoria")
 
   @@index([tax_id])
   @@index([company_type])
@@ -243,8 +247,9 @@ model Invoice {
   supplier               Supplier?         @relation(fields: [supplier_id], references: [id], onDelete: SetNull)
   matched_delivery_notes DeliveryNote[]
   invoice_lines          InvoiceLine[]
-  gestoria_reviewer      User?             @relation("GestoriaReviewer", fields: [gestoria_reviewed_by], references: [id])
+  gestoria_reviewer      User?                       @relation("GestoriaReviewer", fields: [gestoria_reviewed_by], references: [id])
   review_logs            InvoiceReviewLog[]
+  correction_proposals   InvoiceCorrectionProposal[]
 
   @@index([company_id])
   @@index([invoice_type])
@@ -489,5 +494,33 @@ model InvoiceReviewLog {
   @@index([invoice_id])
   @@index([client_company_id])
   @@index([gestoria_company_id])
+  @@index([created_at])
+}
+
+// --- Gestoria → Client correction proposals ---
+
+model InvoiceCorrectionProposal {
+  id                    String    @id @default(cuid())
+  invoice_id            String
+  client_company_id     String
+  gestoria_company_id   String
+  proposed_by_user_id   String
+  status                String    @default("pending") // pending | accepted | rejected | needs_clarification | superseded
+  field_changes         String    // JSON: [{field, label, currentValue, proposedValue}]
+  reason                String?
+  client_response       String?
+  responded_by_user_id  String?
+  created_at            DateTime  @default(now())
+  responded_at          DateTime?
+
+  invoice          Invoice @relation(fields: [invoice_id],           references: [id], onDelete: Cascade)
+  client_company   Company @relation("CorrectionClient",   fields: [client_company_id],   references: [id])
+  gestoria_company Company @relation("CorrectionGestoria", fields: [gestoria_company_id],  references: [id])
+  proposed_by      User    @relation("CorrectionProposer", fields: [proposed_by_user_id],  references: [id])
+  responded_by     User?   @relation("CorrectionResponder", fields: [responded_by_user_id], references: [id])
+
+  @@index([invoice_id])
+  @@index([client_company_id])
+  @@index([status])
   @@index([created_at])
 }

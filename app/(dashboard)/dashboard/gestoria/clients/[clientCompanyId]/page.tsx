@@ -42,12 +42,14 @@ import {
   X,
   ClipboardCheck,
   History,
+  PenLine,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Input } from '@/components/ui/input';
 import { SendMessageModal } from '@/components/gestoria/send-message-modal';
 import { InvoiceReviewModal } from '@/components/gestoria/invoice-review-modal';
 import { InvoiceReviewHistoryModal } from '@/components/gestoria/invoice-review-history-modal';
+import { InvoiceCorrectionModal } from '@/components/gestoria/invoice-correction-modal';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -109,6 +111,8 @@ interface InvoiceRow {
   gestoria_reviewed_by: string | null;
   gestoria_review_notes: string | null;
   gestoria_issue_types: string | null;
+  tax_rate: number | null;
+  category: string | null;
   document: { original_filename: string } | null;
 }
 
@@ -315,6 +319,7 @@ export default function ClientDetailPage() {
   // Review modals
   const [reviewModalInvoice, setReviewModalInvoice] = useState<InvoiceRow | null>(null);
   const [historyModalInvoice, setHistoryModalInvoice] = useState<InvoiceRow | null>(null);
+  const [correctionModalInvoice, setCorrectionModalInvoice] = useState<InvoiceRow | null>(null);
 
   // Revision tab filter
   const [revisionFilter, setRevisionFilter] = useState<string>('pending');
@@ -1238,6 +1243,14 @@ export default function ClientDetailPage() {
                             <Button
                               variant="ghost"
                               size="sm"
+                              title="Proponer corrección"
+                              onClick={() => setCorrectionModalInvoice(inv)}
+                            >
+                              <PenLine className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
                               title="Ver historial de revisión"
                               onClick={() => setHistoryModalInvoice(inv)}
                             >
@@ -1393,6 +1406,14 @@ export default function ClientDetailPage() {
                                   onClick={() => setReviewModalInvoice(inv)}
                                 >
                                   <ClipboardCheck className="h-3.5 w-3.5" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  title="Proponer corrección"
+                                  onClick={() => setCorrectionModalInvoice(inv)}
+                                >
+                                  <PenLine className="h-3.5 w-3.5" />
                                 </Button>
                                 <Button
                                   variant="ghost"
@@ -1678,6 +1699,19 @@ export default function ClientDetailPage() {
           onClose={() => setHistoryModalInvoice(null)}
           invoice={historyModalInvoice}
           clientCompanyId={params.clientCompanyId}
+        />
+      )}
+
+      {correctionModalInvoice && (
+        <InvoiceCorrectionModal
+          open={!!correctionModalInvoice}
+          onClose={() => setCorrectionModalInvoice(null)}
+          invoice={correctionModalInvoice}
+          clientCompanyId={params.clientCompanyId}
+          onProposed={() => {
+            setCorrectionModalInvoice(null);
+            toast.success('Propuesta enviada al cliente');
+          }}
         />
       )}
     </div>

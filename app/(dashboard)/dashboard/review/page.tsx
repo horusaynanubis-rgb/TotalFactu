@@ -12,12 +12,30 @@ import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils';
 import toast from 'react-hot-toast';
 import {
   Eye, CheckCircle, XCircle, Pencil, AlertTriangle,
-  FileText, ClipboardCheck, X, Loader2,
+  FileText, ClipboardCheck, X, Loader2, PenLine, MessageSquare,
 } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+interface CorrectionProposal {
+  id: string;
+  field_changes: string; // JSON
+  reason: string | null;
+  created_at: string;
+  gestoria_company: { name: string };
+  proposed_by: { name: string };
+  invoice: {
+    id: string;
+    invoice_number: string;
+    supplier_name: string;
+    issue_date: string;
+    total_amount: number;
+    currency: string;
+    document_id: string;
+  };
+}
 
 interface ReviewInvoice {
   id: string;
@@ -116,6 +134,13 @@ export default function ReviewQueuePage() {
   const [editForm, setEditForm] = useState<any>({});
   const [saving, setSaving] = useState(false);
 
+  // Correction proposals state
+  const [proposals, setProposals] = useState<CorrectionProposal[]>([]);
+  const [loadingProposals, setLoadingProposals] = useState(true);
+  const [respondingId, setRespondingId] = useState<string | null>(null);
+  const [responseModal, setResponseModal] = useState<{ proposal: CorrectionProposal; action: 'reject' | 'needs_clarification' } | null>(null);
+  const [responseText, setResponseText] = useState('');
+
   const load = useCallback(async () => {
     try {
       setLoading(true);
@@ -129,7 +154,54 @@ export default function ReviewQueuePage() {
     }
   }, [t]);
 
-  useEffect(() => { load(); }, [load]);
+  const loadProposals = useCallback(async () => {
+    try {
+      setLoadingProposals(true);
+      const res = await fetch('/api/corrections', { cache: 'no-store' });
+      if (res.ok) {
+        const d = await res.json();
+        setProposals(d.proposals ?? []);
+      }
+    } catch { /* non-critical */ } finally {
+      setLoadingProposals(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); loadProposals(); }, [load, loadProposals]);
+
+  const handleCorrectionResponse = async (
+    proposalId: string,
+    action: 'accept' | 'reject' | 'needs_clarification',
+    clientResponse?: string,
+  ) => {
+    setRespondingId(proposalId);
+    try {
+      const res = await fetch(`/api/corrections/${proposalId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, clientResponse }),
+      });
+      const d = await res.json();
+      if (!res.ok) {
+        toast.error(d.error ?? 'Error al procesar respuesta');
+        return;
+      }
+      if (action === 'accept') {
+        toast.success('Corrección aceptada y aplicada a la factura');
+      } else if (action === 'reject') {
+        toast.success('Propuesta rechazada');
+      } else {
+        toast.success('Solicitud de aclaración enviada');
+      }
+      setResponseModal(null);
+      setResponseText('');
+      loadProposals();
+    } catch {
+      toast.error('Error inesperado');
+    } finally {
+      setRespondingId(null);
+    }
+  };
 
   // Quick approve / reject via /api/review
   const quickAct = async (
@@ -230,6 +302,188 @@ export default function ReviewQueuePage() {
         <div className="flex items-center justify-center py-16 gap-3 text-gray-500">
           <Loader2 className="h-5 w-5 animate-spin" />
           <span>{t.common.loading}</span>
+        </div>
+      )}
+
+      {/* ----------------------------------------------------------------
+          Correcciones pendientes (gestoría → cliente)
+      ---------------------------------------------------------------- */}
+      {(loadingProposals || proposals.length > 0) && (
+        <Card className="border-orange-200">
+          <CardHeader className="flex flex-row items-center gap-2 pb-3">
+            <PenLine className="h-5 w-5 text-orange-500" />
+            <CardTitle className="text-orange-800">
+              Correcciones propuestas por tu gestoría
+              {proposals.length > 0 && (
+                <span className="ml-2 text-sm font-normal bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full">
+                  {proposals.length}
+                </span>
+              )}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {loadingProposals ? (
+              <div className="flex items-center gap-2 py-4 text-gray-500 text-sm">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Cargando propuestas...
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {proposals.map((proposal) => {
+                  let fieldChanges: { field: string; label: string; currentValue: string; proposedValue: string }[] = [];
+                  try { fieldChanges = JSON.parse(proposal.field_changes); } catch { /* ignore */ }
+                  const isResponding = respondingId === proposal.id;
+
+                  return (
+                    <div
+                      key={proposal.id}
+                      className="border border-orange-100 rounded-lg p-4 space-y-3 bg-orange-50/30"
+                    >
+                      {/* Invoice info */}
+                      <div className="flex items-start justify-between gap-2 flex-wrap">
+                        <div>
+                          <p className="font-semibold text-gray-900">
+                            #{proposal.invoice.invoice_number} · {proposal.invoice.supplier_name}
+                          </p>
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            {new Date(proposal.invoice.issue_date).toLocaleDateString('es-ES')}
+                            {' · '}
+                            {formatCurrency(proposal.invoice.total_amount, proposal.invoice.currency)}
+                          </p>
+                        </div>
+                        <div className="text-right text-xs text-gray-500">
+                          <p className="font-medium text-gray-700">{proposal.gestoria_company.name}</p>
+                          <p>{proposal.proposed_by.name}</p>
+                          <p>{new Date(proposal.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+                        </div>
+                      </div>
+
+                      {/* Field changes */}
+                      <div className="rounded-md bg-white border divide-y text-sm">
+                        {fieldChanges.map((fc) => (
+                          <div key={fc.field} className="flex items-center gap-2 px-3 py-2">
+                            <span className="text-xs font-medium text-gray-500 w-28 shrink-0">{fc.label}</span>
+                            <span className="text-gray-400 line-through text-xs">{fc.currentValue || '—'}</span>
+                            <span className="text-gray-400 text-xs">→</span>
+                            <span className="font-medium text-orange-700 text-xs">{fc.proposedValue}</span>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Reason */}
+                      {proposal.reason && (
+                        <div className="flex items-start gap-2 text-xs text-gray-600 bg-gray-50 rounded-md px-3 py-2">
+                          <MessageSquare className="h-3.5 w-3.5 mt-0.5 shrink-0 text-gray-400" />
+                          <span>{proposal.reason}</span>
+                        </div>
+                      )}
+
+                      {/* Document preview link */}
+                      {proposal.invoice.document_id && (
+                        <button
+                          onClick={() => setPreviewDocId(proposal.invoice.document_id)}
+                          className="inline-flex items-center gap-1.5 px-2.5 h-7 rounded-md text-xs font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors"
+                        >
+                          <Eye className="h-3 w-3" />
+                          Ver factura original
+                        </button>
+                      )}
+
+                      {/* Actions */}
+                      <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-orange-100">
+                        <Button
+                          size="sm"
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white h-8 text-xs"
+                          disabled={isResponding}
+                          onClick={() => handleCorrectionResponse(proposal.id, 'accept')}
+                        >
+                          {isResponding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5 mr-1" />}
+                          Aceptar corrección
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 text-xs border-red-200 text-red-600 hover:bg-red-50"
+                          disabled={isResponding}
+                          onClick={() => { setResponseModal({ proposal, action: 'reject' }); setResponseText(''); }}
+                        >
+                          <XCircle className="h-3.5 w-3.5 mr-1" />
+                          Rechazar
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 text-xs"
+                          disabled={isResponding}
+                          onClick={() => { setResponseModal({ proposal, action: 'needs_clarification' }); setResponseText(''); }}
+                        >
+                          <MessageSquare className="h-3.5 w-3.5 mr-1" />
+                          Pedir aclaración
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Response modal (reject / needs_clarification) */}
+      {responseModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md animate-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between p-5 border-b">
+              <h2 className="text-base font-semibold">
+                {responseModal.action === 'reject' ? 'Rechazar propuesta' : 'Solicitar aclaración'}
+              </h2>
+              <button
+                onClick={() => setResponseModal(null)}
+                className="text-gray-400 hover:text-gray-600 rounded-md p-1 hover:bg-gray-100"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <p className="text-sm text-gray-600">
+                {responseModal.action === 'reject'
+                  ? 'Indica el motivo por el que rechazas esta propuesta de corrección.'
+                  : 'Indica qué necesitas aclarar antes de aceptar o rechazar la propuesta.'}
+              </p>
+              <div className="space-y-1.5">
+                <Label htmlFor="response-text">
+                  {responseModal.action === 'reject' ? 'Motivo (opcional)' : 'Tu consulta'}
+                </Label>
+                <textarea
+                  id="response-text"
+                  rows={4}
+                  maxLength={500}
+                  value={responseText}
+                  onChange={(e) => setResponseText(e.target.value)}
+                  placeholder={responseModal.action === 'reject'
+                    ? 'Ej: Los datos son correctos, no necesito corrección...'
+                    : 'Ej: ¿Puede confirmar el importe de IVA?'}
+                  className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 p-5 border-t">
+              <Button variant="outline" onClick={() => setResponseModal(null)} disabled={!!respondingId}>
+                Cancelar
+              </Button>
+              <Button
+                onClick={() => handleCorrectionResponse(responseModal.proposal.id, responseModal.action, responseText)}
+                disabled={!!respondingId}
+                className={responseModal.action === 'reject'
+                  ? 'bg-red-600 hover:bg-red-700 text-white'
+                  : ''}
+              >
+                {respondingId ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
+                {responseModal.action === 'reject' ? 'Confirmar rechazo' : 'Enviar consulta'}
+              </Button>
+            </div>
+          </div>
         </div>
       )}
 
