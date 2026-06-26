@@ -25,6 +25,15 @@ async function resolveGestoriaAccess(userId: string, clientCompanyId: string) {
   return { gestoriaCompanyId: membership.company_id };
 }
 
+const VALID_GESTORIA_STATUSES = new Set([
+  'reviewed_ok',
+  'reviewed_issue',
+  'waiting_client',
+  'pending_review',
+  'corrected',
+  'ignored',
+]);
+
 const VALID_SORT_FIELDS: Record<string, string> = {
   issue_date: 'issue_date',
   supplier_name: 'supplier_name',
@@ -54,6 +63,7 @@ export async function GET(
   const q = searchParams.get('q')?.trim() ?? '';
   const type = searchParams.get('type') ?? 'all';
   const status = searchParams.get('status') ?? 'all';
+  const gestoriaStatus = searchParams.get('gestoriaStatus') ?? 'all';
   const from = searchParams.get('from') ?? '';
   const to = searchParams.get('to') ?? '';
   const sortByRaw = searchParams.get('sortBy') ?? 'issue_date';
@@ -70,13 +80,24 @@ export async function GET(
     where.invoice_type = type;
   }
 
-  // Status filter
+  // Status filter (individual review_status)
   if (status === 'approved') {
     where.review_status = 'approved';
   } else if (status === 'pending') {
     where.review_status = 'pending';
   } else if (status === 'needs_review') {
     where.review_status = { notIn: ['approved', 'rejected'] };
+  }
+
+  // Gestoria review status filter — collected separately to avoid OR conflicts with text search
+  let gestoriaOrConditions: Prisma.InvoiceWhereInput[] | null = null;
+  if (gestoriaStatus === 'pending') {
+    gestoriaOrConditions = [
+      { gestoria_review_status: null },
+      { gestoria_review_status: 'pending_review' },
+    ];
+  } else if (VALID_GESTORIA_STATUSES.has(gestoriaStatus)) {
+    where.gestoria_review_status = gestoriaStatus;
   }
 
   // Date range filter
@@ -98,12 +119,21 @@ export async function GET(
       { customer_name: { contains: q, mode: 'insensitive' } },
       { supplier_tax_id: { contains: q, mode: 'insensitive' } },
     ];
-    // If q looks like a number, add total_amount exact match
     const qNum = parseFloat(q);
     if (!isNaN(qNum) && qNum > 0) {
       searchConditions.push({ total_amount: qNum });
     }
     where.OR = searchConditions;
+  }
+
+  // Combine gestoriaStatus OR with text search using AND if both are active
+  if (gestoriaOrConditions) {
+    if (where.OR) {
+      where.AND = [{ OR: gestoriaOrConditions }, { OR: where.OR as Prisma.InvoiceWhereInput[] }];
+      delete where.OR;
+    } else {
+      where.OR = gestoriaOrConditions;
+    }
   }
 
   // Build orderBy
@@ -134,6 +164,11 @@ export async function GET(
       currency: true,
       extraction_confidence: true,
       review_status: true,
+      gestoria_review_status: true,
+      gestoria_reviewed_at: true,
+      gestoria_reviewed_by: true,
+      gestoria_review_notes: true,
+      gestoria_issue_types: true,
       document: { select: { original_filename: true } },
     },
   });

@@ -40,10 +40,14 @@ import {
   Archive,
   Search,
   X,
+  ClipboardCheck,
+  History,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Input } from '@/components/ui/input';
 import { SendMessageModal } from '@/components/gestoria/send-message-modal';
+import { InvoiceReviewModal } from '@/components/gestoria/invoice-review-modal';
+import { InvoiceReviewHistoryModal } from '@/components/gestoria/invoice-review-history-modal';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -100,6 +104,11 @@ interface InvoiceRow {
   currency: string;
   extraction_confidence: number;
   review_status: string;
+  gestoria_review_status: string | null;
+  gestoria_reviewed_at: string | null;
+  gestoria_reviewed_by: string | null;
+  gestoria_review_notes: string | null;
+  gestoria_issue_types: string | null;
   document: { original_filename: string } | null;
 }
 
@@ -188,6 +197,30 @@ function invoiceTypeLabel(type: string) {
 }
 
 const LOW_CONFIDENCE_THRESHOLD = 0.7;
+
+function gestoriaStatusBadge(status: string | null) {
+  if (!status || status === 'pending_review')
+    return <Badge className="bg-gray-100 text-gray-600 hover:bg-gray-100 text-xs">Pendiente</Badge>;
+  if (status === 'reviewed_ok')
+    return <Badge className="bg-green-100 text-green-700 hover:bg-green-100 text-xs">Correcta</Badge>;
+  if (status === 'reviewed_issue')
+    return <Badge className="bg-red-100 text-red-700 hover:bg-red-100 text-xs">Incorrecta</Badge>;
+  if (status === 'waiting_client')
+    return <Badge className="bg-yellow-100 text-yellow-700 hover:bg-yellow-100 text-xs">Esp. cliente</Badge>;
+  if (status === 'corrected')
+    return <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 text-xs">Corregida</Badge>;
+  if (status === 'ignored')
+    return <Badge className="bg-gray-100 text-gray-500 hover:bg-gray-100 text-xs">Ignorada</Badge>;
+  return <Badge variant="secondary" className="text-xs">{status}</Badge>;
+}
+
+const REVISION_CHIP_FILTERS = [
+  { v: 'pending',        l: 'Pendientes' },
+  { v: 'reviewed_issue', l: 'Incorrectas' },
+  { v: 'waiting_client', l: 'Esp. cliente' },
+  { v: 'reviewed_ok',    l: 'Revisadas' },
+  { v: 'all',            l: 'Todas' },
+] as const;
 
 function SortableHead({
   col, label, sortBy, sortDir, onClick, className,
@@ -278,6 +311,16 @@ export default function ClientDetailPage() {
   const [messages, setMessages] = useState<MessageRow[] | null>(null);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [showMessageModal, setShowMessageModal] = useState(false);
+
+  // Review modals
+  const [reviewModalInvoice, setReviewModalInvoice] = useState<InvoiceRow | null>(null);
+  const [historyModalInvoice, setHistoryModalInvoice] = useState<InvoiceRow | null>(null);
+
+  // Revision tab filter
+  const [revisionFilter, setRevisionFilter] = useState<string>('pending');
+  const [revisionInvoices, setRevisionInvoices] = useState<InvoiceRow[] | null>(null);
+  const [loadingRevision, setLoadingRevision] = useState(false);
+  const revisionTabActivated = useRef(false);
 
   // Per-document action loading
   const [actionDocId, setActionDocId] = useState<string | null>(null);
@@ -520,13 +563,34 @@ export default function ClientDetailPage() {
       .finally(() => setLoadingMessages(false));
   };
 
+  const loadRevisionInvoices = (filter: string) => {
+    setLoadingRevision(true);
+    setRevisionInvoices(null);
+    const sp = new URLSearchParams({ limit: '100', offset: '0' });
+    if (filter !== 'all') sp.set('gestoriaStatus', filter);
+    fetch(`/api/gestoria/clients/${params.clientCompanyId}/invoices?${sp}`)
+      .then((r) => r.json())
+      .then((data) => setRevisionInvoices(data.invoices ?? []))
+      .catch(() => toast.error('Error cargando revisiones'))
+      .finally(() => setLoadingRevision(false));
+  };
+
   const handleTabChange = (tab: string) => {
-    if (tab === 'documentos' || tab === 'revision') loadDocuments();
+    if (tab === 'documentos') loadDocuments();
     if (tab === 'facturas' && !invoicesTabActivated.current) {
       invoicesTabActivated.current = true;
       doFetchInvoices(true);
     }
+    if (tab === 'revision' && !revisionTabActivated.current) {
+      revisionTabActivated.current = true;
+      loadRevisionInvoices(revisionFilter);
+    }
     if (tab === 'mensajes') loadMessages();
+  };
+
+  const handleRevisionFilterChange = (filter: string) => {
+    setRevisionFilter(filter);
+    loadRevisionInvoices(filter);
   };
 
   const handleDocumentAction = async (docId: string, mode: 'view' | 'download') => {
@@ -592,12 +656,6 @@ export default function ClientDetailPage() {
       )
     : (documents ?? []);
 
-  const reviewDocs = documents?.filter(
-    (d) =>
-      d.processing_status === 'needs_review' ||
-      d.processing_status === 'failed' ||
-      (d.confidence_score !== null && d.confidence_score < LOW_CONFIDENCE_THRESHOLD),
-  ) ?? [];
 
   return (
     <div className="space-y-6">
@@ -1111,7 +1169,8 @@ export default function ClientDetailPage() {
                       <TableHead className="text-right">IVA</TableHead>
                       <SortableHead col="total_amount" label="Total" sortBy={invoiceSortBy} sortDir={invoiceSortDir} onClick={() => handleInvoiceSortChange('total_amount')} className="text-right" />
                       <SortableHead col="extraction_confidence" label="Confianza IA" sortBy={invoiceSortBy} sortDir={invoiceSortDir} onClick={() => handleInvoiceSortChange('extraction_confidence')} />
-                      <SortableHead col="review_status" label="Estado" sortBy={invoiceSortBy} sortDir={invoiceSortDir} onClick={() => handleInvoiceSortChange('review_status')} />
+                      <SortableHead col="review_status" label="Estado IA" sortBy={invoiceSortBy} sortDir={invoiceSortDir} onClick={() => handleInvoiceSortChange('review_status')} />
+                      <TableHead>Revisión gestoría</TableHead>
                       <TableHead className="text-right">Acciones</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -1141,6 +1200,7 @@ export default function ClientDetailPage() {
                         </TableCell>
                         <TableCell>{confidenceBadge(inv.extraction_confidence)}</TableCell>
                         <TableCell>{invoiceStatusBadge(inv.review_status)}</TableCell>
+                        <TableCell>{gestoriaStatusBadge(inv.gestoria_review_status)}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-1">
                             <Button
@@ -1167,6 +1227,22 @@ export default function ClientDetailPage() {
                               <Download className="h-3.5 w-3.5" />
                               <span className="ml-1 hidden sm:inline">Descargar</span>
                             </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              title="Revisar factura"
+                              onClick={() => setReviewModalInvoice(inv)}
+                            >
+                              <ClipboardCheck className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              title="Ver historial de revisión"
+                              onClick={() => setHistoryModalInvoice(inv)}
+                            >
+                              <History className="h-3.5 w-3.5" />
+                            </Button>
                           </div>
                         </TableCell>
                       </TableRow>
@@ -1191,82 +1267,149 @@ export default function ClientDetailPage() {
         {/* ── REVISIÓN ────────────────────────────────────────────────────── */}
         <TabsContent value="revision" className="mt-6">
           <Card>
-            <CardHeader>
+            <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-yellow-500" />
-                Documentos que requieren atención
+                <ClipboardCheck className="h-4 w-4 text-primary" />
+                Cola de revisión de facturas
               </CardTitle>
             </CardHeader>
+
+            {/* Filter chips */}
+            <div className="px-6 pb-4 border-b">
+              <div className="flex flex-wrap gap-1">
+                {REVISION_CHIP_FILTERS.map(({ v, l }) => (
+                  <button
+                    key={v}
+                    onClick={() => handleRevisionFilterChange(v)}
+                    className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                      revisionFilter === v
+                        ? 'bg-primary text-primary-foreground border-primary'
+                        : 'bg-background text-muted-foreground border-border hover:border-primary/50'
+                    }`}
+                  >
+                    {l}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <CardContent className="p-0">
-              {loadingDocs ? (
+              {loadingRevision ? (
                 <div className="flex justify-center py-12">
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                 </div>
-              ) : documents === null ? (
-                <div className="py-12 text-center text-muted-foreground">
-                  <Loader2 className="h-6 w-6 animate-spin mx-auto" />
-                </div>
-              ) : reviewDocs.length === 0 ? (
+              ) : !revisionInvoices || revisionInvoices.length === 0 ? (
                 <div className="py-12 text-center text-muted-foreground">
                   <CheckCircle2 className="h-8 w-8 mx-auto mb-2 text-green-500 opacity-70" />
-                  <p className="text-sm">Sin documentos pendientes de atención.</p>
+                  <p className="text-sm">
+                    {revisionFilter === 'pending'
+                      ? 'No hay facturas pendientes de revisión.'
+                      : 'No hay facturas en esta categoría.'}
+                  </p>
                 </div>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Archivo</TableHead>
-                      <TableHead>Canal</TableHead>
-                      <TableHead>Estado</TableHead>
-                      <TableHead>Confianza</TableHead>
-                      <TableHead>Fecha subida</TableHead>
-                      <TableHead className="text-right">Acciones</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {reviewDocs.map((doc) => (
-                      <TableRow key={doc.id}>
-                        <TableCell className="font-medium text-sm max-w-xs truncate">
-                          {doc.original_filename}
-                        </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {channelLabel(doc.source_channel)}
-                        </TableCell>
-                        <TableCell>{docStatusBadge(doc.processing_status)}</TableCell>
-                        <TableCell>{confidenceBadge(doc.confidence_score)}</TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {new Date(doc.upload_timestamp).toLocaleDateString('es-ES')}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex items-center justify-end gap-1">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              disabled={actionDocId === doc.id}
-                              onClick={() => handleDocumentAction(doc.id, 'view')}
-                            >
-                              {actionDocId === doc.id ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              ) : (
-                                <Eye className="h-3.5 w-3.5" />
-                              )}
-                              <span className="ml-1">Ver</span>
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              disabled={actionDocId === doc.id}
-                              onClick={() => handleDocumentAction(doc.id, 'download')}
-                            >
-                              <Download className="h-3.5 w-3.5" />
-                              <span className="ml-1">Descargar</span>
-                            </Button>
-                          </div>
-                        </TableCell>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Nº Factura</TableHead>
+                        <TableHead>Proveedor</TableHead>
+                        <TableHead>Fecha</TableHead>
+                        <TableHead className="text-right">Total</TableHead>
+                        <TableHead>Revisión</TableHead>
+                        <TableHead>Revisado</TableHead>
+                        <TableHead>Incidencias</TableHead>
+                        <TableHead className="text-right">Acciones</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {revisionInvoices.map((inv) => {
+                        const issues: string[] = inv.gestoria_issue_types
+                          ? JSON.parse(inv.gestoria_issue_types)
+                          : [];
+                        const ISSUE_SHORT: Record<string, string> = {
+                          amount: 'Importe', supplier: 'Proveedor', date: 'Fecha',
+                          vat: 'IVA', duplicate: 'Duplicada', illegible: 'Ilegible',
+                          missing_document: 'Falta doc.', wrong_type: 'Tipo', other: 'Otra',
+                        };
+                        return (
+                          <TableRow key={inv.id}>
+                            <TableCell className="font-medium text-sm whitespace-nowrap">
+                              {inv.invoice_number}
+                            </TableCell>
+                            <TableCell className="text-sm max-w-[150px] truncate">
+                              {inv.supplier_name}
+                            </TableCell>
+                            <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                              {new Date(inv.issue_date).toLocaleDateString('es-ES')}
+                            </TableCell>
+                            <TableCell className="text-right text-sm font-medium whitespace-nowrap">
+                              {inv.total_amount.toFixed(2)} {inv.currency}
+                            </TableCell>
+                            <TableCell>{gestoriaStatusBadge(inv.gestoria_review_status)}</TableCell>
+                            <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                              {inv.gestoria_reviewed_at
+                                ? new Date(inv.gestoria_reviewed_at).toLocaleDateString('es-ES', {
+                                    day: '2-digit', month: '2-digit', year: '2-digit',
+                                    hour: '2-digit', minute: '2-digit',
+                                  })
+                                : '—'}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex flex-wrap gap-1">
+                                {issues.slice(0, 2).map((iss) => (
+                                  <Badge key={iss} variant="outline" className="text-xs">
+                                    {ISSUE_SHORT[iss] ?? iss}
+                                  </Badge>
+                                ))}
+                                {issues.length > 2 && (
+                                  <Badge variant="outline" className="text-xs">
+                                    +{issues.length - 2}
+                                  </Badge>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex items-center justify-end gap-1">
+                                {inv.document_id && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={actionDocId === inv.document_id}
+                                    onClick={() => handleDocumentAction(inv.document_id, 'view')}
+                                  >
+                                    {actionDocId === inv.document_id ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <Eye className="h-3.5 w-3.5" />
+                                    )}
+                                    <span className="ml-1 hidden sm:inline">Ver</span>
+                                  </Button>
+                                )}
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  title="Revisar factura"
+                                  onClick={() => setReviewModalInvoice(inv)}
+                                >
+                                  <ClipboardCheck className="h-3.5 w-3.5" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  title="Ver historial"
+                                  onClick={() => setHistoryModalInvoice(inv)}
+                                >
+                                  <History className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
               )}
             </CardContent>
           </Card>
@@ -1512,6 +1655,29 @@ export default function ClientDetailPage() {
           }}
           clientCompanyId={params.clientCompanyId}
           clientName={detail.company.name}
+        />
+      )}
+
+      {reviewModalInvoice && (
+        <InvoiceReviewModal
+          open={!!reviewModalInvoice}
+          onClose={() => setReviewModalInvoice(null)}
+          invoice={reviewModalInvoice}
+          clientCompanyId={params.clientCompanyId}
+          onReviewed={() => {
+            setReviewModalInvoice(null);
+            doFetchInvoices(true);
+            if (revisionTabActivated.current) loadRevisionInvoices(revisionFilter);
+          }}
+        />
+      )}
+
+      {historyModalInvoice && (
+        <InvoiceReviewHistoryModal
+          open={!!historyModalInvoice}
+          onClose={() => setHistoryModalInvoice(null)}
+          invoice={historyModalInvoice}
+          clientCompanyId={params.clientCompanyId}
         />
       )}
     </div>

@@ -55,7 +55,7 @@ model User {
   name          String
   created_at    DateTime     @default(now())
   updated_at    DateTime     @updatedAt
-  
+
   accounts             Account[]
   sessions             Session[]
   memberships          Membership[]
@@ -63,6 +63,8 @@ model User {
   audit_logs           AuditLog[]
   telegram_links       TelegramLink[]
   telegram_link_codes  TelegramLinkCode[]
+  gestoria_reviews     InvoiceReviewLog[] @relation("ReviewLogUser")
+  gestoria_reviewed    Invoice[]          @relation("GestoriaReviewer")
 
   @@index([email])
 }
@@ -100,6 +102,8 @@ model Company {
   sent_messages         GestoriaMessage[]   @relation("SentMessages")
   received_messages     GestoriaMessage[]   @relation("ReceivedMessages")
   aliases               CompanyAlias[]
+  review_logs_client    InvoiceReviewLog[]  @relation("ReviewLogClient")
+  review_logs_gestoria  InvoiceReviewLog[]  @relation("ReviewLogGestoria")
 
   @@index([tax_id])
   @@index([company_type])
@@ -225,14 +229,22 @@ model Invoice {
   extraction_confidence  Float
   review_status          String   @default("pending") // pending, approved, rejected
   supplier_id            String?
+  // Gestoria review fields (independent of individual user review_status)
+  gestoria_review_status String?   // pending_review | reviewed_ok | reviewed_issue | waiting_client | corrected | ignored
+  gestoria_reviewed_at   DateTime?
+  gestoria_reviewed_by   String?
+  gestoria_review_notes  String?
+  gestoria_issue_types   String?   // JSON array: ["amount","vat","supplier",...]
   created_at             DateTime @default(now())
   updated_at             DateTime @updatedAt
 
-  document               Document       @relation(fields: [document_id], references: [id], onDelete: Cascade)
-  company                Company        @relation(fields: [company_id], references: [id], onDelete: Cascade)
-  supplier               Supplier?      @relation(fields: [supplier_id], references: [id], onDelete: SetNull)
+  document               Document          @relation(fields: [document_id], references: [id], onDelete: Cascade)
+  company                Company           @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  supplier               Supplier?         @relation(fields: [supplier_id], references: [id], onDelete: SetNull)
   matched_delivery_notes DeliveryNote[]
   invoice_lines          InvoiceLine[]
+  gestoria_reviewer      User?             @relation("GestoriaReviewer", fields: [gestoria_reviewed_by], references: [id])
+  review_logs            InvoiceReviewLog[]
 
   @@index([company_id])
   @@index([invoice_type])
@@ -448,5 +460,34 @@ model GestoriaMessage {
   @@index([gestoria_company_id])
   @@index([client_company_id])
   @@index([read_at])
+  @@index([created_at])
+}
+
+// --- Gestoria invoice review audit log ---
+
+model InvoiceReviewLog {
+  id                   String   @id @default(cuid())
+  invoice_id           String
+  client_company_id    String
+  gestoria_company_id  String
+  reviewed_by_user_id  String
+  action               String   // mark_correct | mark_incorrect | mark_pending | add_note | request_client_action | correction_detected
+  previous_status      String?
+  new_status           String
+  observations         String?
+  internal_notes       String?
+  issue_types          String?  // JSON array
+  client_comment       String?
+  visible_to_client    Boolean  @default(false)
+  created_at           DateTime @default(now())
+
+  invoice          Invoice @relation(fields: [invoice_id],           references: [id], onDelete: Cascade)
+  client_company   Company @relation("ReviewLogClient",   fields: [client_company_id],   references: [id])
+  gestoria_company Company @relation("ReviewLogGestoria", fields: [gestoria_company_id],  references: [id])
+  reviewer         User    @relation("ReviewLogUser",     fields: [reviewed_by_user_id],  references: [id])
+
+  @@index([invoice_id])
+  @@index([client_company_id])
+  @@index([gestoria_company_id])
   @@index([created_at])
 }
