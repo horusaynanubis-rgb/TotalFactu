@@ -8,13 +8,13 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import {
   Truck, ArrowLeft, TrendingUp, TrendingDown, Package,
-  FileText, Search, AlertTriangle, ShieldCheck,
+  FileText, Search, AlertTriangle, ShieldCheck, HelpCircle,
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import toast from 'react-hot-toast';
 
-type AlertLevel = 'none' | 'minor' | 'major';
-type ProductFilter = 'all' | 'alerts' | 'stable';
+type AlertLevel = 'none' | 'minor' | 'major' | 'suspicious';
+type ProductFilter = 'all' | 'alerts' | 'stable' | 'suspicious';
 
 interface Product {
   normalized_description: string;
@@ -29,6 +29,9 @@ interface Product {
   variation_vs_initial: number | null;
   alert_level: AlertLevel;
   total_quantity: number;
+  suspicious: boolean;
+  suspicious_reason: string | null;
+  price_inconsistencies: number;
 }
 
 interface Invoice {
@@ -85,8 +88,9 @@ export default function SupplierDetailPage() {
     }
 
     // Status filter
-    if (productFilter === 'alerts') list = list.filter((p) => p.alert_level !== 'none');
+    if (productFilter === 'alerts') list = list.filter((p) => p.alert_level !== 'none' && p.alert_level !== 'suspicious');
     if (productFilter === 'stable') list = list.filter((p) => p.alert_level === 'none');
+    if (productFilter === 'suspicious') list = list.filter((p) => p.alert_level === 'suspicious');
 
     return list;
   }, [data, productSearch, productFilter]);
@@ -104,6 +108,7 @@ export default function SupplierDetailPage() {
   const { supplier, invoice_count, total_spend, invoices, products } = data;
   const alerts = products.filter((p) => p.alert_level === 'major');
   const alertsMinor = products.filter((p) => p.alert_level === 'minor');
+  const alertsSuspicious = products.filter((p) => p.alert_level === 'suspicious');
   const monitored = products.filter((p) => p.appearances >= 2);
 
   return (
@@ -145,6 +150,23 @@ export default function SupplierDetailPage() {
         />
       </div>
 
+      {/* Suspicious section */}
+      {alertsSuspicious.length > 0 && (
+        <Card className="border-amber-200 bg-amber-50">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2 text-amber-800">
+              <HelpCircle className="h-4 w-4" />
+              Posibles errores de extracción ({alertsSuspicious.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {alertsSuspicious.map((p) => (
+              <AlertItem key={p.normalized_description} product={p} level="suspicious" />
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Alerts section */}
       {(alerts.length > 0 || alertsMinor.length > 0) && (
         <Card className={alerts.length > 0 ? 'border-red-200 bg-red-50' : 'border-yellow-200 bg-yellow-50'}>
@@ -173,7 +195,7 @@ export default function SupplierDetailPage() {
             <div className="flex items-center gap-2 flex-wrap">
               {/* Filter tabs */}
               <div className="flex rounded-md border divide-x overflow-hidden text-xs">
-                {(['all', 'alerts', 'stable'] as ProductFilter[]).map((f) => (
+                {(['all', 'alerts', 'suspicious', 'stable'] as ProductFilter[]).map((f) => (
                   <button
                     key={f}
                     onClick={() => setProductFilter(f)}
@@ -183,7 +205,7 @@ export default function SupplierDetailPage() {
                         : 'bg-white text-gray-600 hover:bg-gray-50'
                     }`}
                   >
-                    {f === 'all' ? 'Todos' : f === 'alerts' ? 'Con subidas' : 'Estables'}
+                    {f === 'all' ? 'Todos' : f === 'alerts' ? 'Con subidas' : f === 'suspicious' ? 'Por verificar' : 'Estables'}
                   </button>
                 ))}
               </div>
@@ -227,7 +249,7 @@ export default function SupplierDetailPage() {
                   {filteredProducts.map((p) => (
                     <tr
                       key={p.normalized_description}
-                      className={`hover:bg-gray-50 ${p.alert_level === 'major' ? 'bg-red-50/40' : ''}`}
+                      className={`hover:bg-gray-50 ${p.alert_level === 'major' ? 'bg-red-50/40' : p.alert_level === 'suspicious' ? 'bg-amber-50/40' : ''}`}
                     >
                       <td className="px-4 py-3">
                         <p className="font-medium text-gray-900 leading-snug">{p.last_description}</p>
@@ -246,7 +268,7 @@ export default function SupplierDetailPage() {
                         {p.last_price !== null ? `${p.last_price.toFixed(2)} €` : '—'}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <VsPrevBadge variation={p.variation_vs_prev} />
+                        <VsPrevBadge variation={p.variation_vs_prev} suspicious={p.suspicious} />
                       </td>
                       <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">
                         {p.last_date ? new Date(p.last_date).toLocaleDateString('es-ES') : '—'}
@@ -334,13 +356,29 @@ function StatCard({
   );
 }
 
-function AlertItem({ product, level }: { product: Product; level: 'major' | 'minor' }) {
+function AlertItem({ product, level }: { product: Product; level: 'major' | 'minor' | 'suspicious' }) {
   const isMajor = level === 'major';
+  const isSuspicious = level === 'suspicious';
   const varPrev  = product.variation_vs_prev;
   const varInit  = product.variation_vs_initial;
 
   const mainVar = varPrev !== null ? varPrev : varInit;
   const isVsPrev = varPrev !== null;
+
+  if (isSuspicious) {
+    return (
+      <div className="flex items-start gap-2 text-sm text-amber-800">
+        <HelpCircle className="h-4 w-4 mt-0.5 flex-shrink-0 text-amber-500" />
+        <p>
+          <span className="font-medium">{product.last_description}</span>
+          {' — '}
+          <span className="italic">
+            {product.suspicious_reason ?? 'Variación inusual detectada. Revisa los precios manualmente.'}
+          </span>
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className={`flex items-start gap-2 text-sm ${isMajor ? 'text-red-800' : 'text-yellow-800'}`}>
@@ -363,7 +401,14 @@ function AlertItem({ product, level }: { product: Product; level: 'major' | 'min
   );
 }
 
-function VsPrevBadge({ variation }: { variation: number | null }) {
+function VsPrevBadge({ variation, suspicious = false }: { variation: number | null; suspicious?: boolean }) {
+  if (suspicious) {
+    return (
+      <span className="inline-flex items-center gap-1 text-amber-600 font-medium text-xs" title="Variación inusual — posible error de extracción">
+        <HelpCircle className="h-3 w-3" /> Verificar
+      </span>
+    );
+  }
   if (variation === null) return <span className="text-gray-400 text-xs">—</span>;
   if (variation > 5) {
     return (
@@ -386,6 +431,14 @@ function VsPrevBadge({ variation }: { variation: number | null }) {
 }
 
 function StatusBadge({ level }: { level: AlertLevel }) {
+  if (level === 'suspicious') {
+    return (
+      <Badge className="bg-amber-100 text-amber-700 border-amber-200 gap-1 text-xs whitespace-nowrap">
+        <HelpCircle className="h-3 w-3" />
+        Verificar
+      </Badge>
+    );
+  }
   if (level === 'major') {
     return (
       <Badge className="bg-red-100 text-red-700 border-red-200 gap-1 text-xs whitespace-nowrap">
