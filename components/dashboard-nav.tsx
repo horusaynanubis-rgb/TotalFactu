@@ -23,6 +23,7 @@ import {
   Mail,
   Truck,
   Inbox,
+  Wallet,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useState, useEffect } from 'react';
@@ -88,6 +89,7 @@ export function DashboardNav() {
         { name: 'Cola de Revisión', href: '/dashboard/review', icon: ListChecks },
         { name: t.nav.exports, href: '/dashboard/exports', icon: Download },
         { name: 'Mensajes', href: '/dashboard/messages', icon: Inbox, unreadBadge: unreadMessages > 0 ? unreadMessages : undefined },
+        { name: 'Caja y Cobros', href: '/dashboard/caja-cobros', icon: Wallet },
         ...(isAdmin ? [{ name: 'Admin Demo', href: '/dashboard/admin/demo', icon: ShieldCheck, adminBadge: true }] : []),
         { name: t.nav.settings, href: '/dashboard/settings', icon: Settings },
         { name: t.nav.billing, href: '/dashboard/billing', icon: CreditCard },

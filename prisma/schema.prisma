@@ -108,6 +108,7 @@ model Company {
   review_logs_gestoria  InvoiceReviewLog[]          @relation("ReviewLogGestoria")
   corrections_client    InvoiceCorrectionProposal[] @relation("CorrectionClient")
   corrections_gestoria  InvoiceCorrectionProposal[] @relation("CorrectionGestoria")
+  daily_cash_registers  DailyCashRegister[]
 
   @@index([tax_id])
   @@index([company_type])
@@ -523,4 +524,28 @@ model InvoiceCorrectionProposal {
   @@index([client_company_id])
   @@index([status])
   @@index([created_at])
+}
+
+// --- Caja y Cobros ---
+
+model DailyCashRegister {
+  id               String   @id @default(cuid())
+  company_id       String
+  date             DateTime @db.Date
+  cash_amount      Decimal  @default(0) @db.Decimal(12, 2)
+  card_amount      Decimal  @default(0) @db.Decimal(12, 2)
+  bizum_amount     Decimal  @default(0) @db.Decimal(12, 2)
+  transfer_amount  Decimal  @default(0) @db.Decimal(12, 2)
+  other_amount     Decimal  @default(0) @db.Decimal(12, 2)
+  total_amount     Decimal  @default(0) @db.Decimal(12, 2)
+  notes            String?
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+
+  company Company @relation(fields: [company_id], references: [id], onDelete: Cascade)
+
+  @@unique([company_id, date])
+  @@index([company_id])
+  @@index([date])
+  @@index([company_id, date])
 }
