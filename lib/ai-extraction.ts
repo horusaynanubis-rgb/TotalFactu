@@ -614,11 +614,16 @@ export function validateExtraction(raw: any): InvoiceExtraction {
   const normalizeDate = (v: any): string => {
     if (!v) return '';
     const s = String(v).trim();
+    // Return ISO format as-is — no Date parsing needed, avoids UTC-offset issues
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
     const d = new Date(s);
     if (!isNaN(d.getTime())) {
-      return d.toISOString().split('T')[0];
+      // Use local date parts so UTC-offset doesn't shift the day (e.g. UTC+2 "June 15 00:00" → "June 14" in UTC)
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
     }
-    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
     return '';
   };
 

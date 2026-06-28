@@ -424,16 +424,19 @@ export default function ClientDetailPage() {
     if (status !== 'all') sp.set('status', status);
 
     const now = new Date();
-    const todayStr = now.toISOString().slice(0, 10);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    // Use local date parts to avoid UTC-offset shifting the date (e.g. UTC+2 turns Jan 1 into Dec 31)
+    const localDateStr = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const todayStr = localDateStr(now);
     if (period === 'this_month') {
-      sp.set('from', new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10));
+      sp.set('from', `${now.getFullYear()}-${pad(now.getMonth() + 1)}-01`);
       sp.set('to', todayStr);
     } else if (period === 'last_3_months') {
-      const d = new Date(now); d.setMonth(d.getMonth() - 3);
-      sp.set('from', d.toISOString().slice(0, 10));
+      const d = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate());
+      sp.set('from', localDateStr(d));
       sp.set('to', todayStr);
     } else if (period === 'this_year') {
-      sp.set('from', new Date(now.getFullYear(), 0, 1).toISOString().slice(0, 10));
+      sp.set('from', `${now.getFullYear()}-01-01`);
       sp.set('to', todayStr);
     } else if (period === 'custom') {
       if (from) sp.set('from', from);
