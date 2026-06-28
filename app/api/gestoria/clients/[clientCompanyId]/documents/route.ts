@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/auth-options';
 import { prisma } from '@/lib/prisma';
+import { buildDocumentWhere } from '@/lib/document-filters';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,8 +43,16 @@ export async function GET(
   const limit = Math.min(parseInt(searchParams.get('limit') ?? '50', 10), 100);
   const offset = parseInt(searchParams.get('offset') ?? '0', 10);
 
+  const where = buildDocumentWhere(params.clientCompanyId, {
+    status: searchParams.get('status'),
+    channel: searchParams.get('channel'),
+    q: searchParams.get('q'),
+    from: searchParams.get('from'),
+    to: searchParams.get('to'),
+  });
+
   const documents = await prisma.document.findMany({
-    where: { company_id: params.clientCompanyId },
+    where,
     orderBy: { upload_timestamp: 'desc' },
     take: limit + 1,
     skip: offset,
@@ -55,6 +64,15 @@ export async function GET(
       confidence_score: true,
       upload_timestamp: true,
       mime_type: true,
+      invoice: {
+        select: {
+          id: true,
+          invoice_number: true,
+          supplier_name: true,
+          review_status: true,
+          gestoria_review_status: true,
+        },
+      },
     },
   });
 

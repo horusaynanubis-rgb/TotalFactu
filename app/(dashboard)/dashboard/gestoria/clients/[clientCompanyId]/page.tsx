@@ -43,9 +43,11 @@ import {
   ClipboardCheck,
   History,
   PenLine,
+  Filter,
 } from 'lucide-react';
 import { getUnifiedStatus } from '@/lib/unified-status';
 import { StatusBadge } from '@/components/status-badge';
+import { DocumentTimeline } from '@/components/document-timeline';
 import toast from 'react-hot-toast';
 import { Input } from '@/components/ui/input';
 import { SendMessageModal } from '@/components/gestoria/send-message-modal';
@@ -91,6 +93,13 @@ interface DocRow {
   confidence_score: number | null;
   upload_timestamp: string;
   mime_type?: string;
+  invoice?: {
+    id: string;
+    invoice_number: string;
+    supplier_name: string;
+    review_status: string;
+    gestoria_review_status: string | null;
+  } | null;
 }
 
 interface InvoiceRow {
@@ -283,6 +292,21 @@ export default function ClientDetailPage() {
   const [loadingMoreDocs, setLoadingMoreDocs] = useState(false);
   const [docsHasMore, setDocsHasMore] = useState(false);
 
+  // Document filters
+  const [docStatusFilter, setDocStatusFilter] = useState('all');
+  const [docChannelFilter, setDocChannelFilter] = useState('all');
+  const [docPeriodFilter, setDocPeriodFilter] = useState('all');
+  const [docFrom, setDocFrom] = useState('');
+  const [docTo, setDocTo] = useState('');
+  const docStatusRef = useRef('all');
+  const docChannelRef = useRef('all');
+  const docPeriodRef = useRef('all');
+  const docFromRef = useRef('');
+  const docToRef = useRef('');
+
+  // Trazabilidad modal for documents tab
+  const [traceDocId, setTraceDocId] = useState<string | null>(null);
+
   // Invoices (lazy — loaded on first activation of Facturas tab)
   const [invoices, setInvoices] = useState<InvoiceRow[] | null>(null);
   const [loadingInvoices, setLoadingInvoices] = useState(false);
@@ -357,30 +381,71 @@ export default function ClientDetailPage() {
       .finally(() => setLoadingDetail(false));
   }, [companyType, params.clientCompanyId, router]);
 
-  const loadDocuments = () => {
-    if (documents !== null || loadingDocs) return;
-    setLoadingDocs(true);
-    fetch(`/api/gestoria/clients/${params.clientCompanyId}/documents?limit=50&offset=0`)
+  const padDoc = (n: number) => String(n).padStart(2, '0');
+  const localStrDoc = (d: Date) =>
+    `${d.getFullYear()}-${padDoc(d.getMonth() + 1)}-${padDoc(d.getDate())}`;
+
+  function doFetchDocs(
+    replace: boolean,
+    overrides?: {
+      status?: string; channel?: string; period?: string;
+      from?: string; to?: string;
+    },
+  ) {
+    const status  = overrides?.status  ?? docStatusRef.current;
+    const channel = overrides?.channel ?? docChannelRef.current;
+    const period  = overrides?.period  ?? docPeriodRef.current;
+    const from    = overrides?.from    ?? docFromRef.current;
+    const to      = overrides?.to      ?? docToRef.current;
+    const offset  = replace ? 0 : (documents?.length ?? 0);
+
+    if (replace) { setLoadingDocs(true); setDocuments(null); setDocsHasMore(false); }
+    else { if (loadingMoreDocs) return; setLoadingMoreDocs(true); }
+
+    const sp = new URLSearchParams();
+    sp.set('limit', '50');
+    sp.set('offset', String(offset));
+    if (status !== 'all')  sp.set('status',  status);
+    if (channel !== 'all') sp.set('channel', channel);
+
+    const now = new Date();
+    const todayStr = localStrDoc(now);
+    if (period === 'this_month') {
+      sp.set('from', `${now.getFullYear()}-${padDoc(now.getMonth() + 1)}-01`);
+      sp.set('to', todayStr);
+    } else if (period === 'last_3_months') {
+      sp.set('from', localStrDoc(new Date(now.getFullYear(), now.getMonth() - 3, now.getDate())));
+      sp.set('to', todayStr);
+    } else if (period === 'this_year') {
+      sp.set('from', `${now.getFullYear()}-01-01`);
+      sp.set('to', todayStr);
+    } else if (period === 'custom') {
+      if (from) sp.set('from', from);
+      if (to)   sp.set('to', to);
+    }
+
+    fetch(`/api/gestoria/clients/${params.clientCompanyId}/documents?${sp}`)
       .then((r) => r.json())
       .then((data) => {
-        setDocuments(data.documents ?? []);
+        if (replace) setDocuments(data.documents ?? []);
+        else setDocuments((prev) => [...(prev ?? []), ...(data.documents ?? [])]);
         setDocsHasMore(data.hasMore ?? false);
       })
       .catch(() => toast.error('Error cargando documentos'))
-      .finally(() => setLoadingDocs(false));
+      .finally(() => {
+        if (replace) setLoadingDocs(false);
+        else setLoadingMoreDocs(false);
+      });
+  }
+
+  const loadDocuments = () => {
+    if (documents !== null || loadingDocs) return;
+    doFetchDocs(true);
   };
 
   const loadMoreDocuments = () => {
     if (!documents || loadingMoreDocs) return;
-    setLoadingMoreDocs(true);
-    fetch(`/api/gestoria/clients/${params.clientCompanyId}/documents?limit=50&offset=${documents.length}`)
-      .then((r) => r.json())
-      .then((data) => {
-        setDocuments((prev) => [...(prev ?? []), ...(data.documents ?? [])]);
-        setDocsHasMore(data.hasMore ?? false);
-      })
-      .catch(() => toast.error('Error cargando más documentos'))
-      .finally(() => setLoadingMoreDocs(false));
+    doFetchDocs(false);
   };
 
   function doFetchInvoices(
@@ -653,10 +718,18 @@ export default function ClientDetailPage() {
     invoicePeriod !== 'all';
 
   const filteredDocs = docSearch.trim()
-    ? (documents ?? []).filter((d) =>
-        d.original_filename.toLowerCase().includes(docSearch.toLowerCase()),
-      )
+    ? (documents ?? []).filter((d) => {
+        const q = docSearch.toLowerCase();
+        return (
+          d.original_filename.toLowerCase().includes(q) ||
+          d.invoice?.invoice_number?.toLowerCase().includes(q) ||
+          d.invoice?.supplier_name?.toLowerCase().includes(q)
+        );
+      })
     : (documents ?? []);
+
+  const hasActiveDocFilters =
+    docStatusFilter !== 'all' || docChannelFilter !== 'all' || docPeriodFilter !== 'all';
 
 
   return (
@@ -888,40 +961,163 @@ export default function ClientDetailPage() {
                 <span className="flex items-center gap-2">
                   <FileText className="h-4 w-4" />Documentos del cliente
                 </span>
-                {documents && (
+                {documents !== null && (
                   <span className="text-sm font-normal text-muted-foreground">
                     {filteredDocs.length}{!docSearch && docsHasMore ? '+' : ''} documento{filteredDocs.length !== 1 ? 's' : ''}
                   </span>
                 )}
               </CardTitle>
             </CardHeader>
-            {documents && documents.length > 0 && (
-              <div className="px-6 pb-4 border-b">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Buscar por nombre de archivo..."
-                    value={docSearch}
-                    onChange={(e) => setDocSearch(e.target.value)}
-                    className="pl-9 pr-9"
-                  />
-                  {docSearch && (
-                    <button
-                      onClick={() => setDocSearch('')}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  )}
-                </div>
+
+            {/* Filter bar */}
+            <div className="px-6 pb-4 space-y-3 border-b">
+              {/* Search */}
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar por archivo, proveedor, nº factura…"
+                  value={docSearch}
+                  onChange={(e) => setDocSearch(e.target.value)}
+                  className="pl-9 pr-9"
+                />
+                {docSearch && (
+                  <button
+                    onClick={() => setDocSearch('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
               </div>
-            )}
+
+              {/* Status chips */}
+              <div className="flex flex-wrap gap-1">
+                {([
+                  { v: 'all', l: 'Todos' },
+                  { v: 'processing', l: 'Procesando IA' },
+                  { v: 'pending', l: 'Pendiente revisión' },
+                  { v: 'reviewed', l: 'Revisada' },
+                  { v: 'waiting', l: 'Esperando cliente' },
+                  { v: 'done', l: 'Finalizada' },
+                  { v: 'error', l: 'Error' },
+                ] as const).map(({ v, l }) => (
+                  <button
+                    key={v}
+                    onClick={() => {
+                      setDocStatusFilter(v); docStatusRef.current = v;
+                      doFetchDocs(true, { status: v });
+                    }}
+                    className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors whitespace-nowrap ${
+                      docStatusFilter === v
+                        ? 'bg-primary text-primary-foreground border-primary'
+                        : 'bg-background text-muted-foreground border-border hover:border-primary/50'
+                    }`}
+                  >
+                    {l}
+                  </button>
+                ))}
+              </div>
+
+              {/* Channel + Period chips */}
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex gap-1">
+                  {([
+                    { v: 'all', l: 'Todos canales' },
+                    { v: 'web', l: 'Web' },
+                    { v: 'telegram', l: 'Telegram' },
+                    { v: 'email', l: 'Email' },
+                  ] as const).map(({ v, l }) => (
+                    <button
+                      key={v}
+                      onClick={() => {
+                        setDocChannelFilter(v); docChannelRef.current = v;
+                        doFetchDocs(true, { channel: v });
+                      }}
+                      className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors whitespace-nowrap ${
+                        docChannelFilter === v
+                          ? 'bg-primary text-primary-foreground border-primary'
+                          : 'bg-background text-muted-foreground border-border hover:border-primary/50'
+                      }`}
+                    >
+                      {l}
+                    </button>
+                  ))}
+                </div>
+                <span className="h-5 w-px bg-border" />
+                <div className="flex gap-1 flex-wrap">
+                  {([
+                    { v: 'all', l: 'Todo' },
+                    { v: 'this_month', l: 'Este mes' },
+                    { v: 'last_3_months', l: 'Últimos 3m' },
+                    { v: 'this_year', l: 'Este año' },
+                    { v: 'custom', l: 'Personalizado' },
+                  ] as const).map(({ v, l }) => (
+                    <button
+                      key={v}
+                      onClick={() => {
+                        setDocPeriodFilter(v); docPeriodRef.current = v;
+                        if (v !== 'custom') doFetchDocs(true, { period: v });
+                      }}
+                      className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors whitespace-nowrap ${
+                        docPeriodFilter === v
+                          ? 'bg-primary text-primary-foreground border-primary'
+                          : 'bg-background text-muted-foreground border-border hover:border-primary/50'
+                      }`}
+                    >
+                      {l}
+                    </button>
+                  ))}
+                </div>
+                {(hasActiveDocFilters || docSearch) && (
+                  <button
+                    onClick={() => {
+                      setDocStatusFilter('all'); docStatusRef.current = 'all';
+                      setDocChannelFilter('all'); docChannelRef.current = 'all';
+                      setDocPeriodFilter('all'); docPeriodRef.current = 'all';
+                      setDocFrom(''); docFromRef.current = '';
+                      setDocTo(''); docToRef.current = '';
+                      setDocSearch('');
+                      doFetchDocs(true, { status: 'all', channel: 'all', period: 'all', from: '', to: '' });
+                    }}
+                    className="ml-auto text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+                  >
+                    <X className="h-3 w-3" />Limpiar
+                  </button>
+                )}
+              </div>
+
+              {/* Custom date range */}
+              {docPeriodFilter === 'custom' && (
+                <div className="flex gap-3 items-center max-w-sm">
+                  <Input
+                    type="date"
+                    value={docFrom}
+                    onChange={(e) => {
+                      setDocFrom(e.target.value); docFromRef.current = e.target.value;
+                      doFetchDocs(true, { period: 'custom', from: e.target.value, to: docToRef.current });
+                    }}
+                    className="h-8 text-sm"
+                  />
+                  <span className="text-sm text-muted-foreground shrink-0">—</span>
+                  <Input
+                    type="date"
+                    value={docTo}
+                    onChange={(e) => {
+                      setDocTo(e.target.value); docToRef.current = e.target.value;
+                      doFetchDocs(true, { period: 'custom', from: docFromRef.current, to: e.target.value });
+                    }}
+                    className="h-8 text-sm"
+                  />
+                </div>
+              )}
+            </div>
+
             <CardContent className="p-0">
               {loadingDocs ? (
                 <div className="flex justify-center py-12">
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                 </div>
-              ) : documents === null || documents.length === 0 ? (
+              ) : documents === null || (documents.length === 0 && !hasActiveDocFilters && !docSearch) ? (
                 <div className="py-12 text-center text-muted-foreground">
                   <FileText className="h-8 w-8 mx-auto mb-2 opacity-30" />
                   <p className="text-sm">Sin documentos todavía.</p>
@@ -929,10 +1125,7 @@ export default function ClientDetailPage() {
               ) : filteredDocs.length === 0 ? (
                 <div className="py-12 text-center text-muted-foreground">
                   <FileText className="h-8 w-8 mx-auto mb-2 opacity-30" />
-                  <p className="text-sm">No hay documentos que coincidan con la búsqueda.</p>
-                  <button onClick={() => setDocSearch('')} className="mt-2 text-xs text-primary hover:underline">
-                    Limpiar búsqueda
-                  </button>
+                  <p className="text-sm">No hay documentos con los filtros seleccionados.</p>
                 </div>
               ) : (
                 <>
@@ -943,6 +1136,7 @@ export default function ClientDetailPage() {
                       <TableHead>Canal</TableHead>
                       <TableHead>Estado</TableHead>
                       <TableHead>Confianza</TableHead>
+                      <TableHead>Factura asociada</TableHead>
                       <TableHead>Fecha subida</TableHead>
                       <TableHead className="text-right">Acciones</TableHead>
                     </TableRow>
@@ -956,8 +1150,29 @@ export default function ClientDetailPage() {
                         <TableCell className="text-sm text-muted-foreground">
                           {channelLabel(doc.source_channel)}
                         </TableCell>
-                        <TableCell>{docStatusBadge(doc.processing_status)}</TableCell>
+                        <TableCell>
+                          <StatusBadge
+                            status={getUnifiedStatus({
+                              processingStatus: doc.processing_status,
+                              reviewStatus: doc.invoice?.review_status,
+                              gestoriaStatus: doc.invoice?.gestoria_review_status,
+                            })}
+                            type="unified"
+                          />
+                        </TableCell>
                         <TableCell>{confidenceBadge(doc.confidence_score)}</TableCell>
+                        <TableCell>
+                          {doc.invoice ? (
+                            <div className="text-xs">
+                              <p className="font-medium text-foreground truncate max-w-[140px]" title={doc.invoice.supplier_name}>
+                                {doc.invoice.supplier_name}
+                              </p>
+                              <p className="text-muted-foreground">{doc.invoice.invoice_number}</p>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
                           {new Date(doc.upload_timestamp).toLocaleDateString('es-ES')}
                         </TableCell>
@@ -984,6 +1199,14 @@ export default function ClientDetailPage() {
                             >
                               <Download className="h-3.5 w-3.5" />
                               <span className="ml-1">Descargar</span>
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              title="Ver trazabilidad"
+                              onClick={() => setTraceDocId(doc.id)}
+                            >
+                              <History className="h-3.5 w-3.5" />
                             </Button>
                           </div>
                         </TableCell>
@@ -1669,6 +1892,64 @@ export default function ClientDetailPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* ── Trazabilidad modal ──────────────────────────────────────────── */}
+      {traceDocId && (() => {
+        const traceDoc = (documents ?? []).find((d) => d.id === traceDocId);
+        if (!traceDoc) return null;
+        return (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-sm">
+              <div className="flex items-center justify-between p-5 border-b">
+                <div>
+                  <h2 className="text-base font-semibold">Trazabilidad del documento</h2>
+                  <p className="text-xs text-muted-foreground mt-0.5 truncate max-w-[220px]" title={traceDoc.original_filename}>
+                    {traceDoc.original_filename}
+                  </p>
+                </div>
+                <button onClick={() => setTraceDocId(null)} className="text-muted-foreground hover:text-foreground">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="p-5 space-y-4">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Estado actual</span>
+                  <StatusBadge
+                    status={getUnifiedStatus({
+                      processingStatus: traceDoc.processing_status,
+                      reviewStatus: traceDoc.invoice?.review_status,
+                      gestoriaStatus: traceDoc.invoice?.gestoria_review_status,
+                    })}
+                    type="unified"
+                  />
+                </div>
+                {traceDoc.invoice && (
+                  <div className="text-sm">
+                    <span className="text-muted-foreground">Factura: </span>
+                    <span className="font-medium">{traceDoc.invoice.invoice_number}</span>
+                    {traceDoc.invoice.supplier_name && (
+                      <span className="text-muted-foreground"> · {traceDoc.invoice.supplier_name}</span>
+                    )}
+                  </div>
+                )}
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-3">Progreso</p>
+                  <DocumentTimeline
+                    processingStatus={traceDoc.processing_status}
+                    reviewStatus={traceDoc.invoice?.review_status}
+                    gestoriaStatus={traceDoc.invoice?.gestoria_review_status}
+                  />
+                </div>
+              </div>
+              <div className="px-5 pb-5">
+                <Button variant="outline" className="w-full" onClick={() => setTraceDocId(null)}>
+                  Cerrar
+                </Button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {showMessageModal && detail && (
         <SendMessageModal
