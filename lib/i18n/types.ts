@@ -396,7 +396,7 @@ export interface Translations {
     confidence: string;
   };
 
-  // Status badges
+  // Status badges (legacy — internal/technical labels)
   statusBadges: {
     processing: string;
     completed: string;
@@ -405,6 +405,17 @@ export interface Translations {
     pending: string;
     approved: string;
     rejected: string;
+  };
+
+  // Unified functional status — same labels used across Documents, Invoices, Review, Gestoria
+  unifiedStatus: {
+    processing: string;
+    error: string;
+    pending: string;
+    reviewed: string;
+    rejected: string;
+    waiting: string;
+    done: string;
   };
 
   // Subscription plan features

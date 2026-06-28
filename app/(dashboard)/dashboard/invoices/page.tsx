@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { StatusBadge } from '@/components/status-badge';
+import { getUnifiedStatus } from '@/lib/unified-status';
 import { Search, Filter, X, Pencil, CheckCircle, XCircle, Trash2, AlertTriangle, Eye } from 'lucide-react';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import toast from 'react-hot-toast';
@@ -234,9 +235,9 @@ export default function InvoicesPage() {
                 className="border rounded-md px-3 py-2 text-sm"
               >
                 <option value="all">{t.common.all}</option>
-                <option value="pending">{t.invoices.pending}</option>
-                <option value="approved">{t.invoices.approved}</option>
-                <option value="rejected">{t.invoices.rejected}</option>
+                <option value="pending">{t.unifiedStatus.pending}</option>
+                <option value="approved">{t.unifiedStatus.reviewed}</option>
+                <option value="rejected">{t.unifiedStatus.rejected}</option>
               </select>
             </div>
           </div>
@@ -310,7 +311,14 @@ export default function InvoicesPage() {
                         {inv?.extraction_confidence ? `${(inv.extraction_confidence * 100).toFixed(0)}%` : '-'}
                       </td>
                       <td className="py-3 px-4">
-                        <StatusBadge status={inv?.review_status} type="review" />
+                        <StatusBadge
+                          status={getUnifiedStatus({
+                            processingStatus: inv?.document?.processing_status ?? 'completed',
+                            reviewStatus: inv?.review_status,
+                            gestoriaStatus: null,
+                          })}
+                          type="unified"
+                        />
                       </td>
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-1">

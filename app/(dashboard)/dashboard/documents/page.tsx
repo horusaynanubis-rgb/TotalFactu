@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { StatusBadge } from '@/components/status-badge';
+import { getUnifiedStatus } from '@/lib/unified-status';
 import { Upload, FileText, Filter, RotateCw, Trash2, X, Eye } from 'lucide-react';
 import { formatDateTime } from '@/lib/utils';
 import toast from 'react-hot-toast';
@@ -220,10 +221,10 @@ export default function DocumentsPage() {
                 className="border rounded-md px-3 py-2 text-sm"
               >
                 <option value="all">{t.common.all}</option>
-                <option value="processing">{t.documents.statusProcessing}</option>
+                <option value="processing">{t.unifiedStatus.processing}</option>
                 <option value="completed">{t.documents.statusCompleted}</option>
-                <option value="needs_review">{t.documents.statusNeedsReview}</option>
-                <option value="failed">{t.documents.statusFailed}</option>
+                <option value="needs_review">{t.unifiedStatus.pending}</option>
+                <option value="failed">{t.unifiedStatus.error}</option>
               </select>
             </div>
             <div>
@@ -289,7 +290,14 @@ export default function DocumentsPage() {
                         <span className="text-sm capitalize">{doc?.source_channel}</span>
                       </td>
                       <td className="py-3 px-4">
-                        <StatusBadge status={doc?.processing_status} type="processing" />
+                        <StatusBadge
+                          status={getUnifiedStatus({
+                            processingStatus: doc?.processing_status ?? 'processing',
+                            reviewStatus: doc?.invoice?.review_status,
+                            gestoriaStatus: doc?.invoice?.gestoria_review_status,
+                          })}
+                          type="unified"
+                        />
                       </td>
                       <td className="py-3 px-4 text-sm text-gray-600">
                         {doc?.confidence_score ? `${(doc?.confidence_score * 100).toFixed(0)}%` : '-'}

@@ -52,6 +52,11 @@ async function fetchDocuments(request: NextRequest, companyId: string) {
     orderBy: { upload_timestamp: 'desc' },
     take: limit + 1,
     skip: offset,
+    include: {
+      invoice: {
+        select: { review_status: true, gestoria_review_status: true },
+      },
+    },
   });
 
   const hasMore = documents.length > limit;

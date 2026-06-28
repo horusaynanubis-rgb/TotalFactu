@@ -14,6 +14,7 @@ import {
   Eye, CheckCircle, XCircle, Pencil, AlertTriangle,
   FileText, ClipboardCheck, X, Loader2, PenLine, MessageSquare,
 } from 'lucide-react';
+import { DocumentTimeline } from '@/components/document-timeline';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -876,6 +877,16 @@ export default function ReviewQueuePage() {
               {/* Confidence indicator */}
               <div className="bg-gray-50 rounded-md px-3 py-2 text-xs text-gray-500">
                 {t.review.confidence}: {Math.round(editInvoice.extraction_confidence * 100)}%
+              </div>
+
+              {/* Document timeline */}
+              <div className="border rounded-md p-3">
+                <p className="text-xs font-medium text-gray-500 mb-3">Estado del documento</p>
+                <DocumentTimeline
+                  processingStatus="needs_review"
+                  reviewStatus={editInvoice.review_status}
+                  gestoriaStatus={null}
+                />
               </div>
             </div>
 

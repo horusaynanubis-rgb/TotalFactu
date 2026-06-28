@@ -394,6 +394,16 @@ export const en: Translations = {
     rejected: 'Rejected',
   },
 
+  unifiedStatus: {
+    processing: 'Processing AI',
+    error: 'Error',
+    pending: 'Pending Review',
+    reviewed: 'Reviewed',
+    rejected: 'Rejected',
+    waiting: 'Awaiting Client',
+    done: 'Finalized',
+  },
+
   planFeatures: {
     demo: [
       'Up to 5 invoices total',

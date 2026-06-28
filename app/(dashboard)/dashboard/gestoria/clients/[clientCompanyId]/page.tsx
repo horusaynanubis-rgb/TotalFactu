@@ -44,6 +44,8 @@ import {
   History,
   PenLine,
 } from 'lucide-react';
+import { getUnifiedStatus } from '@/lib/unified-status';
+import { StatusBadge } from '@/components/status-badge';
 import toast from 'react-hot-toast';
 import { Input } from '@/components/ui/input';
 import { SendMessageModal } from '@/components/gestoria/send-message-modal';
@@ -158,20 +160,12 @@ interface MessageRow {
 
 function docStatusBadge(status: string) {
   if (status === 'completed')
-    return <Badge className="bg-green-100 text-green-700 hover:bg-green-100">Completado</Badge>;
+    return <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100">Pendiente revisión</Badge>;
   if (status === 'needs_review')
-    return <Badge className="bg-yellow-100 text-yellow-700 hover:bg-yellow-100">Revisión</Badge>;
+    return <Badge className="bg-yellow-100 text-yellow-700 hover:bg-yellow-100">Pendiente revisión</Badge>;
   if (status === 'failed')
     return <Badge className="bg-red-100 text-red-700 hover:bg-red-100">Error</Badge>;
-  return <Badge variant="secondary">Procesando</Badge>;
-}
-
-function invoiceStatusBadge(status: string) {
-  if (status === 'approved')
-    return <Badge className="bg-green-100 text-green-700 hover:bg-green-100">Aprobada</Badge>;
-  if (status === 'rejected')
-    return <Badge className="bg-red-100 text-red-700 hover:bg-red-100">Rechazada</Badge>;
-  return <Badge className="bg-yellow-100 text-yellow-700 hover:bg-yellow-100">Pendiente</Badge>;
+  return <Badge variant="secondary">Procesando IA</Badge>;
 }
 
 function confidenceBadge(score: number | null) {
@@ -204,15 +198,15 @@ const LOW_CONFIDENCE_THRESHOLD = 0.7;
 
 function gestoriaStatusBadge(status: string | null) {
   if (!status || status === 'pending_review')
-    return <Badge className="bg-gray-100 text-gray-600 hover:bg-gray-100 text-xs">Pendiente</Badge>;
+    return <Badge className="bg-gray-100 text-gray-600 hover:bg-gray-100 text-xs">Pendiente revisión</Badge>;
   if (status === 'reviewed_ok')
-    return <Badge className="bg-green-100 text-green-700 hover:bg-green-100 text-xs">Correcta</Badge>;
+    return <Badge className="bg-green-100 text-green-700 hover:bg-green-100 text-xs">Revisada</Badge>;
   if (status === 'reviewed_issue')
-    return <Badge className="bg-red-100 text-red-700 hover:bg-red-100 text-xs">Incorrecta</Badge>;
+    return <Badge className="bg-orange-100 text-orange-700 hover:bg-orange-100 text-xs">Revisada (incidencia)</Badge>;
   if (status === 'waiting_client')
-    return <Badge className="bg-yellow-100 text-yellow-700 hover:bg-yellow-100 text-xs">Esp. cliente</Badge>;
+    return <Badge className="bg-yellow-100 text-yellow-700 hover:bg-yellow-100 text-xs">Esperando cliente</Badge>;
   if (status === 'corrected')
-    return <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 text-xs">Corregida</Badge>;
+    return <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 text-xs">Finalizada</Badge>;
   if (status === 'ignored')
     return <Badge className="bg-gray-100 text-gray-500 hover:bg-gray-100 text-xs">Ignorada</Badge>;
   return <Badge variant="secondary" className="text-xs">{status}</Badge>;
@@ -1177,8 +1171,7 @@ export default function ClientDetailPage() {
                       <TableHead className="text-right">IVA</TableHead>
                       <SortableHead col="total_amount" label="Total" sortBy={invoiceSortBy} sortDir={invoiceSortDir} onClick={() => handleInvoiceSortChange('total_amount')} className="text-right" />
                       <SortableHead col="extraction_confidence" label="Confianza IA" sortBy={invoiceSortBy} sortDir={invoiceSortDir} onClick={() => handleInvoiceSortChange('extraction_confidence')} />
-                      <SortableHead col="review_status" label="Estado IA" sortBy={invoiceSortBy} sortDir={invoiceSortDir} onClick={() => handleInvoiceSortChange('review_status')} />
-                      <TableHead>Revisión gestoría</TableHead>
+                      <TableHead>Estado</TableHead>
                       <TableHead className="text-right">Acciones</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -1207,8 +1200,16 @@ export default function ClientDetailPage() {
                           {inv.total_amount.toFixed(2)} {inv.currency}
                         </TableCell>
                         <TableCell>{confidenceBadge(inv.extraction_confidence)}</TableCell>
-                        <TableCell>{invoiceStatusBadge(inv.review_status)}</TableCell>
-                        <TableCell>{gestoriaStatusBadge(inv.gestoria_review_status)}</TableCell>
+                        <TableCell>
+                          <StatusBadge
+                            status={getUnifiedStatus({
+                              processingStatus: 'completed',
+                              reviewStatus: inv.review_status,
+                              gestoriaStatus: inv.gestoria_review_status,
+                            })}
+                            type="unified"
+                          />
+                        </TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-1">
                             <Button
