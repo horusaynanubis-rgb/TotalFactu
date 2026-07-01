@@ -7,8 +7,8 @@ import { buildDocumentWhere } from '@/lib/gestoria-document-where';
 
 export const dynamic = 'force-dynamic';
 
-// Tuneable limits
-const MAX_DOCS_PER_BATCH = 300;
+// Tuneable limits — kept low to stay within Vercel's 60 s function timeout
+const MAX_DOCS_PER_BATCH = 25;
 const MAX_ESTIMATED_SIZE_MB = 80;
 const MAX_DOCS_TOTAL = 5000;
 const AVG_DOC_SIZE_BYTES = 200 * 1024; // 200 KB per document (conservative estimate)

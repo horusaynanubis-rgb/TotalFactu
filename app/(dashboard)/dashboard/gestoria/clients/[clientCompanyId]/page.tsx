@@ -356,6 +356,8 @@ export default function ClientDetailPage() {
   const [exportStatus, setExportStatus] = useState('processed');
   const [exportPlan, setExportPlan] = useState<ExportPlan | null>(null);
   const [loadingExportPlan, setLoadingExportPlan] = useState(false);
+  const [downloadingBatch, setDownloadingBatch] = useState<number | null>(null);
+  const [downloadErrors, setDownloadErrors] = useState<Record<number, string>>({});
 
   const companyType = (session?.user as any)?.companyType;
 
@@ -617,6 +619,43 @@ export default function ClientDetailPage() {
       toast.error('Error al preparar la exportación');
     } finally {
       setLoadingExportPlan(false);
+    }
+  };
+
+  const handleDownloadZip = async (batch: BatchInfo, zipUrl: string) => {
+    console.log('[A3-ZIP-UI] click batchIndex=', batch.batchIndex, 'url=', zipUrl);
+    setDownloadingBatch(batch.batchIndex);
+    setDownloadErrors((prev) => { const next = { ...prev }; delete next[batch.batchIndex]; return next; });
+
+    try {
+      const res = await fetch(zipUrl, { method: 'GET', credentials: 'include' });
+      console.log('[A3-ZIP-UI] status', res.status, 'batchIndex=', batch.batchIndex);
+
+      if (!res.ok) {
+        const text = await res.text();
+        console.error('[A3-ZIP-UI] failed', text);
+        setDownloadErrors((prev) => ({ ...prev, [batch.batchIndex]: `Error ${res.status}` }));
+        return;
+      }
+
+      const blob = await res.blob();
+      console.log('[A3-ZIP-UI] blob size=', blob.size, 'batchIndex=', batch.batchIndex);
+
+      const batchLabel = String(batch.batchIndex + 1).padStart(3, '0');
+      const filename = `documentos_lote${batchLabel}.zip`;
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (err: any) {
+      console.error('[A3-ZIP-UI] exception', err);
+      setDownloadErrors((prev) => ({ ...prev, [batch.batchIndex]: err?.message ?? 'Error desconocido' }));
+    } finally {
+      setDownloadingBatch(null);
     }
   };
 
@@ -1767,7 +1806,7 @@ export default function ClientDetailPage() {
 
                 {exportPlan.batchCount > 1 && (
                   <p className="text-sm text-muted-foreground rounded-md border border-blue-200 bg-blue-50 p-3">
-                    Los documentos se han dividido en <strong>{exportPlan.batchCount} archivos ZIP independientes</strong>.
+                    Para evitar límites de servidor, se generan <strong>{exportPlan.batchCount} ZIPs pequeños e independientes</strong>.
                     Cada ZIP es completo y se abre directamente. <strong>No necesitas unirlos ni descomprimirlos juntos.</strong>
                   </p>
                 )}
@@ -1777,31 +1816,46 @@ export default function ClientDetailPage() {
                     const zipUrl =
                       `/api/gestoria/clients/${params.clientCompanyId}/documents/export-zip` +
                       `?token=${encodeURIComponent(batch.token)}`;
+                    const isDownloading = downloadingBatch === batch.batchIndex;
+                    const batchError = downloadErrors[batch.batchIndex];
                     return (
                       <div
                         key={batch.batchIndex}
-                        className="flex items-center justify-between rounded-md border p-3 gap-3"
+                        className="flex flex-col gap-1"
                       >
-                        <div className="text-sm">
-                          <span className="font-medium">ZIP {batch.batchIndex + 1}</span>
-                          <span className="text-muted-foreground ml-2">
-                            Documentos {batch.fromItem}–{batch.toItem}
-                            {' · '}
-                            {batch.documentCount} archivos
-                            {' · '}
-                            ~{batch.estimatedSizeMB} MB
-                          </span>
-                        </div>
-                        <Button asChild variant="outline" size="sm">
-                          <a
-                            href={zipUrl}
-                            download
-                            onClick={() => console.log('[ZIP-DEBUG-UI] Download clicked url=', zipUrl)}
+                        <div className="flex items-center justify-between rounded-md border p-3 gap-3">
+                          <div className="text-sm">
+                            <span className="font-medium">ZIP {batch.batchIndex + 1}</span>
+                            <span className="text-muted-foreground ml-2">
+                              Documentos {batch.fromItem}–{batch.toItem}
+                              {' · '}
+                              {batch.documentCount} archivos
+                              {' · '}
+                              ~{batch.estimatedSizeMB} MB
+                            </span>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={isDownloading || downloadingBatch !== null}
+                            onClick={() => handleDownloadZip(batch, zipUrl)}
                           >
-                            <Download className="h-3.5 w-3.5 mr-1.5" />
-                            Descargar ZIP {batch.batchIndex + 1}
-                          </a>
-                        </Button>
+                            {isDownloading ? (
+                              <>
+                                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                                Descargando...
+                              </>
+                            ) : (
+                              <>
+                                <Download className="h-3.5 w-3.5 mr-1.5" />
+                                Descargar ZIP {batch.batchIndex + 1}
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                        {batchError && (
+                          <p className="text-xs text-destructive px-1">{batchError}</p>
+                        )}
                       </div>
                     );
                   })}
