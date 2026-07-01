@@ -1792,12 +1792,16 @@ export default function ClientDetailPage() {
                             ~{batch.estimatedSizeMB} MB
                           </span>
                         </div>
-                        <a href={zipUrl} download>
-                          <Button variant="outline" size="sm">
+                        <Button asChild variant="outline" size="sm">
+                          <a
+                            href={zipUrl}
+                            download
+                            onClick={() => console.log('[ZIP-DEBUG-UI] Download clicked url=', zipUrl)}
+                          >
                             <Download className="h-3.5 w-3.5 mr-1.5" />
                             Descargar ZIP {batch.batchIndex + 1}
-                          </Button>
-                        </a>
+                          </a>
+                        </Button>
                       </div>
                     );
                   })}
