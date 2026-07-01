@@ -67,7 +67,13 @@ export async function GET(
       where: { company_id: cid, issue_date: { gte: monthStart, lte: monthEnd } },
     }),
     prisma.invoice.count({
-      where: { company_id: cid, review_status: 'pending' },
+      where: {
+        company_id: cid,
+        OR: [
+          { gestoria_review_status: null },
+          { gestoria_review_status: 'pending_review' },
+        ],
+      },
     }),
     prisma.export.count({ where: { company_id: cid } }),
     prisma.license.findFirst({

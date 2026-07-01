@@ -169,12 +169,12 @@ interface MessageRow {
 
 function docStatusBadge(status: string) {
   if (status === 'completed')
-    return <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100">Pendiente revisión</Badge>;
+    return <Badge className="bg-green-100 text-green-700 hover:bg-green-100">Extraído</Badge>;
   if (status === 'needs_review')
-    return <Badge className="bg-yellow-100 text-yellow-700 hover:bg-yellow-100">Pendiente revisión</Badge>;
+    return <Badge className="bg-orange-100 text-orange-700 hover:bg-orange-100">Revisión IA</Badge>;
   if (status === 'failed')
-    return <Badge className="bg-red-100 text-red-700 hover:bg-red-100">Error</Badge>;
-  return <Badge variant="secondary">Procesando IA</Badge>;
+    return <Badge className="bg-red-100 text-red-700 hover:bg-red-100">Error extracción</Badge>;
+  return <Badge variant="secondary">Procesando</Badge>;
 }
 
 function confidenceBadge(score: number | null) {
@@ -263,8 +263,8 @@ const INVOICE_CHIP_TYPES = [
 
 const INVOICE_CHIP_STATUSES = [
   { v: 'all', l: 'Todos estados' },
-  { v: 'approved', l: 'Aprobadas' },
-  { v: 'pending', l: 'Pendientes' },
+  { v: 'approved', l: 'Validadas' },
+  { v: 'pending', l: 'Sin validar' },
 ] as const;
 
 const INVOICE_CHIP_PERIODS = [
@@ -623,24 +623,20 @@ export default function ClientDetailPage() {
   };
 
   const handleDownloadZip = async (batch: BatchInfo, zipUrl: string) => {
-    console.log('[A3-ZIP-UI] click batchIndex=', batch.batchIndex, 'url=', zipUrl);
     setDownloadingBatch(batch.batchIndex);
     setDownloadErrors((prev) => { const next = { ...prev }; delete next[batch.batchIndex]; return next; });
 
     try {
       const res = await fetch(zipUrl, { method: 'GET', credentials: 'include' });
-      console.log('[A3-ZIP-UI] status', res.status, 'batchIndex=', batch.batchIndex);
 
       if (!res.ok) {
         const text = await res.text();
-        console.error('[A3-ZIP-UI] failed', text);
+        console.error('export-zip error', res.status, text);
         setDownloadErrors((prev) => ({ ...prev, [batch.batchIndex]: `Error ${res.status}` }));
         return;
       }
 
       const blob = await res.blob();
-      console.log('[A3-ZIP-UI] blob size=', blob.size, 'batchIndex=', batch.batchIndex);
-
       const batchLabel = String(batch.batchIndex + 1).padStart(3, '0');
       const filename = `documentos_lote${batchLabel}.zip`;
       const objectUrl = URL.createObjectURL(blob);
@@ -652,7 +648,6 @@ export default function ClientDetailPage() {
       a.remove();
       URL.revokeObjectURL(objectUrl);
     } catch (err: any) {
-      console.error('[A3-ZIP-UI] exception', err);
       setDownloadErrors((prev) => ({ ...prev, [batch.batchIndex]: err?.message ?? 'Error desconocido' }));
     } finally {
       setDownloadingBatch(null);
@@ -1008,6 +1003,11 @@ export default function ClientDetailPage() {
               </CardTitle>
             </CardHeader>
 
+            {/* Clarification banner */}
+            <div className="mx-6 mb-3 mt-0 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700">
+              Esta vista muestra los archivos recibidos y su estado de extracción IA. La revisión contable se gestiona desde la pestaña <strong>Revisión</strong>.
+            </div>
+
             {/* Filter bar */}
             <div className="px-6 pb-4 space-y-3 border-b">
               {/* Search */}
@@ -1034,7 +1034,7 @@ export default function ClientDetailPage() {
                 {([
                   { v: 'all', l: 'Todos' },
                   { v: 'processing', l: 'Procesando IA' },
-                  { v: 'pending', l: 'Pendiente revisión' },
+                  { v: 'pending', l: 'Sin revisar' },
                   { v: 'reviewed', l: 'Revisada' },
                   { v: 'waiting', l: 'Esperando cliente' },
                   { v: 'done', l: 'Finalizada' },

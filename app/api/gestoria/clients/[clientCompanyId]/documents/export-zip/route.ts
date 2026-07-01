@@ -97,15 +97,10 @@ export async function GET(
   request: NextRequest,
   { params }: { params: { clientCompanyId: string } },
 ) {
-  const __zipStart = Date.now();
-  let __docIndex = 0;
-  console.log(`[ZIP-DEBUG] START clientCompanyId=${params.clientCompanyId} t=0ms`);
-
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
-  console.log(`[ZIP-DEBUG] AUTH_OK userId=${session.user.id} t=${Date.now() - __zipStart}ms`);
 
   const token = request.nextUrl.searchParams.get('token');
   if (!token) {
@@ -127,13 +122,11 @@ export async function GET(
   if (payload.cid !== params.clientCompanyId) {
     return Response.json({ error: 'Forbidden' }, { status: 403 });
   }
-  console.log(`[ZIP-DEBUG] TOKEN_OK offset=${payload.offset} count=${payload.count} t=${Date.now() - __zipStart}ms`);
 
   const access = await resolveGestoriaAccess(session.user.id, params.clientCompanyId);
   if (!access) {
     return Response.json({ error: 'Forbidden' }, { status: 403 });
   }
-  console.log(`[ZIP-DEBUG] ACCESS_OK t=${Date.now() - __zipStart}ms`);
 
   const { from, to, type, status, offset, count, batchIndex } = payload;
   const fromDate = new Date(from);
@@ -159,7 +152,6 @@ export async function GET(
     skip: offset,
     take: count,
   });
-  console.log(`[ZIP-DEBUG] DOCS_FETCHED count=${documents.length} t=${Date.now() - __zipStart}ms`);
 
   // Download each file and build the ZIP
   const files: { [path: string]: [Uint8Array, { level: 0 }] } = {};
@@ -167,15 +159,11 @@ export async function GET(
   const usedNames = new Set<string>();
 
   for (const doc of documents) {
-    console.log(`[ZIP-DEBUG] DOC_START i=${__docIndex} path=${doc.cloud_storage_path} t=${Date.now() - __zipStart}ms`);
     try {
       const signedUrl = await getSignedDownloadUrl(doc.cloud_storage_path, 180);
-      console.log(`[ZIP-DEBUG] SIGNED_URL_OK i=${__docIndex} t=${Date.now() - __zipStart}ms`);
       const res = await fetch(signedUrl);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const buf = await res.arrayBuffer();
-      console.log(`[ZIP-DEBUG] FILE_FETCHED i=${__docIndex} bytes=${buf.byteLength} t=${Date.now() - __zipStart}ms`);
-      __docIndex++;
       const entryName = buildZipEntryName(doc, usedNames);
       // level: 0 = store (no re-compression) — PDFs are already compressed
       files[entryName] = [new Uint8Array(buf), { level: 0 }];
@@ -197,11 +185,9 @@ export async function GET(
   }
 
   const zipBuffer = zipSync(files);
-  console.log(`[ZIP-DEBUG] ZIP_BUILT files=${Object.keys(files).length} bytes=${zipBuffer.byteLength} errors=${errors.length} t=${Date.now() - __zipStart}ms`);
 
   const batchLabel = String(batchIndex + 1).padStart(3, '0');
   const zipFilename = `documentos_${from}_${to}_lote${batchLabel}.zip`;
-  console.log(`[ZIP-DEBUG] SENDING_RESPONSE filename=${zipFilename} t=${Date.now() - __zipStart}ms`);
 
   return new Response(zipBuffer, {
     headers: {
