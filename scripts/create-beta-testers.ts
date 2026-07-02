@@ -27,6 +27,13 @@ const BETA_ACCOUNTS = [
     companyName: "Fernando Martinez",
     taxId: "BETA-FM-002",
   },
+  {
+    name: "Jordi",
+    email: "jordi@totalfactu.com",
+    password: "B3t@J0rd!#2026",
+    companyName: "TotalFactu Interno - Jordi",
+    taxId: "BETA-JO-003",
+  },
 ];
 
 async function createBetaAccount(account: (typeof BETA_ACCOUNTS)[0]) {
