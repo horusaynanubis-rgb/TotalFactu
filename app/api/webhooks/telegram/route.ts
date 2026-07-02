@@ -14,6 +14,33 @@ import {
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
+// Keywords that strongly suggest a TPV/cash register closure document.
+// Must be specific enough to avoid false positives on invoice captions.
+const CASH_CLOSEOUT_STRONG_KEYWORDS = [
+  'cierre de caja',
+  'cierre caja',
+  'cierre tpv',
+  'informe caja',
+  'informe de caja',
+  'informe caja global',
+  'z-report',
+  'z report',
+  'x-report',
+  'x report',
+  'resumen ventas del día',
+  'resumen de ventas',
+  'liquidación del día',
+  'lote cierre',
+  'usuario apertura',
+  'usuario cierre',
+  'cobros registrados',
+];
+
+function hasCashCloseoutHint(text: string): boolean {
+  const lower = text.toLowerCase();
+  return CASH_CLOSEOUT_STRONG_KEYWORDS.some((kw) => lower.includes(kw));
+}
+
 function getBotToken(): string {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) throw new Error('TELEGRAM_BOT_TOKEN not configured');
@@ -89,7 +116,10 @@ export async function POST(request: NextRequest) {
         '/start CODIGO — Vincula tu cuenta de TotalFactu\n' +
         '/status — Ver estado de tus últimas facturas\n' +
         '/help — Mostrar esta ayuda\n\n' +
-        '📎 Envía una <b>foto</b>, <b>PDF</b>, <b>JPG</b> o <b>PNG</b> para procesar una factura.'
+        '📎 <b>Qué puedes enviar:</b>\n' +
+        '• Foto o PDF de una <b>factura</b> → se extrae y guarda automáticamente\n' +
+        '• Foto del <b>ticket de cierre TPV/caja</b> → se registra en Caja y Cobros\n\n' +
+        '💡 Para datos de TPV en Excel, usa <b>Importar Excel TPV</b> en el panel web.'
       );
       return NextResponse.json({ ok: true });
     }
@@ -490,7 +520,16 @@ async function handleFileUpload(
     uploadPhase = 'ai_process';
     const vercelUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null;
     const baseUrl = process.env.NEXTAUTH_URL || vercelUrl || 'http://localhost:3000';
-    const processUrl = `${baseUrl}/api/documents/${document.id}/process`;
+
+    // Pre-screen caption + filename for cash register keywords (free — no AI call)
+    const caption = message.caption ?? '';
+    const hintText = `${caption} ${fileName}`;
+    const cashCloseoutHint = hasCashCloseoutHint(hintText);
+    if (cashCloseoutHint) {
+      console.log(`[Telegram upload] [TELEGRAM-DOC-TYPE] Cash closeout hint detected from caption/filename: "${caption.slice(0, 80)}"`);
+    }
+
+    const processUrl = `${baseUrl}/api/documents/${document.id}/process${cashCloseoutHint ? '?hint=cash_closeout' : ''}`;
     console.log(`[Telegram upload] Calling process: ${processUrl}`);
 
     const processResponse = await fetch(processUrl, { method: 'POST' });
@@ -508,23 +547,41 @@ async function handleFileUpload(
       let finalText = '';
 
       if (cashRegister) {
-        // Cash register closure path
         const fmtAmt = (v: number) => v.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        finalText = '🏧 <b>Cierre de caja/TPV detectado</b>\n\n';
-        if (cashRegister.business_name) finalText += `🏪 ${cashRegister.business_name}\n`;
-        if (cashRegister.terminal_id)   finalText += `📟 Terminal: ${cashRegister.terminal_id}\n`;
-        finalText += `📅 Fecha: ${new Date(cashRegister.date).toLocaleDateString('es-ES')}\n\n`;
-        if (cashRegister.card_amount    > 0) finalText += `💳 TPV:            ${fmtAmt(cashRegister.card_amount)} €\n`;
-        if (cashRegister.cash_amount    > 0) finalText += `💵 Efectivo:       ${fmtAmt(cashRegister.cash_amount)} €\n`;
-        if (cashRegister.bizum_amount   > 0) finalText += `📱 Bizum:          ${fmtAmt(cashRegister.bizum_amount)} €\n`;
-        if (cashRegister.transfer_amount > 0) finalText += `🏦 Transferencias: ${fmtAmt(cashRegister.transfer_amount)} €\n`;
-        if (cashRegister.other_amount   > 0) finalText += `📦 Otros:          ${fmtAmt(cashRegister.other_amount)} €\n`;
-        finalText += `─────────────────────\n`;
-        finalText += `📊 <b>Total: ${fmtAmt(cashRegister.total_amount)} €</b>\n\n`;
-        if (cashRegister.has_conflict) {
-          finalText += '⚠️ <b>Ya existe un registro para este día.</b> Ambos quedan pendientes de revisión.\n\n';
+
+        if (cashRegister.is_screenshot) {
+          // Low confidence — likely a web screenshot
+          finalText =
+            '⚠️ <b>No he podido procesar como cierre de caja</b>\n\n' +
+            'La imagen no parece un ticket físico de cierre TPV.\n\n' +
+            '• Si es una captura de pantalla del software TPV, usa la función <b>Importar Excel TPV</b> en Caja y Cobros.\n' +
+            '• Si es una foto del ticket impreso, asegúrate de que esté bien iluminada y legible.';
+        } else if (cashRegister.has_conflict) {
+          // Date conflict — existing register preserved
+          const dateFormatted = new Date(cashRegister.date).toLocaleDateString('es-ES');
+          finalText =
+            `⚠️ <b>Ya existe un cierre de caja para el ${dateFormatted}</b>\n\n` +
+            'He guardado el justificante pero <b>no he modificado</b> el registro existente.\n\n' +
+            'Datos detectados en la imagen:\n';
+          if (cashRegister.cash_amount   > 0) finalText += `💵 Efectivo: ${fmtAmt(cashRegister.cash_amount)} €\n`;
+          if (cashRegister.card_amount   > 0) finalText += `💳 TPV: ${fmtAmt(cashRegister.card_amount)} €\n`;
+          if (cashRegister.total_amount  > 0) finalText += `📊 Total: ${fmtAmt(cashRegister.total_amount)} €\n`;
+          finalText += '\nRevisa y compara en <b>Caja y Cobros</b> en TotalFactu.';
+        } else {
+          // Normal cash register detection
+          finalText = '🏧 <b>Cierre de caja/TPV detectado</b>\n\n';
+          if (cashRegister.business_name) finalText += `🏪 ${cashRegister.business_name}\n`;
+          if (cashRegister.terminal_id)   finalText += `📟 Terminal: ${cashRegister.terminal_id}\n`;
+          finalText += `📅 Fecha: ${new Date(cashRegister.date).toLocaleDateString('es-ES')}\n\n`;
+          if (cashRegister.card_amount    > 0) finalText += `💳 TPV:            ${fmtAmt(cashRegister.card_amount)} €\n`;
+          if (cashRegister.cash_amount    > 0) finalText += `💵 Efectivo:       ${fmtAmt(cashRegister.cash_amount)} €\n`;
+          if (cashRegister.bizum_amount   > 0) finalText += `📱 Bizum:          ${fmtAmt(cashRegister.bizum_amount)} €\n`;
+          if (cashRegister.transfer_amount > 0) finalText += `🏦 Transferencias: ${fmtAmt(cashRegister.transfer_amount)} €\n`;
+          if (cashRegister.other_amount   > 0) finalText += `📦 Otros:          ${fmtAmt(cashRegister.other_amount)} €\n`;
+          finalText += `─────────────────────\n`;
+          finalText += `📊 <b>Total: ${fmtAmt(cashRegister.total_amount)} €</b>\n\n`;
+          finalText += '⏳ Pendiente de confirmar en <b>Caja y Cobros</b> en TotalFactu.';
         }
-        finalText += '⏳ Pendiente de confirmar en <b>Caja y Cobros</b> en TotalFactu.';
       } else if (deliveryNote) {
         // Delivery note path
         finalText = '📦 <b>Albarán recibido y guardado</b>\n\n';

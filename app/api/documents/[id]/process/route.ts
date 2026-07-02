@@ -46,7 +46,7 @@ export async function POST(
     processingPhase = 'db_load';
     const document = await prisma.document.findUnique({
       where: { id: documentId },
-      include: { company: true, invoice: true, delivery_note: true },
+      include: { company: true, invoice: true, delivery_note: true, daily_cash_register: true },
     });
 
     if (!document) {
@@ -59,6 +59,11 @@ export async function POST(
     }
     if (document.delivery_note) {
       await prisma.deliveryNote.delete({ where: { id: document.delivery_note.id } });
+    }
+    // Also clean up any DailyCashRegister created by a previous processing attempt for this document
+    if (document.daily_cash_register) {
+      await prisma.dailyCashRegister.delete({ where: { id: document.daily_cash_register.id } });
+      console.log(`[CASH-CLOSEOUT] documentId=${documentId} Deleted stale DailyCashRegister id=${document.daily_cash_register.id} (retry cleanup)`);
     }
 
     await prisma.document.update({
@@ -138,6 +143,23 @@ export async function POST(
       aliases: companyAliases.map(a => a.alias),
     };
 
+    // ── Pre-screening: hint from Telegram caption keyword detection ───────────
+    // If the webhook detected cash-register keywords in the caption, skip the
+    // full invoice extraction and route directly to the cheaper cash-register path.
+    // This avoids one heavy Gemini call AND ensures correct routing.
+    const documentHint = new URL(request.url).searchParams.get('hint');
+    console.log(`[TELEGRAM-DOC-TYPE] documentId=${documentId} hint=${documentHint ?? 'none'} source=${document.source_channel} mime=${effectiveMime}`);
+
+    if (documentHint === 'cash_closeout') {
+      processingPhase = 'cash_register';
+      console.log(`[CASH-CLOSEOUT] documentId=${documentId} Hint-based routing — skipping invoice extraction`);
+      const cashDataFromHint = await extractCashRegisterData(fileBase64, effectiveMime);
+      return await handleCashRegisterResult(
+        documentId, document.company_id, cashDataFromHint,
+        /* fallbackTotal */ 0, prisma,
+      );
+    }
+
     // AI Extraction — returns validated structured JSON, never writes to DB
     processingPhase = 'ai_extract';
     const extraction = await extractInvoiceData(
@@ -148,84 +170,22 @@ export async function POST(
       companyContext,
     );
 
-    console.log(`[process] document_type=${extraction.document_type} confidence=${extraction.extraction_confidence}`);
+    console.log(`[TELEGRAM-DOC-TYPE] documentId=${documentId} detected=${extraction.document_type} confidence=${extraction.extraction_confidence}`);
     console.log(`[process:roles] issuer="${extraction.issuer_name ?? 'n/a'}" recipient="${extraction.recipient_name ?? 'n/a'}" reasoning="${extraction.role_reasoning_summary ?? 'n/a'}"`);
     console.log(`[process:roles] supplier_name="${extraction.supplier_name}" customer_name="${extraction.customer_name}" invoice_type=${extraction.invoice_type}`);
 
     // ── CASH REGISTER path (Cierre TPV / Cierre Caja) ─────────────────────
     if (extraction.document_type === 'cash_register') {
       processingPhase = 'cash_register';
+      console.log(`[CASH-CLOSEOUT] documentId=${documentId} First-pass detected cash_register — running specialized extraction`);
 
       // Second-pass specialized extraction for detailed TPV/cash fields
       const cashData = await extractCashRegisterData(fileBase64, effectiveMime);
 
-      const dateStr = cashData?.date ?? new Date().toISOString().split('T')[0];
-      const dateObj = new Date(dateStr);
-
-      const cashAmount     = cashData?.cash_amount     ?? 0;
-      const cardAmount     = cashData?.card_amount     ?? extraction.total_amount; // fallback to AI total if no breakdown
-      const bizumAmount    = cashData?.bizum_amount    ?? 0;
-      const transferAmount = cashData?.transfer_amount ?? 0;
-      const otherAmount    = cashData?.other_amount    ?? 0;
-      const totalAmount    = cashData?.total_amount    ?? (cashAmount + cardAmount + bizumAmount + transferAmount + otherAmount);
-
-      // Extra TPV details stored for future reconciliation use
-      const aiRawData = cashData ? JSON.stringify({
-        time:            cashData.time,
-        business_name:   cashData.business_name,
-        terminal_id:     cashData.terminal_id,
-        batch_number:    cashData.batch_number,
-        operation_count: cashData.operation_count,
-      }) : null;
-
-      // Update document first
-      const updatedDocument = await prisma.document.update({
-        where: { id: documentId },
-        data: { processing_status: 'completed', confidence_score: cashData?.extraction_confidence ?? 0.7 },
-      });
-
-      // Check for existing confirmed register on same date — create as pending if conflict
-      const existing = await prisma.dailyCashRegister.findFirst({
-        where: { company_id: document.company_id, date: dateObj, status: 'confirmed' },
-      });
-
-      const register = await prisma.dailyCashRegister.create({
-        data: {
-          company_id:      document.company_id,
-          date:            dateObj,
-          cash_amount:     cashAmount,
-          card_amount:     cardAmount,
-          bizum_amount:    bizumAmount,
-          transfer_amount: transferAmount,
-          other_amount:    otherAmount,
-          total_amount:    totalAmount,
-          notes:           cashData?.notes ?? null,
-          source:          'ai',
-          status:          existing ? 'pending_review' : 'pending_review', // always pending — user must confirm
-          document_id:     documentId,
-          ai_raw_data:     aiRawData,
-        },
-      });
-
-      console.log(`[process] ✅ DailyCashRegister created (pending_review). id=${register.id} date=${dateStr} total=${totalAmount} existingConflict=${!!existing}`);
-
-      return NextResponse.json({
-        document: updatedDocument,
-        cash_register: {
-          id:              register.id,
-          date:            dateStr,
-          cash_amount:     cashAmount,
-          card_amount:     cardAmount,
-          bizum_amount:    bizumAmount,
-          transfer_amount: transferAmount,
-          other_amount:    otherAmount,
-          total_amount:    totalAmount,
-          notes:           cashData?.notes,
-          business_name:   cashData?.business_name,
-          terminal_id:     cashData?.terminal_id,
-          has_conflict:    !!existing,
-        },
-      });
+      return await handleCashRegisterResult(
+        documentId, document.company_id, cashData,
+        extraction.total_amount, prisma,
+      );
     }
 
     // ── DELIVERY NOTE path ─────────────────────────────────────────────────
@@ -498,6 +458,14 @@ export async function POST(
 
         if (processingPhase === 'storage_download' || errorMessage.includes('storage fetch failed')) {
           msg = '❌ <b>No se pudo subir el archivo</b>\n\nError al acceder al documento guardado. Inténtalo de nuevo.';
+        } else if (processingPhase === 'cash_register') {
+          if (errorMessage.includes('429') || errorMessage.includes('503') || errorMessage.includes('RESOURCE_EXHAUSTED') || errorMessage.includes('UNAVAILABLE')) {
+            msg = '⏳ <b>Servicio de IA ocupado temporalmente</b>\n\nInténtalo de nuevo en unos minutos.';
+          } else if (isImage) {
+            msg = '⚠️ <b>No se pudo leer el cierre de caja</b>\n\nAsegúrate de enviar una foto clara del ticket de cierre, no una captura de pantalla de la aplicación TPV.\n\nPara importar datos del TPV, usa la función <b>Importar Excel TPV</b> en Caja y Cobros.';
+          } else {
+            msg = '❌ <b>Error al procesar el cierre de caja</b>\n\nInténtalo de nuevo o importa los datos manualmente desde Caja y Cobros.';
+          }
         } else if (processingPhase === 'ai_extract') {
           if (errorMessage.includes('SAFETY') || errorMessage.includes('safety')) {
             msg = '⚠️ <b>Documento bloqueado</b>\n\nEl contenido fue bloqueado por los filtros de seguridad de la IA. Prueba con otro archivo.';
@@ -533,6 +501,121 @@ export async function POST(
       { status: 500 }
     );
   }
+}
+
+// ── Cash Register result handler ───────────────────────────────────────────
+// Shared logic for both hint-based and first-pass-detected cash register processing.
+// Handles: low confidence (screenshot), date conflict, successful creation.
+async function handleCashRegisterResult(
+  documentId: string,
+  companyId: string,
+  cashData: import('@/lib/ai-extraction').CashRegisterExtraction | null,
+  fallbackTotal: number,
+  db: typeof prisma,
+): Promise<NextResponse> {
+  const confidence = cashData?.extraction_confidence ?? 0;
+  const dateStr = cashData?.date ?? new Date().toISOString().split('T')[0];
+  const dateObj = new Date(dateStr);
+
+  const cashAmount     = cashData?.cash_amount     ?? 0;
+  const cardAmount     = cashData?.card_amount     ?? fallbackTotal;
+  const bizumAmount    = cashData?.bizum_amount    ?? 0;
+  const transferAmount = cashData?.transfer_amount ?? 0;
+  const otherAmount    = cashData?.other_amount    ?? 0;
+  const totalAmount    = cashData?.total_amount    ?? (cashAmount + cardAmount + bizumAmount + transferAmount + otherAmount);
+
+  const aiRawData = cashData ? JSON.stringify({
+    time:            cashData.time,
+    business_name:   cashData.business_name,
+    terminal_id:     cashData.terminal_id,
+    batch_number:    cashData.batch_number,
+    operation_count: cashData.operation_count,
+  }) : null;
+
+  // ① Low confidence → likely a web screenshot or unreadable image
+  if (!cashData || confidence < 0.25) {
+    console.log(`[CASH-CLOSEOUT] documentId=${documentId} confidence=${confidence} — possible screenshot or unreadable — rejecting`);
+    const failedDoc = await db.document.update({
+      where: { id: documentId },
+      data: { processing_status: 'failed', confidence_score: confidence },
+    });
+    return NextResponse.json({
+      document: failedDoc,
+      cash_register: { is_screenshot: true, extraction_confidence: confidence },
+    });
+  }
+
+  // ② Check for existing register for this date (ANY status, ANY source)
+  const existingByDate = await db.dailyCashRegister.findFirst({
+    where: { company_id: companyId, date: dateObj },
+  });
+
+  const updatedDocument = await db.document.update({
+    where: { id: documentId },
+    data: { processing_status: 'completed', confidence_score: confidence },
+  });
+
+  if (existingByDate) {
+    // Date conflict — preserve the existing register, do NOT overwrite
+    console.log(`[CASH-CLOSEOUT] documentId=${documentId} DATE CONFLICT — existing id=${existingByDate.id} source=${existingByDate.source} status=${existingByDate.status} date=${dateStr}`);
+    return NextResponse.json({
+      document: updatedDocument,
+      cash_register: {
+        has_conflict:    true,
+        conflict_source: existingByDate.source,
+        date:            dateStr,
+        cash_amount:     cashAmount,
+        card_amount:     cardAmount,
+        bizum_amount:    bizumAmount,
+        transfer_amount: transferAmount,
+        other_amount:    otherAmount,
+        total_amount:    totalAmount,
+        notes:           cashData.notes,
+        business_name:   cashData.business_name,
+        terminal_id:     cashData.terminal_id,
+      },
+    });
+  }
+
+  // ③ No conflict — create pending register
+  const register = await db.dailyCashRegister.create({
+    data: {
+      company_id:      companyId,
+      date:            dateObj,
+      cash_amount:     cashAmount,
+      card_amount:     cardAmount,
+      bizum_amount:    bizumAmount,
+      transfer_amount: transferAmount,
+      other_amount:    otherAmount,
+      total_amount:    totalAmount,
+      notes:           cashData.notes ?? null,
+      source:          'ai',
+      status:          'pending_review',
+      document_id:     documentId,
+      ai_raw_data:     aiRawData,
+    },
+  });
+
+  console.log(`[CASH-CLOSEOUT] documentId=${documentId} ✅ DailyCashRegister created id=${register.id} date=${dateStr} total=${totalAmount} confidence=${confidence}`);
+
+  return NextResponse.json({
+    document: updatedDocument,
+    cash_register: {
+      id:              register.id,
+      date:            dateStr,
+      cash_amount:     cashAmount,
+      card_amount:     cardAmount,
+      bizum_amount:    bizumAmount,
+      transfer_amount: transferAmount,
+      other_amount:    otherAmount,
+      total_amount:    totalAmount,
+      notes:           cashData.notes,
+      business_name:   cashData.business_name,
+      terminal_id:     cashData.terminal_id,
+      has_conflict:    false,
+      is_screenshot:   false,
+    },
+  });
 }
 
 // Attempt to auto-match a newly created delivery note with existing pending invoices
