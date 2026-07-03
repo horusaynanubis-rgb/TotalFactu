@@ -47,10 +47,12 @@ export async function POST(request: NextRequest) {
   let skipped = 0;
   let updated = 0;
   const errors: string[] = [];
+  const skippedDates: string[] = [];
 
   for (const row of rows) {
     if (row.status === 'exists' && skipExisting) {
       skipped++;
+      skippedDates.push(row.date);
       continue;
     }
 
@@ -82,9 +84,16 @@ export async function POST(request: NextRequest) {
         imported++;
       }
     } catch (e: any) {
-      errors.push(`${row.date}: ${e.message ?? 'Error desconocido'}`);
+      // P2002 = unique constraint violation (company_id, date already exists)
+      // Treat as skipped rather than an error — race condition or preview drift
+      if (e?.code === 'P2002') {
+        skipped++;
+        skippedDates.push(row.date);
+      } else {
+        errors.push(`${row.date}: Error al importar el registro`);
+      }
     }
   }
 
-  return NextResponse.json({ imported, skipped, updated, errors });
+  return NextResponse.json({ imported, skipped, updated, errors, skippedDates });
 }

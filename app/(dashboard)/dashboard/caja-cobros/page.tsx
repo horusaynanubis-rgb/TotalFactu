@@ -58,6 +58,7 @@ interface ImportResult {
   skipped: number;
   updated: number;
   errors: string[];
+  skippedDates: string[];
 }
 
 interface MonthlySummary {
@@ -296,6 +297,25 @@ function ImportModal({
                   </div>
                 </div>
               </div>
+              {result.skippedDates?.length > 0 && (
+                <div className="rounded-lg bg-gray-50 border border-gray-200 p-4 space-y-2">
+                  <p className="text-xs font-semibold text-gray-600">
+                    Los siguientes registros ya existían y no se han importado nuevamente:
+                  </p>
+                  <ul className="text-xs text-gray-500 space-y-0.5">
+                    {result.skippedDates.slice(0, 10).map((d) => {
+                      const [y, m, day] = d.split('-');
+                      return <li key={d}>• {day}/{m}/{y}</li>;
+                    })}
+                    {result.skippedDates.length > 10 && (
+                      <li className="text-gray-400">... y {result.skippedDates.length - 10} más</li>
+                    )}
+                  </ul>
+                  <p className="text-xs text-gray-400 pt-1">
+                    Los registros omitidos ya existían previamente en Caja y Cobros. No se han duplicado para proteger la integridad de la información.
+                  </p>
+                </div>
+              )}
               {result.errors.length > 0 && (
                 <div className="rounded-lg bg-red-50 border border-red-200 p-4">
                   <p className="text-xs font-semibold text-red-700 flex items-center gap-1 mb-2">
