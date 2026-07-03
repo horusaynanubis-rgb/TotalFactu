@@ -345,10 +345,10 @@ export default function GestoriaClientsPage() {
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
                         {client.company?.id && (
-                          <Button variant="outline" size="sm" asChild>
+                          <Button variant="outline" size="sm" className="whitespace-nowrap" asChild>
                             <Link href={`/dashboard/gestoria/clients/${client.company.id}`}>
-                              Ver detalle
-                              <ChevronRight className="ml-1 h-3.5 w-3.5" />
+                              Ver
+                              <ChevronRight className="ml-1 h-3.5 w-3.5 flex-shrink-0" />
                             </Link>
                           </Button>
                         )}

@@ -74,6 +74,7 @@ export default function DocumentsPage() {
   const toRef = useRef('');
   const qRef = useRef('');
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { t } = useTranslation();
 
@@ -350,21 +351,24 @@ export default function DocumentsPage() {
           <h1 className="text-3xl font-bold text-gray-900">{t.documents.title}</h1>
           <p className="text-gray-600 mt-1">{t.documents.subtitle}</p>
         </div>
-        <label className="cursor-pointer">
-          <Button disabled={uploading} asChild>
-            <span>
-              <Upload className="h-4 w-4 mr-2" />
-              {uploading ? t.documents.uploading : t.documents.uploadInvoice}
-            </span>
+        <div>
+          <Button
+            disabled={uploading}
+            onClick={() => fileInputRef.current?.click()}
+            className="whitespace-nowrap px-5"
+          >
+            <Upload className="h-4 w-4 mr-2 flex-shrink-0" />
+            {uploading ? t.documents.uploading : t.documents.uploadInvoice}
           </Button>
-          <Input
+          <input
+            ref={fileInputRef}
             type="file"
             accept=".pdf,.jpg,.jpeg,.png"
             onChange={handleFileUpload}
             disabled={uploading}
             className="hidden"
           />
-        </label>
+        </div>
       </div>
 
       {/* Filters */}
