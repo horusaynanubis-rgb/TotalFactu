@@ -1,18 +1,53 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Download, FileText, Mail, CheckCircle } from 'lucide-react';
+import { Label } from '@/components/ui/label';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from '@/components/ui/select';
+import { Download, FileText, Mail, CheckCircle, CalendarClock, SlidersHorizontal } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
+import { getCurrentFiscalQuarter, formatFiscalDate, FiscalQuarter } from '@/lib/fiscal-calendar';
 import toast from 'react-hot-toast';
 import { useTranslation } from '@/lib/i18n/context';
+
+const FISCAL_BANNER_STYLES: Record<'open' | 'upcoming' | 'closed', string> = {
+  open: 'bg-green-50 border-green-200 text-green-800',
+  upcoming: 'bg-blue-50 border-blue-200 text-blue-800',
+  closed: 'bg-gray-50 border-gray-200 text-gray-700',
+};
 
 export default function ExportsPage() {
   const [exports, setExports] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
+  const [customOpen, setCustomOpen] = useState(false);
+  const [customYear, setCustomYear] = useState<number>(new Date().getFullYear());
+  const [customQuarter, setCustomQuarter] = useState<FiscalQuarter>(1);
   const { t } = useTranslation();
+
+  // Computed once per page load — the "last completed quarter" doesn't
+  // change within a session, and mirrors the same rule the quick quarterly
+  // export uses server-side.
+  const fiscalQuarter = useMemo(() => getCurrentFiscalQuarter(), []);
+  const yearOptions = useMemo(() => {
+    const current = new Date().getFullYear();
+    return Array.from({ length: 5 }, (_, i) => current - i);
+  }, []);
 
   const fetchExports = async () => {
     try {
@@ -31,13 +66,16 @@ export default function ExportsPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleGenerate = async (exportType: 'monthly' | 'quarterly') => {
+  const handleGenerate = async (
+    exportType: 'monthly' | 'quarterly',
+    customPeriod?: { year: number; quarter: FiscalQuarter },
+  ) => {
     setGenerating(true);
     try {
       const response = await fetch('/api/exports/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ exportType }),
+        body: JSON.stringify({ exportType, ...customPeriod }),
       });
 
       if (!response.ok) {
@@ -47,12 +85,16 @@ export default function ExportsPage() {
 
       toast.success(t.exports.generateSuccess);
       fetchExports();
+      if (customPeriod) setCustomOpen(false);
     } catch (error: any) {
       toast.error(error?.message || t.exports.generateFailed);
     } finally {
       setGenerating(false);
     }
   };
+
+  const handleGenerateCustom = () =>
+    handleGenerate('quarterly', { year: customYear, quarter: customQuarter });
 
   const handleDownload = async (exportId: string) => {
     try {
@@ -79,6 +121,28 @@ export default function ExportsPage() {
       <div>
         <h1 className="text-3xl font-bold text-gray-900">{t.exports.title}</h1>
         <p className="text-gray-600 mt-1">{t.exports.subtitle}</p>
+      </div>
+
+      {/* Fiscal deadline banner */}
+      <div className={`rounded-lg border p-4 flex items-start gap-3 ${FISCAL_BANNER_STYLES[fiscalQuarter.status]}`}>
+        <CalendarClock className="h-5 w-5 mt-0.5 shrink-0" />
+        <div className="text-sm">
+          <p className="font-semibold">{t.exports.nextFilingTitle}</p>
+          <p className="mt-0.5">
+            {t.exports.modelo303} · {fiscalQuarter.quarter}º Trimestre {fiscalQuarter.year}
+          </p>
+          <p className="mt-1">
+            {t.exports.periodLabel}: {formatFiscalDate(fiscalQuarter.period_start)} → {formatFiscalDate(fiscalQuarter.period_end)}
+          </p>
+          <p>
+            {t.exports.filingUntilLabel}: {formatFiscalDate(fiscalQuarter.declaration_end)}
+          </p>
+          <p className="mt-1 font-medium">
+            {fiscalQuarter.status === 'open' && t.exports.filingStatusOpen}
+            {fiscalQuarter.status === 'closed' && t.exports.filingStatusClosed}
+            {fiscalQuarter.status === 'upcoming' && t.exports.filingStatusUpcoming}
+          </p>
+        </div>
       </div>
 
       {/* Generate Section */}
@@ -116,17 +180,88 @@ export default function ExportsPage() {
             <p className="text-sm text-gray-600 mb-4">
               {t.exports.quarterlyDescription}
             </p>
-            <Button
-              onClick={() => handleGenerate('quarterly')}
-              disabled={generating}
-              className="w-full"
-            >
-              <Download className="mr-2 h-4 w-4" />
-              {t.exports.generateQuarterlyCSV}
-            </Button>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Button
+                onClick={() => handleGenerate('quarterly')}
+                disabled={generating}
+                className="w-full"
+              >
+                <Download className="mr-2 h-4 w-4" />
+                {t.exports.generateQuarterlyCSV}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setCustomOpen(true)}
+                disabled={generating}
+                className="w-full"
+              >
+                <SlidersHorizontal className="mr-2 h-4 w-4" />
+                {t.exports.customExport}
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>
+
+      {/* Custom period export modal */}
+      <Dialog open={customOpen} onOpenChange={setCustomOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t.exports.customExportTitle}</DialogTitle>
+            <DialogDescription>{t.exports.customExportDescription}</DialogDescription>
+          </DialogHeader>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label>{t.exports.yearLabel}</Label>
+              <Select
+                value={String(customYear)}
+                onValueChange={(v) => setCustomYear(Number(v))}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {yearOptions.map((y) => (
+                    <SelectItem key={y} value={String(y)}>
+                      {y}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>{t.exports.quarterLabel}</Label>
+              <Select
+                value={String(customQuarter)}
+                onValueChange={(v) => setCustomQuarter(Number(v) as FiscalQuarter)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {[1, 2, 3, 4].map((q) => (
+                    <SelectItem key={q} value={String(q)}>
+                      Q{q}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCustomOpen(false)} disabled={generating}>
+              {t.common.cancel}
+            </Button>
+            <Button onClick={handleGenerateCustom} disabled={generating}>
+              <Download className="mr-2 h-4 w-4" />
+              {t.exports.generateCustomCSV}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Export History */}
       <Card>

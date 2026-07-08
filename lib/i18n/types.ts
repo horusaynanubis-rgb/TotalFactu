@@ -295,6 +295,21 @@ export interface Translations {
     downloadStarted: string;
     downloadFailed: string;
     fetchFailed: string;
+    // Custom period export modal
+    customExport: string;
+    customExportTitle: string;
+    customExportDescription: string;
+    yearLabel: string;
+    quarterLabel: string;
+    generateCustomCSV: string;
+    // Fiscal deadline banner
+    nextFilingTitle: string;
+    modelo303: string;
+    periodLabel: string;
+    filingUntilLabel: string;
+    filingStatusOpen: string;
+    filingStatusClosed: string;
+    filingStatusUpcoming: string;
   };
 
   // Settings

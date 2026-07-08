@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/auth-options';
 import { prisma } from '@/lib/prisma';
 import { generateCSV, getDateRange } from '@/lib/csv-generator';
+import { getFiscalQuarterInfo, FiscalQuarter } from '@/lib/fiscal-calendar';
 import { uploadFile, buildExportPath } from '@/lib/storage';
 import { sendMessage } from '@/lib/telegram';
 
@@ -25,9 +26,25 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { exportType } = body; // 'monthly' or 'quarterly'
+    const { exportType, year, quarter } = body; // exportType: 'monthly' or 'quarterly'
 
-    const { start, end } = getDateRange(exportType as any);
+    // Custom period export: year + quarter override the automatic
+    // "last completed quarter" range used by the quick quarterly export.
+    // The rest of the flow below (query, CSV generation, upload, Export
+    // record) is identical either way — only the {start, end} source differs.
+    const isCustomQuarter = Number.isInteger(year) && [1, 2, 3, 4].includes(quarter);
+
+    let start: Date;
+    let end: Date;
+    if (isCustomQuarter) {
+      const info = getFiscalQuarterInfo(year, quarter as FiscalQuarter);
+      start = info.period_start;
+      end = info.period_end;
+    } else {
+      ({ start, end } = getDateRange(exportType as any));
+    }
+
+    const resolvedExportType = isCustomQuarter ? 'quarterly' : exportType;
 
     const invoices = await prisma.invoice.findMany({
       where: {
@@ -47,7 +64,7 @@ export async function POST(request: NextRequest) {
 
     const csvContent = generateCSV(invoices as any);
 
-    const filename = `${exportType}-export-${start.toISOString().split('T')[0]}-${end.toISOString().split('T')[0]}.csv`;
+    const filename = `${resolvedExportType}-export-${start.toISOString().split('T')[0]}-${end.toISOString().split('T')[0]}.csv`;
     const cloud_storage_path = buildExportPath(membership.company_id, filename);
 
     await uploadFile(Buffer.from(csvContent, 'utf-8'), cloud_storage_path, 'text/csv; charset=utf-8');
@@ -55,7 +72,7 @@ export async function POST(request: NextRequest) {
     const exportRecord = await prisma.export.create({
       data: {
         company_id: membership.company_id,
-        export_type: exportType,
+        export_type: resolvedExportType,
         period_start: start,
         period_end: end,
         record_count: invoices.length,
@@ -83,7 +100,7 @@ export async function POST(request: NextRequest) {
         });
         const exportMsg =
           `📁 <b>CSV Export Ready!</b>\n\n` +
-          `📅 ${exportType.charAt(0).toUpperCase() + exportType.slice(1)} export\n` +
+          `📅 ${resolvedExportType.charAt(0).toUpperCase() + resolvedExportType.slice(1)} export\n` +
           `📄 ${invoices.length} invoices\n` +
           `📆 ${formatDate(start)} — ${formatDate(end)}\n\n` +
           `Download it from the TotalFactu dashboard.`;
