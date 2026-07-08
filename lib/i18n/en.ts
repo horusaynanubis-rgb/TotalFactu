@@ -97,6 +97,12 @@ export const en: Translations = {
     gestoriaContactName: 'Full name',
     gestoriaContactEmail: 'Email',
     gestoriaContactCompany: 'Company name',
+    // Business Group — informational pricing card
+    businessGroupPlanLabel: 'On-demand activation',
+    businessGroupTitle: 'Business Group',
+    businessGroupDescription: 'For owners or groups managing several companies, entities, or tax IDs from a single account.',
+    businessGroupPrice: 'Contact us',
+    businessGroupButton: 'Request information',
     // Demo plan
     demoPlanLabel: 'Try it free',
     demoUpgradeBannerTitle: 'You\'re on the Demo plan',
@@ -467,6 +473,13 @@ export const en: Translations = {
       'Suppliers & Delivery Notes access',
       'Advanced OCR',
       'Full platform access',
+    ],
+    businessGroup: [
+      'Centralized management of multiple companies',
+      'One-click company switching',
+      'Data separated by tax ID',
+      'Multi-company access for admins',
+      'Custom configuration',
     ],
   },
 };

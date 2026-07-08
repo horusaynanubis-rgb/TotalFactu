@@ -97,6 +97,12 @@ export const es: Translations = {
     gestoriaContactName: 'Nombre completo',
     gestoriaContactEmail: 'Correo electrónico',
     gestoriaContactCompany: 'Nombre de la empresa',
+    // Business Group (Grupo Empresarial) — informational pricing card
+    businessGroupPlanLabel: 'Activación bajo demanda',
+    businessGroupTitle: 'Grupo Empresarial',
+    businessGroupDescription: 'Para propietarios o grupos que gestionan varias empresas, sociedades o CIF desde una única cuenta.',
+    businessGroupPrice: 'Bajo consulta',
+    businessGroupButton: 'Solicitar información',
     // Demo plan
     demoPlanLabel: 'Pruébalo gratis',
     demoUpgradeBannerTitle: 'Estás en el plan Demo',
@@ -467,6 +473,13 @@ export const es: Translations = {
       'Acceso a Proveedores y Albaranes',
       'OCR avanzado',
       'Acceso completo a la plataforma',
+    ],
+    businessGroup: [
+      'Gestión centralizada de varias empresas',
+      'Cambio de empresa con un clic',
+      'Datos separados por CIF/NIF',
+      'Acceso multiempresa para administradores',
+      'Configuración personalizada',
     ],
   },
 };

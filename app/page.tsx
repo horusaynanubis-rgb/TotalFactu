@@ -20,6 +20,7 @@ import {
   Building2,
   Rocket,
   Gift,
+  Layers,
 } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n/context';
 import { LanguageSelector } from '@/components/language-selector';
@@ -333,6 +334,42 @@ export default function LandingPage() {
               </CardContent>
             </Card>
 
+          </div>
+
+          {/* Grupo Empresarial — informational, no fixed price */}
+          <div className="max-w-6xl mx-auto mt-8">
+            <Card className="relative border-2 border-dashed border-primary/40 bg-primary/5 hover:shadow-md transition-all">
+              <CardContent className="p-6 md:p-8">
+                <div className="grid md:grid-cols-3 gap-6 md:gap-8 items-center">
+                  <div className="md:col-span-2">
+                    <div className="inline-flex items-center justify-center bg-primary/10 text-primary text-xs font-medium px-3 py-1 rounded-full mb-3 gap-1.5">
+                      <Layers className="h-3.5 w-3.5" /> {t.landing.businessGroupPlanLabel}
+                    </div>
+                    <h3 className="text-2xl font-bold text-gray-900 mb-2">{t.landing.businessGroupTitle}</h3>
+                    <p className="text-gray-600 mb-4">{t.landing.businessGroupDescription}</p>
+                    <ul className="grid sm:grid-cols-2 gap-x-6 gap-y-2">
+                      {t.planFeatures.businessGroup.map((feature: string, idx: number) => (
+                        <li key={idx} className="flex items-start">
+                          <CheckCircle className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
+                          <span className="text-gray-700 text-sm">{feature}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div className="text-center md:text-right">
+                    <div className="text-2xl font-bold text-primary mb-4">
+                      {t.landing.businessGroupPrice}
+                    </div>
+                    <a href="mailto:info@horusayn.com?subject=Grupo%20Empresarial%20-%20Solicitud%20de%20informaci%C3%B3n">
+                      <Button className="w-full md:w-auto" variant="outline">
+                        <Mail className="h-4 w-4 mr-2" />
+                        {t.landing.businessGroupButton}
+                      </Button>
+                    </a>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
           </div>
         </div>
       </section>

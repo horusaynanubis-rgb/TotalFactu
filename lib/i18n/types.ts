@@ -99,6 +99,12 @@ export interface Translations {
     gestoriaContactName: string;
     gestoriaContactEmail: string;
     gestoriaContactCompany: string;
+    // Business Group (Grupo Empresarial) — informational pricing card
+    businessGroupPlanLabel: string;
+    businessGroupTitle: string;
+    businessGroupDescription: string;
+    businessGroupPrice: string;
+    businessGroupButton: string;
     // Demo plan
     demoPlanLabel: string;
     demoUpgradeBannerTitle: string;
@@ -460,5 +466,6 @@ export interface Translations {
     profesional: string[];
     gestoria: string[];
     beta: string[];
+    businessGroup: string[];
   };
 }
