@@ -363,14 +363,15 @@ export default function LandingPage() {
                     </ul>
                   </div>
                   <div className="text-center md:text-right">
-                    <div className="text-2xl font-bold text-primary mb-4">
+                    <div className="text-2xl font-bold text-primary mb-2">
                       {t.landing.businessGroupPrice}
                     </div>
-                    <a href={BUSINESS_GROUP_MAILTO}>
-                      <Button className="w-full md:w-auto" variant="outline">
-                        <Mail className="h-4 w-4 mr-2" />
-                        {t.landing.businessGroupButton}
-                      </Button>
+                    <a
+                      href={BUSINESS_GROUP_MAILTO}
+                      className="inline-flex items-center gap-2 text-primary font-semibold hover:underline"
+                    >
+                      <Mail className="h-4 w-4 flex-shrink-0" />
+                      info@horusayn.com
                     </a>
                   </div>
                 </div>

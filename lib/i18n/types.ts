@@ -104,7 +104,6 @@ export interface Translations {
     businessGroupTitle: string;
     businessGroupDescription: string;
     businessGroupPrice: string;
-    businessGroupButton: string;
     // Demo plan
     demoPlanLabel: string;
     demoUpgradeBannerTitle: string;

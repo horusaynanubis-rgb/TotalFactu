@@ -102,7 +102,6 @@ export const en: Translations = {
     businessGroupTitle: 'Business Group',
     businessGroupDescription: 'For owners or groups managing several companies, entities, or tax IDs from a single account.',
     businessGroupPrice: 'Contact us',
-    businessGroupButton: 'Request information',
     // Demo plan
     demoPlanLabel: 'Try it free',
     demoUpgradeBannerTitle: 'You\'re on the Demo plan',

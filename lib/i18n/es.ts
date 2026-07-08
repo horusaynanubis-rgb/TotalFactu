@@ -102,7 +102,6 @@ export const es: Translations = {
     businessGroupTitle: 'Grupo Empresarial',
     businessGroupDescription: 'Para propietarios o grupos que gestionan varias empresas, sociedades o CIF desde una única cuenta.',
     businessGroupPrice: 'Bajo consulta',
-    businessGroupButton: 'Solicitar información',
     // Demo plan
     demoPlanLabel: 'Pruébalo gratis',
     demoUpgradeBannerTitle: 'Estás en el plan Demo',
