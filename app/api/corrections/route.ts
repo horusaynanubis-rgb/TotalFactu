@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/auth-options';
 import { prisma } from '@/lib/prisma';
+import { resolveActiveCompanyId } from '@/lib/active-company';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,10 +13,13 @@ export async function GET() {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const membership = await prisma.membership.findFirst({
-    where: { user_id: session.user.id },
-    select: { company_id: true, company: { select: { company_type: true } } },
-  });
+  const companyId = await resolveActiveCompanyId(session);
+  const membership = companyId
+    ? await prisma.membership.findFirst({
+        where: { user_id: session.user.id, company_id: companyId },
+        select: { company_id: true, company: { select: { company_type: true } } },
+      })
+    : null;
   if (!membership) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   // Gestoria users don't have corrections — this is a client-only endpoint

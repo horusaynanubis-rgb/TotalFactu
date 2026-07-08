@@ -9,6 +9,7 @@ declare module 'next-auth' {
       image?: string | null;
       companyId?: string | null;
       companyType?: string | null;
+      companyCount?: number;
     };
   }
 
@@ -24,5 +25,6 @@ declare module 'next-auth/jwt' {
     id: string;
     companyId?: string | null;
     companyType?: string | null;
+    companyCount?: number;
   }
 }

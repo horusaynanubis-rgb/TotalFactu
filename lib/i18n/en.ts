@@ -149,6 +149,26 @@ export const en: Translations = {
     billing: 'Billing',
     support: 'Support',
     supportHelp: 'Need help?',
+    companies: 'Manage companies',
+  },
+
+  companies: {
+    title: 'Manage companies',
+    subtitle: 'Companies in your group you have access to',
+    company: 'Company',
+    taxId: 'Tax ID',
+    type: 'Type',
+    role: 'Role',
+    lastActivity: 'Last activity',
+    active: 'Active',
+    enter: 'Enter',
+    switching: 'Switching...',
+    switchFailed: 'Could not switch company',
+    switchSuccess: 'Active company updated',
+    typeIndividual: 'Company',
+    typeGestoria: 'Gestoría',
+    activeCompanyLabel: 'Active company',
+    changeCompany: 'Switch company',
   },
 
   dashboard: {

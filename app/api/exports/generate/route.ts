@@ -4,6 +4,7 @@ import { authOptions } from '@/app/api/auth/[...nextauth]/auth-options';
 import { prisma } from '@/lib/prisma';
 import { generateCSV, getDateRange } from '@/lib/csv-generator';
 import { getFiscalQuarterInfo, FiscalQuarter } from '@/lib/fiscal-calendar';
+import { resolveActiveCompanyId } from '@/lib/active-company';
 import { uploadFile, buildExportPath } from '@/lib/storage';
 import { sendMessage } from '@/lib/telegram';
 
@@ -16,12 +17,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
     }
 
-    const membership = await prisma.membership.findFirst({
-      where: { user_id: session.user.id },
-      include: { company: true },
-    });
-
-    if (!membership) {
+    const companyId = await resolveActiveCompanyId(session);
+    if (!companyId) {
       return NextResponse.json({ message: 'No company found' }, { status: 400 });
     }
 
@@ -48,7 +45,7 @@ export async function POST(request: NextRequest) {
 
     const invoices = await prisma.invoice.findMany({
       where: {
-        company_id: membership.company_id,
+        company_id: companyId,
         issue_date: { gte: start, lte: end },
       },
       include: { document: true },
@@ -65,13 +62,13 @@ export async function POST(request: NextRequest) {
     const csvContent = generateCSV(invoices as any);
 
     const filename = `${resolvedExportType}-export-${start.toISOString().split('T')[0]}-${end.toISOString().split('T')[0]}.csv`;
-    const cloud_storage_path = buildExportPath(membership.company_id, filename);
+    const cloud_storage_path = buildExportPath(companyId, filename);
 
     await uploadFile(Buffer.from(csvContent, 'utf-8'), cloud_storage_path, 'text/csv; charset=utf-8');
 
     const exportRecord = await prisma.export.create({
       data: {
-        company_id: membership.company_id,
+        company_id: companyId,
         export_type: resolvedExportType,
         period_start: start,
         period_end: end,
@@ -96,7 +93,7 @@ export async function POST(request: NextRequest) {
       const botToken = process.env.TELEGRAM_BOT_TOKEN;
       if (botToken) {
         const telegramLinks = await prisma.telegramLink.findMany({
-          where: { company_id: membership.company_id },
+          where: { company_id: companyId },
         });
         const exportMsg =
           `📁 <b>CSV Export Ready!</b>\n\n` +

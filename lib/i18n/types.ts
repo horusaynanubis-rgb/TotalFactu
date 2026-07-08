@@ -153,6 +153,27 @@ export interface Translations {
     billing: string;
     support: string;
     supportHelp: string;
+    companies: string;
+  };
+
+  // Gestión de empresas (multi-company owner accounts)
+  companies: {
+    title: string;
+    subtitle: string;
+    company: string;
+    taxId: string;
+    type: string;
+    role: string;
+    lastActivity: string;
+    active: string;
+    enter: string;
+    switching: string;
+    switchFailed: string;
+    switchSuccess: string;
+    typeIndividual: string;
+    typeGestoria: string;
+    activeCompanyLabel: string;
+    changeCompany: string;
   };
 
   // Dashboard

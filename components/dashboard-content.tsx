@@ -19,9 +19,10 @@ interface DashboardContentProps {
   };
   recentDocs: any[];
   subscription?: { plan_name: string };
+  hasMultipleCompanies?: boolean;
 }
 
-export function DashboardContent({ company, stats, recentDocs, subscription }: DashboardContentProps) {
+export function DashboardContent({ company, stats, recentDocs, subscription, hasMultipleCompanies }: DashboardContentProps) {
   const { t } = useTranslation();
   const isDemo = subscription?.plan_name === 'demo';
 
@@ -35,9 +36,21 @@ export function DashboardContent({ company, stats, recentDocs, subscription }: D
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">{t.dashboard.title}</h1>
-        <p className="text-gray-600 mt-1">{t.dashboard.welcomeBack} {company?.name}.</p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">{t.dashboard.title}</h1>
+          <p className="text-gray-600 mt-1">{t.dashboard.welcomeBack} {company?.name}.</p>
+        </div>
+        <div className="text-sm text-gray-500 flex items-center gap-2">
+          <span>
+            {t.companies.activeCompanyLabel}: <span className="font-medium text-gray-800">{company?.name}</span>
+          </span>
+          {hasMultipleCompanies && (
+            <Link href="/dashboard/companies" className="text-primary hover:underline font-medium">
+              {t.companies.changeCompany}
+            </Link>
+          )}
+        </div>
       </div>
 
       {/* Demo upgrade banner */}

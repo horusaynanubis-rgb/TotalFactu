@@ -6,9 +6,12 @@ import { parseByouXls } from '@/lib/tpv-parsers/byou';
 
 export const dynamic = 'force-dynamic';
 
-async function getCompanyId(userId: string): Promise<string | null> {
+// Prefers the active company already validated in the JWT (session.user.companyId);
+// only re-derives from Membership as a fallback for a stale/edge-case token.
+async function getCompanyId(session: any): Promise<string | null> {
+  if (session?.user?.companyId) return session.user.companyId;
   const membership = await prisma.membership.findFirst({
-    where: { user_id: userId },
+    where: { user_id: session.user.id },
     select: { company_id: true },
   });
   return membership?.company_id ?? null;
@@ -19,7 +22,7 @@ export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const companyId = await getCompanyId(session.user.id);
+  const companyId = await getCompanyId(session);
   if (!companyId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   let formData: FormData;

@@ -17,6 +17,7 @@ import {
   Menu,
   X,
   Building2,
+  Building,
   ShieldCheck,
   Users,
   ClipboardList,
@@ -39,6 +40,7 @@ export function DashboardNav() {
   const { t } = useTranslation();
   const { data: session } = useSession();
   const isGestoria = (session?.user as any)?.companyType === 'gestoria';
+  const hasMultipleCompanies = ((session?.user as any)?.companyCount ?? 1) > 1;
   const adminEmails = (process.env.NEXT_PUBLIC_ADMIN_EMAILS ?? '').split(',').map((e) => e.trim()).filter(Boolean);
   const isAdmin = adminEmails.includes(session?.user?.email ?? '');
 
@@ -90,6 +92,7 @@ export function DashboardNav() {
         { name: t.nav.exports, href: '/dashboard/exports', icon: Download },
         { name: 'Mensajes', href: '/dashboard/messages', icon: Inbox, unreadBadge: unreadMessages > 0 ? unreadMessages : undefined },
         { name: 'Caja y Cobros', href: '/dashboard/caja-cobros', icon: Wallet },
+        ...(hasMultipleCompanies ? [{ name: t.nav.companies, href: '/dashboard/companies', icon: Building }] : []),
         ...(isAdmin ? [{ name: 'Admin Demo', href: '/dashboard/admin/demo', icon: ShieldCheck, adminBadge: true }] : []),
         { name: t.nav.settings, href: '/dashboard/settings', icon: Settings },
         { name: t.nav.billing, href: '/dashboard/billing', icon: CreditCard },

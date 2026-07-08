@@ -5,15 +5,18 @@ import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
 
-async function resolveRegister(id: string, userId: string) {
-  const membership = await prisma.membership.findFirst({
-    where: { user_id: userId },
-    select: { company_id: true },
-  });
-  if (!membership) return null;
+// Prefers the active company already validated in the JWT (session.user.companyId);
+// only re-derives from Membership as a fallback for a stale/edge-case token.
+async function resolveRegister(id: string, session: any) {
+  const companyId = session?.user?.companyId
+    ?? (await prisma.membership.findFirst({
+      where: { user_id: session.user.id },
+      select: { company_id: true },
+    }))?.company_id;
+  if (!companyId) return null;
 
   const register = await prisma.dailyCashRegister.findUnique({ where: { id } });
-  if (!register || register.company_id !== membership.company_id) return null;
+  if (!register || register.company_id !== companyId) return null;
   return register;
 }
 
@@ -25,7 +28,7 @@ export async function PUT(
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const register = await resolveRegister(params.id, session.user.id);
+  const register = await resolveRegister(params.id, session);
   if (!register) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   let body: {
@@ -88,7 +91,7 @@ export async function DELETE(
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const register = await resolveRegister(params.id, session.user.id);
+  const register = await resolveRegister(params.id, session);
   if (!register) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   await prisma.dailyCashRegister.delete({ where: { id: params.id } });

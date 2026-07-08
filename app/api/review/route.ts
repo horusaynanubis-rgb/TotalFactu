@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/auth-options";
 import { prisma } from "@/lib/prisma";
+import { resolveActiveCompanyId } from "@/lib/active-company";
 
 export const dynamic = "force-dynamic";
 
@@ -13,10 +14,13 @@ async function getContext() {
     return { error: NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 }) };
   }
 
-  const membership = await prisma.membership.findFirst({
-    where: { user_id: session.user.id },
-    include: { company: true },
-  });
+  const companyId = await resolveActiveCompanyId(session);
+  const membership = companyId
+    ? await prisma.membership.findFirst({
+        where: { user_id: session.user.id, company_id: companyId },
+        include: { company: true },
+      })
+    : null;
 
   if (!membership) {
     return { error: NextResponse.json({ error: "MEMBERSHIP_NOT_FOUND" }, { status: 404 }) };

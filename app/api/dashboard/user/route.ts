@@ -18,19 +18,25 @@ export async function GET() {
       );
     }
 
-    const membership = await prisma.membership.findFirst({
-      where: { user_id: session.user.id },
-      include: {
-        company: true,
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
+    // Prefer the active company already validated in the JWT (multi-company
+    // owner accounts); fall back to the oldest membership for a stale/edge
+    // case token, same default as before this feature existed.
+    const membership = session.user.companyId
+      ? await prisma.membership.findFirst({
+          where: { user_id: session.user.id, company_id: session.user.companyId },
+          include: {
+            company: true,
+            user: { select: { id: true, name: true, email: true } },
           },
-        },
-      },
-    });
+        })
+      : await prisma.membership.findFirst({
+          where: { user_id: session.user.id },
+          orderBy: { created_at: 'asc' },
+          include: {
+            company: true,
+            user: { select: { id: true, name: true, email: true } },
+          },
+        });
 
     if (!membership) {
       return NextResponse.json(

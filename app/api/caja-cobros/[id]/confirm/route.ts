@@ -13,14 +13,17 @@ export async function POST(
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const membership = await prisma.membership.findFirst({
-    where: { user_id: session.user.id },
-    select: { company_id: true },
-  });
-  if (!membership) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  // Prefers the active company already validated in the JWT; falls back to
+  // Membership only for a stale/edge-case token.
+  const companyId = session.user.companyId
+    ?? (await prisma.membership.findFirst({
+      where: { user_id: session.user.id },
+      select: { company_id: true },
+    }))?.company_id;
+  if (!companyId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const register = await prisma.dailyCashRegister.findUnique({ where: { id: params.id } });
-  if (!register || register.company_id !== membership.company_id) {
+  if (!register || register.company_id !== companyId) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 

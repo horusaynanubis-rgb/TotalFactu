@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/auth-options';
 import { prisma } from '@/lib/prisma';
+import { resolveActiveCompanyId } from '@/lib/active-company';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,16 +13,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
     }
 
-    const membership = await prisma.membership.findFirst({
-      where: { user_id: session.user.id },
-      include: { company: true },
-    });
-
-    if (!membership) {
+    const companyId = await resolveActiveCompanyId(session);
+    if (!companyId) {
       return NextResponse.json({ message: 'No company found' }, { status: 400 });
     }
 
-    return NextResponse.json({ company: membership.company });
+    const company = await prisma.company.findUnique({ where: { id: companyId } });
+    return NextResponse.json({ company });
   } catch (error: any) {
     console.error('Get settings error:', error);
     return NextResponse.json(
@@ -38,11 +36,8 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
     }
 
-    const membership = await prisma.membership.findFirst({
-      where: { user_id: session.user.id },
-    });
-
-    if (!membership) {
+    const companyId = await resolveActiveCompanyId(session);
+    if (!companyId) {
       return NextResponse.json({ message: 'No company found' }, { status: 400 });
     }
 
@@ -62,7 +57,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     const company = await prisma.company.update({
-      where: { id: membership.company_id },
+      where: { id: companyId },
       data: allowedFields,
     });
 

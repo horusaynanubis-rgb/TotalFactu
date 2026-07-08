@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/auth-options';
 import { prisma } from '@/lib/prisma';
+import { resolveActiveCompanyId } from '@/lib/active-company';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,12 +15,8 @@ export async function PATCH(
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const membership = await prisma.membership.findFirst({
-    where: { user_id: session.user.id },
-    select: { company_id: true },
-  });
-
-  if (!membership) {
+  const companyId = await resolveActiveCompanyId(session);
+  if (!companyId) {
     return NextResponse.json({ error: 'No company found' }, { status: 400 });
   }
 
@@ -28,7 +25,7 @@ export async function PATCH(
     select: { id: true, client_company_id: true, read_at: true },
   });
 
-  if (!message || message.client_company_id !== membership.company_id) {
+  if (!message || message.client_company_id !== companyId) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 

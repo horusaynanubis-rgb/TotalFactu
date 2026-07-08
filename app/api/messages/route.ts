@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/auth-options';
 import { prisma } from '@/lib/prisma';
+import { resolveActiveCompanyId } from '@/lib/active-company';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,17 +12,13 @@ export async function GET() {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const membership = await prisma.membership.findFirst({
-    where: { user_id: session.user.id },
-    select: { company_id: true },
-  });
-
-  if (!membership) {
+  const companyId = await resolveActiveCompanyId(session);
+  if (!companyId) {
     return NextResponse.json({ error: 'No company found' }, { status: 400 });
   }
 
   const messages = await prisma.gestoriaMessage.findMany({
-    where: { client_company_id: membership.company_id },
+    where: { client_company_id: companyId },
     include: {
       gestoria_company: { select: { id: true, name: true } },
     },

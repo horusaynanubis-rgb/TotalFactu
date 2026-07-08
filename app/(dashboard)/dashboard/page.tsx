@@ -7,11 +7,20 @@ import { GestoriaRedirectGuard } from '@/components/gestoria-redirect-guard';
 
 export const dynamic = 'force-dynamic';
 
-async function getDashboardData(userId: string) {
-  const membership = await prisma.membership.findFirst({
-    where: { user_id: userId },
-    include: { company: true },
-  });
+async function getDashboardData(userId: string, activeCompanyId: string | null | undefined) {
+  // Prefer the active company already validated in the JWT (multi-company
+  // owner accounts); fall back to the oldest membership for a stale/edge
+  // case token, same default as before this feature existed.
+  const membership = activeCompanyId
+    ? await prisma.membership.findFirst({
+        where: { user_id: userId, company_id: activeCompanyId },
+        include: { company: true },
+      })
+    : await prisma.membership.findFirst({
+        where: { user_id: userId },
+        orderBy: { created_at: 'asc' },
+        include: { company: true },
+      });
 
   if (!membership) return null;
 
@@ -69,7 +78,7 @@ export default async function DashboardPage() {
     redirect('/login');
   }
 
-  const data = await getDashboardData(session.user.id);
+  const data = await getDashboardData(session.user.id, session.user.companyId);
 
   if (!data) {
     return <div className="p-6">No company found. Please contact support.</div>;
@@ -83,6 +92,7 @@ export default async function DashboardPage() {
         stats={data.stats}
         recentDocs={data.recentDocs}
         subscription={data.subscription}
+        hasMultipleCompanies={(session.user.companyCount ?? 1) > 1}
       />
     </>
   );

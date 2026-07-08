@@ -149,6 +149,26 @@ export const es: Translations = {
     billing: 'Facturación',
     support: 'Soporte',
     supportHelp: '¿Necesitas ayuda?',
+    companies: 'Gestión de empresas',
+  },
+
+  companies: {
+    title: 'Gestión de empresas',
+    subtitle: 'Empresas de tu grupo a las que tienes acceso',
+    company: 'Empresa',
+    taxId: 'CIF/NIF',
+    type: 'Tipo',
+    role: 'Rol',
+    lastActivity: 'Última actividad',
+    active: 'Activa',
+    enter: 'Entrar',
+    switching: 'Cambiando...',
+    switchFailed: 'No se pudo cambiar de empresa',
+    switchSuccess: 'Empresa activa actualizada',
+    typeIndividual: 'Empresa',
+    typeGestoria: 'Gestoría',
+    activeCompanyLabel: 'Empresa activa',
+    changeCompany: 'Cambiar empresa',
   },
 
   dashboard: {

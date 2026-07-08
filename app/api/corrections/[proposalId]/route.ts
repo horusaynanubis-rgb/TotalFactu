@@ -4,6 +4,7 @@ import { authOptions } from '@/app/api/auth/[...nextauth]/auth-options';
 import { prisma } from '@/lib/prisma';
 import { sendCorrectionNotificationEmail } from '@/lib/email';
 import { sendMessage } from '@/lib/telegram';
+import { resolveActiveCompanyId } from '@/lib/active-company';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,15 +36,18 @@ export async function PATCH(
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const membership = await prisma.membership.findFirst({
-    where: { user_id: session.user.id },
-    select: {
-      company_id: true,
-      role: true,
-      company: { select: { company_type: true, export_email: true, name: true } },
-      user: { select: { name: true } },
-    },
-  });
+  const companyId = await resolveActiveCompanyId(session);
+  const membership = companyId
+    ? await prisma.membership.findFirst({
+        where: { user_id: session.user.id, company_id: companyId },
+        select: {
+          company_id: true,
+          role: true,
+          company: { select: { company_type: true, export_email: true, name: true } },
+          user: { select: { name: true } },
+        },
+      })
+    : null;
   if (!membership) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   if (membership.company.company_type === 'gestoria') {
     return NextResponse.json({ error: 'Gestoria cannot respond to proposals via this endpoint' }, { status: 403 });
