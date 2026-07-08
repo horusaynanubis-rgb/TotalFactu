@@ -26,6 +26,12 @@ import { useTranslation } from '@/lib/i18n/context';
 import { LanguageSelector } from '@/components/language-selector';
 import { GestoriaContactPopup } from '@/components/gestoria-contact-popup';
 
+const BUSINESS_GROUP_MAILTO = `mailto:info@horusayn.com?subject=${encodeURIComponent(
+  'Consulta Grupo Empresarial - TotalFactu'
+)}&body=${encodeURIComponent(
+  'Hola,\n\nMe gustaría recibir información sobre la modalidad Grupo Empresarial de TotalFactu.\n\nNúmero aproximado de empresas:\nPaís:\nComentarios:\n\nGracias.'
+)}`;
+
 export default function LandingPage() {
   const { t } = useTranslation();
   const [gestoriaPopupOpen, setGestoriaPopupOpen] = useState(false);
@@ -360,7 +366,7 @@ export default function LandingPage() {
                     <div className="text-2xl font-bold text-primary mb-4">
                       {t.landing.businessGroupPrice}
                     </div>
-                    <a href="mailto:info@horusayn.com?subject=Grupo%20Empresarial%20-%20Solicitud%20de%20informaci%C3%B3n">
+                    <a href={BUSINESS_GROUP_MAILTO}>
                       <Button className="w-full md:w-auto" variant="outline">
                         <Mail className="h-4 w-4 mr-2" />
                         {t.landing.businessGroupButton}
