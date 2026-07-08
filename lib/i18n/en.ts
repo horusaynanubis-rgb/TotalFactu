@@ -273,7 +273,7 @@ export const en: Translations = {
     monthlyDescription: "Generate a CSV export for the current month's invoices",
     generateMonthlyCSV: 'Generate Monthly CSV',
     quarterlyExport: 'Quarterly Export',
-    quarterlyDescription: "Generate a CSV export for the current quarter's invoices",
+    quarterlyDescription: "Generate a CSV export for the last completed quarter's invoices",
     generateQuarterlyCSV: 'Generate Quarterly CSV',
     exportHistory: 'Export History',
     exportDate: 'Export Date',

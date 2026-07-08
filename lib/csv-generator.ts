@@ -85,7 +85,13 @@ export function getDateRange(type: 'monthly' | 'quarterly', date: Date = new Dat
     const end = new Date(year, month + 1, 0, 23, 59, 59, 999);
     return { start, end };
   } else {
-    const quarter = Math.floor(month / 3);
+    // Quarterly exports are generated for tax filing (Modelo 303), which is
+    // always done in the days right after a quarter closes (e.g. Jul 1-20
+    // covers Q2/Apr-Jun) — so this must target the last COMPLETED quarter,
+    // not the in-progress current one. JS Date normalizes negative months,
+    // so quarter=-1 correctly rolls back to Q4 of the previous year.
+    const currentQuarter = Math.floor(month / 3);
+    const quarter = currentQuarter - 1;
     const start = new Date(year, quarter * 3, 1);
     const end = new Date(year, quarter * 3 + 3, 0, 23, 59, 59, 999);
     return { start, end };
