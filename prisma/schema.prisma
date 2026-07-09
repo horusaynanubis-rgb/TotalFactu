@@ -236,7 +236,10 @@ model Invoice {
   review_status          String   @default("pending") // pending, approved, rejected
   supplier_id            String?
   // Gestoria review fields (independent of individual user review_status)
-  gestoria_review_status String?   // pending_review | reviewed_ok | reviewed_issue | waiting_client | corrected | ignored
+  gestoria_review_status String?   // pending_review | reviewed_ok | reviewed_issue | waiting_client | corrected | ignored | legacy_unreviewed
+  // NULL = never touched by gestoria review workflow (genuinely pending if created after the
+  // workflow launched 2026-06-26; historical rows from before that are backfilled to
+  // 'legacy_unreviewed' so they don't flood the Pendientes queue — see prisma/migrations/backfill_legacy_gestoria_review_status.sql)
   gestoria_reviewed_at   DateTime?
   gestoria_reviewed_by   String?
   gestoria_review_notes  String?

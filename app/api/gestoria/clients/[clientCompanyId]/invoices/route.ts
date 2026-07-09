@@ -32,6 +32,7 @@ const VALID_GESTORIA_STATUSES = new Set([
   'pending_review',
   'corrected',
   'ignored',
+  'legacy_unreviewed',
 ]);
 
 const VALID_SORT_FIELDS: Record<string, string> = {

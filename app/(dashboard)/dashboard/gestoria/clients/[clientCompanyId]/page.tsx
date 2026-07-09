@@ -218,6 +218,8 @@ function gestoriaStatusBadge(status: string | null) {
     return <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 text-xs">Finalizada</Badge>;
   if (status === 'ignored')
     return <Badge className="bg-gray-100 text-gray-500 hover:bg-gray-100 text-xs">Ignorada</Badge>;
+  if (status === 'legacy_unreviewed')
+    return <Badge className="bg-slate-100 text-slate-500 hover:bg-slate-100 text-xs">Histórica sin revisar</Badge>;
   return <Badge variant="secondary" className="text-xs">{status}</Badge>;
 }
 
