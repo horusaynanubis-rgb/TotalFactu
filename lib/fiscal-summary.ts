@@ -1,6 +1,6 @@
-// Aggregates Invoice data into the "resumen_trimestral.csv" used by the
-// "Exportación trimestral completa" ZIP (ventas/compras por mes, bases e IVA
-// por tipo, total trimestral). No existing helper computes this breakdown —
+// Aggregates Invoice data into "resumen_fiscal.csv" — informational quarterly
+// fiscal summary used both standalone (company "Fiscal" export) and inside the
+// "Paquete trimestral" ZIP. No existing helper computes this breakdown —
 // lib/csv-generator.ts only emits a flat per-invoice CSV.
 import { prisma } from './prisma';
 
@@ -14,8 +14,10 @@ export interface MonthlyTotals {
 
 export interface RateBreakdown {
   rate: number; // 0, 4, 10, 21, ...
-  base: number;
-  iva: number;
+  ventasBase: number;
+  ventasIva: number;
+  comprasBase: number;
+  comprasIva: number;
 }
 
 export interface FiscalSummary {
@@ -24,9 +26,15 @@ export interface FiscalSummary {
   rates: RateBreakdown[];
   totalVentas: number;
   totalCompras: number;
-  totalBase: number;
-  totalIva: number;
-  totalTrimestral: number;
+  totalBaseImponible: number;
+  ivaRepercutido: number; // IVA de ventas
+  ivaSoportado: number;   // IVA de compras
+  resultadoOrientativo: number; // ivaRepercutido - ivaSoportado
+}
+
+export interface SpecialExpenseEntry {
+  label: string;
+  count: number;
 }
 
 export async function buildFiscalSummary(
@@ -48,16 +56,18 @@ export async function buildFiscalSummary(
   });
 
   const monthlyMap = new Map<string, { ventas: number; compras: number }>();
-  const rateMap = new Map<number, { base: number; iva: number }>();
+  const rateMap = new Map<number, { ventasBase: number; ventasIva: number; comprasBase: number; comprasIva: number }>();
   let totalVentas = 0;
   let totalCompras = 0;
-  let totalBase = 0;
-  let totalIva = 0;
+  let totalBaseImponible = 0;
+  let ivaRepercutido = 0;
+  let ivaSoportado = 0;
 
   for (const inv of invoices) {
+    const isVenta = inv.invoice_type === 'issued';
     const monthKey = `${inv.issue_date.getFullYear()}-${String(inv.issue_date.getMonth() + 1).padStart(2, '0')}`;
     const m = monthlyMap.get(monthKey) ?? { ventas: 0, compras: 0 };
-    if (inv.invoice_type === 'issued') {
+    if (isVenta) {
       m.ventas += inv.total_amount;
       totalVentas += inv.total_amount;
     } else {
@@ -67,12 +77,18 @@ export async function buildFiscalSummary(
     monthlyMap.set(monthKey, m);
 
     const rate = Math.round(inv.tax_rate ?? 0);
-    const r = rateMap.get(rate) ?? { base: 0, iva: 0 };
-    r.base += inv.subtotal;
-    r.iva += inv.tax_amount;
+    const r = rateMap.get(rate) ?? { ventasBase: 0, ventasIva: 0, comprasBase: 0, comprasIva: 0 };
+    if (isVenta) {
+      r.ventasBase += inv.subtotal;
+      r.ventasIva += inv.tax_amount;
+      ivaRepercutido += inv.tax_amount;
+    } else {
+      r.comprasBase += inv.subtotal;
+      r.comprasIva += inv.tax_amount;
+      ivaSoportado += inv.tax_amount;
+    }
     rateMap.set(rate, r);
-    totalBase += inv.subtotal;
-    totalIva += inv.tax_amount;
+    totalBaseImponible += inv.subtotal;
   }
 
   const monthly = Array.from(monthlyMap.entries())
@@ -89,9 +105,10 @@ export async function buildFiscalSummary(
     rates,
     totalVentas,
     totalCompras,
-    totalBase,
-    totalIva,
-    totalTrimestral: totalVentas - totalCompras,
+    totalBaseImponible,
+    ivaRepercutido,
+    ivaSoportado,
+    resultadoOrientativo: ivaRepercutido - ivaSoportado,
   };
 }
 
@@ -104,10 +121,11 @@ function escapeCSV(value: string): string {
   return s;
 }
 
-export function generateResumenCSV(summary: FiscalSummary): string {
+export function generateResumenCSV(summary: FiscalSummary, specialExpenses?: SpecialExpenseEntry[]): string {
   const lines: string[] = [];
 
-  lines.push(escapeCSV(`Resumen trimestral — ${summary.periodLabel}`));
+  lines.push(escapeCSV(`Resumen fiscal trimestral — ${summary.periodLabel}`));
+  lines.push(escapeCSV('Documento informativo para revisión por la empresa o gestoría. No es la declaración oficial del Modelo 303.'));
   lines.push('');
 
   lines.push(['Mes', 'Ventas', 'Compras/Gastos'].join(CSV_DELIMITER));
@@ -116,17 +134,34 @@ export function generateResumenCSV(summary: FiscalSummary): string {
   }
   lines.push('');
 
-  lines.push(['Tipo IVA (%)', 'Base imponible', 'Cuota IVA'].join(CSV_DELIMITER));
+  lines.push([
+    'Tipo IVA (%)', 'Base ventas', 'IVA ventas', 'Base compras', 'IVA compras',
+  ].join(CSV_DELIMITER));
   for (const r of summary.rates) {
-    lines.push([`${r.rate}%`, r.base.toFixed(2), r.iva.toFixed(2)].join(CSV_DELIMITER));
+    lines.push([
+      `${r.rate}%`, r.ventasBase.toFixed(2), r.ventasIva.toFixed(2), r.comprasBase.toFixed(2), r.comprasIva.toFixed(2),
+    ].join(CSV_DELIMITER));
   }
   lines.push('');
 
   lines.push(['Total ventas', summary.totalVentas.toFixed(2)].join(CSV_DELIMITER));
   lines.push(['Total compras/gastos', summary.totalCompras.toFixed(2)].join(CSV_DELIMITER));
-  lines.push(['Total base imponible', summary.totalBase.toFixed(2)].join(CSV_DELIMITER));
-  lines.push(['Total cuota IVA', summary.totalIva.toFixed(2)].join(CSV_DELIMITER));
-  lines.push(['Total trimestral (ventas - compras)', summary.totalTrimestral.toFixed(2)].join(CSV_DELIMITER));
+  lines.push(['Base imponible total', summary.totalBaseImponible.toFixed(2)].join(CSV_DELIMITER));
+  lines.push(['IVA repercutido (ventas)', summary.ivaRepercutido.toFixed(2)].join(CSV_DELIMITER));
+  lines.push(['IVA soportado (compras)', summary.ivaSoportado.toFixed(2)].join(CSV_DELIMITER));
+  lines.push(['Resultado orientativo (repercutido - soportado)', summary.resultadoOrientativo.toFixed(2)].join(CSV_DELIMITER));
+
+  if (specialExpenses && specialExpenses.length > 0) {
+    lines.push('');
+    lines.push(escapeCSV('Gastos especiales (documentación complementaria)'));
+    lines.push(['Categoría', 'Estado'].join(CSV_DELIMITER));
+    for (const e of specialExpenses) {
+      lines.push([
+        escapeCSV(e.label),
+        escapeCSV(e.count > 0 ? `Existe documentación complementaria para revisión (${e.count})` : 'Sin documentación'),
+      ].join(CSV_DELIMITER));
+    }
+  }
 
   // UTF-8 BOM + CRLF — same convention as lib/csv-generator.ts
   return '﻿' + lines.join('\r\n');

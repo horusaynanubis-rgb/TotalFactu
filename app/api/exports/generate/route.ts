@@ -78,6 +78,19 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    // Additive history entry for the "Centro de Exportación" — does not
+    // replace or alter the Export record above, which existing features rely on.
+    prisma.exportLog.create({
+      data: {
+        company_id: companyId,
+        user_id: session.user.id,
+        export_type: `${resolvedExportType}_csv`,
+        format: 'csv',
+        period_label: `${start.toISOString().split('T')[0]} — ${end.toISOString().split('T')[0]}`,
+        record_count: invoices.length,
+      },
+    }).catch((err) => console.error('[exports/generate] ExportLog write failed:', err?.message));
+
     // Email notification placeholder
     try {
       await prisma.export.update({

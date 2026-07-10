@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/auth-options';
-import { prisma } from '@/lib/prisma';
+import { resolveActiveCompanyId } from '@/lib/active-company';
 import { verifyFiscalExportBatchToken } from '@/lib/batch-token';
 import { zipSync } from 'fflate';
 import { buildFiscalExportZipFiles, fiscalExportZipFilename } from '@/lib/fiscal-export-builder';
@@ -9,32 +9,15 @@ import { buildFiscalExportZipFiles, fiscalExportZipFilename } from '@/lib/fiscal
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
-async function resolveGestoriaAccess(userId: string, clientCompanyId: string) {
-  const membership = await prisma.membership.findFirst({
-    where: { user_id: userId },
-    select: { company_id: true, company: { select: { company_type: true } } },
-  });
-  if (!membership || membership.company.company_type !== 'gestoria') return null;
-
-  const license = await prisma.license.findFirst({
-    where: {
-      client_company_id: clientCompanyId,
-      status: 'assigned',
-      pack: { gestoria_company_id: membership.company_id },
-    },
-  });
-  if (!license) return null;
-
-  return { gestoriaCompanyId: membership.company_id };
-}
-
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { clientCompanyId: string } },
-) {
+export async function GET(request: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const companyId = await resolveActiveCompanyId(session);
+  if (!companyId) {
+    return Response.json({ error: 'No company found' }, { status: 400 });
   }
 
   const token = request.nextUrl.searchParams.get('token');
@@ -42,14 +25,13 @@ export async function GET(
 
   const payload = verifyFiscalExportBatchToken(token);
   if (!payload) return Response.json({ error: 'Invalid or expired token' }, { status: 403 });
-  if (payload.cid !== params.clientCompanyId) {
+  // Token must have been minted for this same active company — prevents a
+  // multi-company user from reusing a token generated under a different company.
+  if (payload.cid !== companyId) {
     return Response.json({ error: 'Forbidden' }, { status: 403 });
   }
 
-  const access = await resolveGestoriaAccess(session.user.id, params.clientCompanyId);
-  if (!access) return Response.json({ error: 'Forbidden' }, { status: 403 });
-
-  const { files } = await buildFiscalExportZipFiles(params.clientCompanyId, payload);
+  const { files } = await buildFiscalExportZipFiles(companyId, payload);
 
   if (Object.keys(files).length === 0) {
     return Response.json({ error: 'Nothing to export for this batch' }, { status: 500 });

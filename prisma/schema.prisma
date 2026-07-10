@@ -69,6 +69,7 @@ model User {
   responded_corrections InvoiceCorrectionProposal[] @relation("CorrectionResponder")
   uploaded_fiscal_documents FiscalDocument[]         @relation("FiscalDocumentUploader")
   reviewed_fiscal_documents FiscalDocument[]         @relation("FiscalDocumentReviewer")
+  export_logs               ExportLog[]
 
   @@index([email])
 }
@@ -112,6 +113,7 @@ model Company {
   corrections_gestoria  InvoiceCorrectionProposal[] @relation("CorrectionGestoria")
   daily_cash_registers  DailyCashRegister[]
   fiscal_documents      FiscalDocument[]
+  export_logs           ExportLog[]
 
   @@index([tax_id])
   @@index([company_type])
@@ -593,4 +595,28 @@ model FiscalDocument {
   @@index([company_id, fiscal_year, fiscal_period])
   @@index([document_type])
   @@index([status])
+}
+
+// --- Export history log — "Centro de Exportación" ---
+// Purely additive action log, no file storage. Not the same as Export
+// (which requires a stored CSV) — see the "Centro de Exportación" plan for why.
+
+model ExportLog {
+  id             String   @id @default(cuid())
+  company_id     String
+  user_id        String?
+  export_type    String   // monthly_csv | quarterly_csv | custom_csv | fiscal_summary | caja_csv | control_tpv | fiscal_documents_zip | paquete_trimestral
+  format         String   // csv | zip
+  period_label   String
+  fiscal_year    Int?
+  fiscal_quarter String?  // Q1 | Q2 | Q3 | Q4 | annual
+  record_count   Int      @default(0)
+  status         String   @default("completed") // completed | failed
+  created_at     DateTime @default(now())
+
+  company Company @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [user_id], references: [id], onDelete: SetNull)
+
+  @@index([company_id])
+  @@index([company_id, created_at])
 }
