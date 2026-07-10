@@ -25,6 +25,7 @@ import {
   Truck,
   Inbox,
   Wallet,
+  FileStack,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useState, useEffect } from 'react';
@@ -92,6 +93,7 @@ export function DashboardNav() {
         { name: t.nav.exports, href: '/dashboard/exports', icon: Download },
         { name: 'Mensajes', href: '/dashboard/messages', icon: Inbox, unreadBadge: unreadMessages > 0 ? unreadMessages : undefined },
         { name: 'Caja y Cobros', href: '/dashboard/caja-cobros', icon: Wallet },
+        { name: 'Documentación fiscal', href: '/dashboard/fiscal-documents', icon: FileStack },
         ...(hasMultipleCompanies ? [{ name: t.nav.companies, href: '/dashboard/companies', icon: Building }] : []),
         ...(isAdmin ? [{ name: 'Admin Demo', href: '/dashboard/admin/demo', icon: ShieldCheck, adminBadge: true }] : []),
         { name: t.nav.settings, href: '/dashboard/settings', icon: Settings },

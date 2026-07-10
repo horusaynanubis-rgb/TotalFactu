@@ -54,6 +54,11 @@ import { SendMessageModal } from '@/components/gestoria/send-message-modal';
 import { InvoiceReviewModal } from '@/components/gestoria/invoice-review-modal';
 import { InvoiceReviewHistoryModal } from '@/components/gestoria/invoice-review-history-modal';
 import { InvoiceCorrectionModal } from '@/components/gestoria/invoice-correction-modal';
+import {
+  FISCAL_DOCUMENT_TYPES, FISCAL_PERIODS,
+  FISCAL_DOCUMENT_TYPE_LABELS_ES, FISCAL_PERIOD_LABELS_ES,
+} from '@/lib/fiscal-document-types';
+import { FileStack } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -155,6 +160,16 @@ interface ExportPlan {
   batches: BatchInfo[];
 }
 
+interface FiscalExportPlan {
+  mode: 'csv' | 'fiscal' | 'complete';
+  year: number;
+  quarter: number | 'annual';
+  periodLabel: string;
+  totalDocuments: number;
+  batchCount: number;
+  batches: BatchInfo[];
+}
+
 interface MessageRow {
   id: string;
   subject: string;
@@ -162,6 +177,18 @@ interface MessageRow {
   read_at: string | null;
   email_sent: boolean;
   telegram_sent: boolean;
+  created_at: string;
+}
+
+interface FiscalDocRow {
+  id: string;
+  original_filename: string;
+  document_type: string;
+  fiscal_year: number;
+  fiscal_period: string;
+  description: string | null;
+  status: string;
+  gestoria_notes: string | null;
   created_at: string;
 }
 
@@ -360,6 +387,34 @@ export default function ClientDetailPage() {
   const [loadingExportPlan, setLoadingExportPlan] = useState(false);
   const [downloadingBatch, setDownloadingBatch] = useState<number | null>(null);
   const [downloadErrors, setDownloadErrors] = useState<Record<number, string>>({});
+
+  // Documentación fiscal (lazy — loaded on first activation of that tab)
+  const [fiscalDocs, setFiscalDocs] = useState<FiscalDocRow[] | null>(null);
+  const [loadingFiscalDocs, setLoadingFiscalDocs] = useState(false);
+  const [fiscalDocsTotal, setFiscalDocsTotal] = useState(0);
+  const fiscalDocsTabActivated = useRef(false);
+  const [fiscalYearFilter, setFiscalYearFilter] = useState('all');
+  const [fiscalPeriodFilter, setFiscalPeriodFilter] = useState('all');
+  const [fiscalTypeFilter, setFiscalTypeFilter] = useState('all');
+  const [fiscalStatusFilter, setFiscalStatusFilter] = useState('all');
+  const [fiscalActionId, setFiscalActionId] = useState<string | null>(null);
+  const [fiscalNoteDraft, setFiscalNoteDraft] = useState<Record<string, string>>({});
+  // Current-quarter count shown as an info block in the Exportaciones tab
+  const [fiscalDocsQuarterCount, setFiscalDocsQuarterCount] = useState<number | null>(null);
+
+  // Controlled tab state — lets the "Ver documentación fiscal" link jump tabs programmatically
+  const [activeTab, setActiveTab] = useState('resumen');
+
+  // Exportación trimestral completa (CSV + documentación fiscal ZIP) — additive, does not replace A3 export
+  const [fiscalExportMode, setFiscalExportMode] = useState<'csv' | 'fiscal' | 'complete'>('complete');
+  const [fiscalExportYear, setFiscalExportYear] = useState<number>(new Date().getFullYear());
+  const [fiscalExportQuarter, setFiscalExportQuarter] = useState<number | 'annual'>(
+    Math.floor(new Date().getMonth() / 3) + 1,
+  );
+  const [fiscalExportPlan, setFiscalExportPlan] = useState<FiscalExportPlan | null>(null);
+  const [loadingFiscalExportPlan, setLoadingFiscalExportPlan] = useState(false);
+  const [downloadingFiscalBatch, setDownloadingFiscalBatch] = useState<number | null>(null);
+  const [fiscalDownloadErrors, setFiscalDownloadErrors] = useState<Record<number, string>>({});
 
   const companyType = (session?.user as any)?.companyType;
 
@@ -656,6 +711,67 @@ export default function ClientDetailPage() {
     }
   };
 
+  const handlePrepareFiscalExport = async () => {
+    setLoadingFiscalExportPlan(true);
+    setFiscalExportPlan(null);
+    try {
+      const res = await fetch(
+        `/api/gestoria/clients/${params.clientCompanyId}/fiscal-export/plan`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ year: fiscalExportYear, quarter: fiscalExportQuarter, mode: fiscalExportMode }),
+        },
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        if (data.error === 'TOO_MANY_DOCUMENTS') {
+          toast.error(
+            `Demasiados documentos (${(data.totalDocuments as number).toLocaleString('es-ES')}). Reduce el periodo.`,
+          );
+        } else {
+          toast.error(data.error || 'Error al preparar la exportación');
+        }
+        return;
+      }
+      setFiscalExportPlan(data as FiscalExportPlan);
+    } catch {
+      toast.error('Error al preparar la exportación');
+    } finally {
+      setLoadingFiscalExportPlan(false);
+    }
+  };
+
+  const handleDownloadFiscalZip = async (batch: BatchInfo, zipUrl: string) => {
+    setDownloadingFiscalBatch(batch.batchIndex);
+    setFiscalDownloadErrors((prev) => { const next = { ...prev }; delete next[batch.batchIndex]; return next; });
+
+    try {
+      const res = await fetch(zipUrl, { method: 'GET', credentials: 'include' });
+      if (!res.ok) {
+        const text = await res.text();
+        console.error('fiscal-export-zip error', res.status, text);
+        setFiscalDownloadErrors((prev) => ({ ...prev, [batch.batchIndex]: `Error ${res.status}` }));
+        return;
+      }
+      const blob = await res.blob();
+      const batchLabel = String(batch.batchIndex + 1).padStart(3, '0');
+      const filename = `exportacion_lote${batchLabel}.zip`;
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (err: any) {
+      setFiscalDownloadErrors((prev) => ({ ...prev, [batch.batchIndex]: err?.message ?? 'Error desconocido' }));
+    } finally {
+      setDownloadingFiscalBatch(null);
+    }
+  };
+
   const loadMessages = () => {
     if (messages !== null || loadingMessages) return;
     setLoadingMessages(true);
@@ -678,6 +794,107 @@ export default function ClientDetailPage() {
       .finally(() => setLoadingRevision(false));
   };
 
+  const loadFiscalDocuments = (overrides?: {
+    year?: string; period?: string; type?: string; status?: string;
+  }) => {
+    const year = overrides?.year ?? fiscalYearFilter;
+    const period = overrides?.period ?? fiscalPeriodFilter;
+    const type = overrides?.type ?? fiscalTypeFilter;
+    const st = overrides?.status ?? fiscalStatusFilter;
+
+    setLoadingFiscalDocs(true);
+    const sp = new URLSearchParams({ limit: '100', offset: '0' });
+    if (year !== 'all') sp.set('year', year);
+    if (period !== 'all') sp.set('period', period);
+    if (type !== 'all') sp.set('type', type);
+    if (st !== 'all') sp.set('status', st);
+    fetch(`/api/gestoria/clients/${params.clientCompanyId}/fiscal-documents?${sp}`)
+      .then((r) => r.json())
+      .then((data) => { setFiscalDocs(data.items ?? []); setFiscalDocsTotal(data.total ?? 0); })
+      .catch(() => toast.error('Error cargando documentación fiscal'))
+      .finally(() => setLoadingFiscalDocs(false));
+  };
+
+  const handleFiscalYearFilterChange = (v: string) => { setFiscalYearFilter(v); loadFiscalDocuments({ year: v }); };
+  const handleFiscalPeriodFilterChange = (v: string) => { setFiscalPeriodFilter(v); loadFiscalDocuments({ period: v }); };
+  const handleFiscalTypeFilterChange = (v: string) => { setFiscalTypeFilter(v); loadFiscalDocuments({ type: v }); };
+  const handleFiscalStatusFilterChange = (v: string) => { setFiscalStatusFilter(v); loadFiscalDocuments({ status: v }); };
+
+  const loadFiscalDocsQuarterCount = () => {
+    const now = new Date();
+    const quarter = Math.floor(now.getMonth() / 3) + 1;
+    const sp = new URLSearchParams({ limit: '1', offset: '0', year: String(now.getFullYear()), period: `Q${quarter}` });
+    fetch(`/api/gestoria/clients/${params.clientCompanyId}/fiscal-documents?${sp}`)
+      .then((r) => r.json())
+      .then((data) => setFiscalDocsQuarterCount(data.total ?? 0))
+      .catch(() => {});
+  };
+
+  const handleFiscalDocAction = async (docId: string, mode: 'view' | 'download') => {
+    setFiscalActionId(docId);
+    try {
+      const res = await fetch(
+        `/api/gestoria/clients/${params.clientCompanyId}/fiscal-documents/${docId}/preview`,
+      );
+      if (!res.ok) { toast.error('No se pudo obtener el enlace'); return; }
+      const { url, original_filename } = await res.json();
+      if (mode === 'view') {
+        window.open(url, '_blank');
+      } else {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = original_filename ?? 'documento';
+        a.click();
+      }
+    } catch {
+      toast.error('Error al acceder al documento');
+    } finally {
+      setFiscalActionId(null);
+    }
+  };
+
+  const handleFiscalDocReview = async (docId: string, status: 'available' | 'reviewed') => {
+    setFiscalActionId(docId);
+    try {
+      const res = await fetch(
+        `/api/gestoria/clients/${params.clientCompanyId}/fiscal-documents/${docId}/review`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status }),
+        },
+      );
+      if (!res.ok) { toast.error('No se pudo actualizar el estado'); return; }
+      toast.success(status === 'reviewed' ? 'Marcado como revisado' : 'Marcado como disponible');
+      loadFiscalDocuments();
+    } catch {
+      toast.error('Error al actualizar el estado');
+    } finally {
+      setFiscalActionId(null);
+    }
+  };
+
+  const handleFiscalDocNoteSave = async (docId: string) => {
+    setFiscalActionId(docId);
+    try {
+      const res = await fetch(
+        `/api/gestoria/clients/${params.clientCompanyId}/fiscal-documents/${docId}/review`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ gestoria_notes: fiscalNoteDraft[docId] ?? '' }),
+        },
+      );
+      if (!res.ok) { toast.error('No se pudo guardar la observación'); return; }
+      toast.success('Observación guardada');
+      loadFiscalDocuments();
+    } catch {
+      toast.error('Error al guardar la observación');
+    } finally {
+      setFiscalActionId(null);
+    }
+  };
+
   const handleTabChange = (tab: string) => {
     if (tab === 'documentos') loadDocuments();
     if (tab === 'facturas' && !invoicesTabActivated.current) {
@@ -687,6 +904,13 @@ export default function ClientDetailPage() {
     if (tab === 'revision' && !revisionTabActivated.current) {
       revisionTabActivated.current = true;
       loadRevisionInvoices(revisionFilter);
+    }
+    if (tab === 'documentacion-fiscal' && !fiscalDocsTabActivated.current) {
+      fiscalDocsTabActivated.current = true;
+      loadFiscalDocuments();
+    }
+    if (tab === 'exportaciones' && fiscalDocsQuarterCount === null) {
+      loadFiscalDocsQuarterCount();
     }
     if (tab === 'mensajes') loadMessages();
   };
@@ -797,7 +1021,7 @@ export default function ClientDetailPage() {
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue="resumen" onValueChange={handleTabChange}>
+      <Tabs value={activeTab} onValueChange={(v) => { setActiveTab(v); handleTabChange(v); }}>
         <TabsList>
           <TabsTrigger value="resumen">
             <LayoutDashboard className="h-4 w-4 mr-1.5" />
@@ -819,6 +1043,10 @@ export default function ClientDetailPage() {
                 {pendingReviews}
               </Badge>
             )}
+          </TabsTrigger>
+          <TabsTrigger value="documentacion-fiscal">
+            <FileStack className="h-4 w-4 mr-1.5" />
+            Documentación fiscal
           </TabsTrigger>
           <TabsTrigger value="exportaciones">
             <Archive className="h-4 w-4 mr-1.5" />
@@ -1703,8 +1931,184 @@ export default function ClientDetailPage() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* ── DOCUMENTACIÓN FISCAL ────────────────────────────────────────── */}
+        <TabsContent value="documentacion-fiscal" className="mt-6 space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <FileStack className="h-4 w-4" />
+                Documentación fiscal complementaria ({fiscalDocsTotal})
+              </CardTitle>
+              <div className="flex flex-wrap gap-2 pt-2">
+                <select
+                  value={fiscalYearFilter}
+                  onChange={(e) => handleFiscalYearFilterChange(e.target.value)}
+                  className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <option value="all">Todos los años</option>
+                  {Array.from({ length: 6 }, (_, i) => new Date().getFullYear() - i).map((y) => (
+                    <option key={y} value={String(y)}>{y}</option>
+                  ))}
+                </select>
+                <select
+                  value={fiscalPeriodFilter}
+                  onChange={(e) => handleFiscalPeriodFilterChange(e.target.value)}
+                  className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <option value="all">Todos los periodos</option>
+                  {FISCAL_PERIODS.map((p) => (
+                    <option key={p} value={p}>{FISCAL_PERIOD_LABELS_ES[p]}</option>
+                  ))}
+                </select>
+                <select
+                  value={fiscalTypeFilter}
+                  onChange={(e) => handleFiscalTypeFilterChange(e.target.value)}
+                  className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <option value="all">Todos los tipos</option>
+                  {FISCAL_DOCUMENT_TYPES.map((tp) => (
+                    <option key={tp} value={tp}>{FISCAL_DOCUMENT_TYPE_LABELS_ES[tp]}</option>
+                  ))}
+                </select>
+                <select
+                  value={fiscalStatusFilter}
+                  onChange={(e) => handleFiscalStatusFilterChange(e.target.value)}
+                  className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <option value="all">Todos los estados</option>
+                  <option value="available">Disponible</option>
+                  <option value="reviewed">Revisado</option>
+                </select>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {loadingFiscalDocs ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : !fiscalDocs || fiscalDocs.length === 0 ? (
+                <p className="text-center text-muted-foreground py-8">No hay documentos fiscales para este cliente todavía.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Archivo</TableHead>
+                        <TableHead>Tipo</TableHead>
+                        <TableHead>Periodo</TableHead>
+                        <TableHead>Fecha</TableHead>
+                        <TableHead>Estado</TableHead>
+                        <TableHead>Observación interna</TableHead>
+                        <TableHead>Acciones</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {fiscalDocs.map((doc) => (
+                        <TableRow key={doc.id}>
+                          <TableCell className="max-w-[200px] truncate">{doc.original_filename}</TableCell>
+                          <TableCell className="text-sm">
+                            {FISCAL_DOCUMENT_TYPE_LABELS_ES[doc.document_type as keyof typeof FISCAL_DOCUMENT_TYPE_LABELS_ES] ?? doc.document_type}
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            {doc.fiscal_year} · {FISCAL_PERIOD_LABELS_ES[doc.fiscal_period as keyof typeof FISCAL_PERIOD_LABELS_ES] ?? doc.fiscal_period}
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {new Date(doc.created_at).toLocaleDateString('es-ES')}
+                          </TableCell>
+                          <TableCell>
+                            <Badge className={doc.status === 'reviewed' ? 'bg-green-100 text-green-700 hover:bg-green-100' : 'bg-blue-100 text-blue-700 hover:bg-blue-100'}>
+                              {doc.status === 'reviewed' ? 'Revisado' : 'Disponible'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="min-w-[200px]">
+                            <div className="flex items-center gap-1">
+                              <Input
+                                value={fiscalNoteDraft[doc.id] ?? doc.gestoria_notes ?? ''}
+                                onChange={(e) => setFiscalNoteDraft((prev) => ({ ...prev, [doc.id]: e.target.value }))}
+                                placeholder="Observación interna"
+                                className="h-8 text-xs"
+                              />
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={fiscalActionId === doc.id}
+                                onClick={() => handleFiscalDocNoteSave(doc.id)}
+                                title="Guardar observación"
+                              >
+                                <PenLine className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-1">
+                              <Button
+                                size="sm" variant="outline"
+                                disabled={fiscalActionId === doc.id}
+                                onClick={() => handleFiscalDocAction(doc.id, 'view')}
+                                title="Ver"
+                              >
+                                <Eye className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                size="sm" variant="outline"
+                                disabled={fiscalActionId === doc.id}
+                                onClick={() => handleFiscalDocAction(doc.id, 'download')}
+                                title="Descargar"
+                              >
+                                <Download className="h-3.5 w-3.5" />
+                              </Button>
+                              {doc.status !== 'reviewed' ? (
+                                <Button
+                                  size="sm" variant="outline"
+                                  disabled={fiscalActionId === doc.id}
+                                  onClick={() => handleFiscalDocReview(doc.id, 'reviewed')}
+                                  title="Marcar como revisado"
+                                >
+                                  <ClipboardCheck className="h-3.5 w-3.5" />
+                                </Button>
+                              ) : (
+                                <Button
+                                  size="sm" variant="outline"
+                                  disabled={fiscalActionId === doc.id}
+                                  onClick={() => handleFiscalDocReview(doc.id, 'available')}
+                                  title="Desmarcar revisado"
+                                >
+                                  <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
+                                </Button>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         {/* ── EXPORTAR A3 ─────────────────────────────────────────────────── */}
         <TabsContent value="exportaciones" className="mt-6 space-y-6">
+          {/* Aviso: documentación fiscal complementaria del periodo actual */}
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm">
+            <div className="flex items-center gap-2 text-blue-800">
+              <FileStack className="h-4 w-4 shrink-0" />
+              <span>
+                Documentación fiscal complementaria del periodo:{' '}
+                <strong>{fiscalDocsQuarterCount ?? '…'}</strong> documento(s) este trimestre.
+              </span>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => { setActiveTab('documentacion-fiscal'); handleTabChange('documentacion-fiscal'); }}
+            >
+              Ver documentación fiscal
+            </Button>
+          </div>
+
           {/* Form */}
           <Card>
             <CardHeader>
@@ -1866,6 +2270,147 @@ export default function ClientDetailPage() {
                 <p className="text-xs text-muted-foreground">
                   Los enlaces son válidos durante 1 hora. Pasado ese tiempo, pulsa de nuevo "Preparar descarga".
                 </p>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* ── Exportación trimestral completa (additive, no sustituye al ZIP A3) ── */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <FileStack className="h-4 w-4" />
+                Exportación trimestral completa
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Genera un ZIP con el resumen trimestral, las facturas del periodo y/o la documentación
+                fiscal complementaria (contratos, escrituras, retenciones...), organizados en carpetas
+                separadas. No sustituye a la exportación CSV habitual ni a Exportar A3.
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="space-y-1">
+                  <label className="text-sm font-medium">Año</label>
+                  <select
+                    value={fiscalExportYear}
+                    onChange={(e) => { setFiscalExportYear(Number(e.target.value)); setFiscalExportPlan(null); }}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i).map((y) => (
+                      <option key={y} value={y}>{y}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium">Periodo</label>
+                  <select
+                    value={String(fiscalExportQuarter)}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setFiscalExportQuarter(v === 'annual' ? 'annual' : Number(v));
+                      setFiscalExportPlan(null);
+                    }}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <option value="1">Q1</option>
+                    <option value="2">Q2</option>
+                    <option value="3">Q3</option>
+                    <option value="4">Q4</option>
+                    <option value="annual">Año completo</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium">Contenido</label>
+                  <select
+                    value={fiscalExportMode}
+                    onChange={(e) => { setFiscalExportMode(e.target.value as any); setFiscalExportPlan(null); }}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <option value="csv">Solo CSV (resumen + facturas)</option>
+                    <option value="fiscal">Solo documentación fiscal</option>
+                    <option value="complete">Exportación completa</option>
+                  </select>
+                </div>
+              </div>
+
+              <Button
+                onClick={handlePrepareFiscalExport}
+                disabled={loadingFiscalExportPlan}
+                className="w-full sm:w-auto"
+              >
+                {loadingFiscalExportPlan ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Calculando…
+                  </>
+                ) : (
+                  <>
+                    <Archive className="h-4 w-4 mr-2" />
+                    Preparar exportación
+                  </>
+                )}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {fiscalExportPlan && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-green-500" />
+                  {fiscalExportPlan.periodLabel} · {fiscalExportPlan.totalDocuments} documento(s) fiscal(es)
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {fiscalExportPlan.batchCount > 1 && (
+                  <p className="text-sm text-muted-foreground rounded-md border border-blue-200 bg-blue-50 p-3">
+                    Se generan <strong>{fiscalExportPlan.batchCount} ZIPs independientes</strong>. El primero
+                    incluye los CSV; todos incluyen su parte de documentación fiscal.
+                  </p>
+                )}
+                <div className="space-y-2">
+                  {fiscalExportPlan.batches.map((batch) => {
+                    const zipUrl =
+                      `/api/gestoria/clients/${params.clientCompanyId}/fiscal-export/zip` +
+                      `?token=${encodeURIComponent(batch.token)}`;
+                    const isDownloading = downloadingFiscalBatch === batch.batchIndex;
+                    const batchError = fiscalDownloadErrors[batch.batchIndex];
+                    return (
+                      <div key={batch.batchIndex} className="flex flex-col gap-1">
+                        <div className="flex items-center justify-between rounded-md border p-3 gap-3">
+                          <div className="text-sm">
+                            <span className="font-medium">ZIP {batch.batchIndex + 1}</span>
+                            {batch.documentCount > 0 && (
+                              <span className="text-muted-foreground ml-2">
+                                {batch.documentCount} archivo(s) · ~{batch.estimatedSizeMB} MB
+                              </span>
+                            )}
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={isDownloading || downloadingFiscalBatch !== null}
+                            onClick={() => handleDownloadFiscalZip(batch, zipUrl)}
+                          >
+                            {isDownloading ? (
+                              <>
+                                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                                Descargando...
+                              </>
+                            ) : (
+                              <>
+                                <Download className="h-3.5 w-3.5 mr-1.5" />
+                                Descargar ZIP {batch.batchIndex + 1}
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                        {batchError && <p className="text-xs text-destructive px-1">{batchError}</p>}
+                      </div>
+                    );
+                  })}
+                </div>
               </CardContent>
             </Card>
           )}

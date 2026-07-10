@@ -11,13 +11,15 @@ interface PreviewData {
   mime_type: string;
   original_filename: string;
   status: string;
-  source_channel: string;
+  source_channel?: string;
   upload_timestamp: string;
 }
 
 interface DocumentPreviewModalProps {
   documentId: string | null;
   onClose: () => void;
+  /** Overrides the preview endpoint, e.g. for fiscal documents. Defaults to /api/documents/:id/preview. */
+  previewEndpoint?: (id: string) => string;
 }
 
 const SUPPORTED_TYPES = [
@@ -28,7 +30,7 @@ const SUPPORTED_TYPES = [
   'image/webp',
 ];
 
-export function DocumentPreviewModal({ documentId, onClose }: DocumentPreviewModalProps) {
+export function DocumentPreviewModal({ documentId, onClose, previewEndpoint }: DocumentPreviewModalProps) {
   const { t } = useTranslation();
   const [data, setData] = useState<PreviewData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -46,7 +48,8 @@ export function DocumentPreviewModal({ documentId, onClose }: DocumentPreviewMod
     setData(null);
     setError(null);
 
-    fetch(`/api/documents/${documentId}/preview`)
+    const endpoint = previewEndpoint ? previewEndpoint(documentId) : `/api/documents/${documentId}/preview`;
+    fetch(endpoint)
       .then((res) => {
         if (!res.ok) return res.json().then((d) => Promise.reject(d?.message ?? 'Error'));
         return res.json();
@@ -64,6 +67,7 @@ export function DocumentPreviewModal({ documentId, onClose }: DocumentPreviewMod
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [documentId, t]);
 
   if (!documentId) return null;
@@ -88,8 +92,12 @@ export function DocumentPreviewModal({ documentId, onClose }: DocumentPreviewMod
             </h2>
             {data && (
               <p className="text-xs text-gray-500 mt-0.5 flex gap-3">
-                <span className="capitalize">{data.source_channel}</span>
-                <span>·</span>
+                {data.source_channel && (
+                  <>
+                    <span className="capitalize">{data.source_channel}</span>
+                    <span>·</span>
+                  </>
+                )}
                 <span>{data.status}</span>
                 <span>·</span>
                 <span>{formatDateTime(data.upload_timestamp)}</span>

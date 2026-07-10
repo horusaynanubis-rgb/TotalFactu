@@ -6,6 +6,7 @@
  * Paths:  uploads/<companyId>/<timestamp>-<filename>
  *         uploads/telegram/<companyId>/<timestamp>-<filename>
  *         exports/<companyId>/<timestamp>-<filename>
+ *         fiscal-documents/<companyId>/<year>/<period>/<timestamp>-<filename>
  */
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
@@ -74,6 +75,19 @@ export function buildTelegramPath(companyId: string, filename: string): string {
 
 export function buildExportPath(companyId: string, filename: string): string {
   return `exports/${companyId}/${Date.now()}-${sanitizeFilename(filename)}`;
+}
+
+/**
+ * Documentación fiscal complementaria — kept under its own top-level prefix
+ * so these files never overlap with uploads/ (OCR pipeline) or exports/.
+ */
+export function buildFiscalDocumentPath(
+  companyId: string,
+  year: number,
+  period: string,
+  filename: string,
+): string {
+  return `fiscal-documents/${companyId}/${year}/${period}/${Date.now()}-${sanitizeFilename(filename)}`;
 }
 
 // ---------------------------------------------------------------------------

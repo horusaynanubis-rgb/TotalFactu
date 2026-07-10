@@ -19,7 +19,8 @@ import {
   SelectContent,
   SelectItem,
 } from '@/components/ui/select';
-import { Download, FileText, Mail, CheckCircle, CalendarClock, SlidersHorizontal } from 'lucide-react';
+import { Download, FileText, Mail, CheckCircle, CalendarClock, SlidersHorizontal, FileStack } from 'lucide-react';
+import Link from 'next/link';
 import { formatDate } from '@/lib/utils';
 import { getCurrentFiscalQuarter, formatFiscalDate, FiscalQuarter } from '@/lib/fiscal-calendar';
 import toast from 'react-hot-toast';
@@ -48,6 +49,21 @@ export default function ExportsPage() {
     const current = new Date().getFullYear();
     return Array.from({ length: 5 }, (_, i) => current - i);
   }, []);
+
+  // Aviso: documentación fiscal complementaria cargada para el trimestre en curso.
+  // Info-only — never mixed into facturas.csv or the Export/A3 flow.
+  const [fiscalDocsCount, setFiscalDocsCount] = useState<number | null>(null);
+  useEffect(() => {
+    const params = new URLSearchParams({
+      year: String(fiscalQuarter.year),
+      period: `Q${fiscalQuarter.quarter}`,
+      limit: '1',
+    });
+    fetch(`/api/fiscal-documents?${params.toString()}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (data) setFiscalDocsCount(data.total ?? 0); })
+      .catch(() => {});
+  }, [fiscalQuarter.year, fiscalQuarter.quarter]);
 
   const fetchExports = async () => {
     try {
@@ -143,6 +159,20 @@ export default function ExportsPage() {
             {fiscalQuarter.status === 'upcoming' && t.exports.filingStatusUpcoming}
           </p>
         </div>
+      </div>
+
+      {/* Aviso: documentación fiscal complementaria del periodo */}
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm">
+        <div className="flex items-center gap-2 text-blue-800">
+          <FileStack className="h-4 w-4 shrink-0" />
+          <span>
+            Documentación fiscal complementaria del periodo:{' '}
+            <strong>{fiscalDocsCount ?? '…'}</strong> documento(s) este trimestre.
+          </span>
+        </div>
+        <Button size="sm" variant="outline" asChild>
+          <Link href="/dashboard/fiscal-documents">Ver documentación fiscal</Link>
+        </Button>
       </div>
 
       {/* Generate Section */}

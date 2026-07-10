@@ -67,6 +67,8 @@ model User {
   gestoria_reviewed    Invoice[]                     @relation("GestoriaReviewer")
   proposed_corrections InvoiceCorrectionProposal[]  @relation("CorrectionProposer")
   responded_corrections InvoiceCorrectionProposal[] @relation("CorrectionResponder")
+  uploaded_fiscal_documents FiscalDocument[]         @relation("FiscalDocumentUploader")
+  reviewed_fiscal_documents FiscalDocument[]         @relation("FiscalDocumentReviewer")
 
   @@index([email])
 }
@@ -109,6 +111,7 @@ model Company {
   corrections_client    InvoiceCorrectionProposal[] @relation("CorrectionClient")
   corrections_gestoria  InvoiceCorrectionProposal[] @relation("CorrectionGestoria")
   daily_cash_registers  DailyCashRegister[]
+  fiscal_documents      FiscalDocument[]
 
   @@index([tax_id])
   @@index([company_type])
@@ -558,5 +561,36 @@ model DailyCashRegister {
   @@index([company_id])
   @@index([date])
   @@index([company_id, date])
+  @@index([status])
+}
+
+// --- Documentación fiscal complementaria (NOT invoices — never enters OCR/Gemini pipeline) ---
+
+model FiscalDocument {
+  id                   String    @id @default(cuid())
+  company_id           String
+  uploaded_by_user_id  String
+  original_filename    String
+  mime_type            String
+  size_bytes           Int
+  cloud_storage_path   String
+  document_type        String    // alquiler | retenciones | escritura | registro_mercantil | certificado_fiscal | actividad | tabaco | profesional_notarial | otro
+  fiscal_year          Int
+  fiscal_period        String    // Q1 | Q2 | Q3 | Q4 | annual | none
+  description          String?
+  status               String    @default("available") // available | reviewed
+  gestoria_notes       String?
+  reviewed_at          DateTime?
+  reviewed_by_user_id  String?
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @updatedAt
+
+  company     Company @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  uploaded_by User    @relation("FiscalDocumentUploader", fields: [uploaded_by_user_id], references: [id])
+  reviewed_by User?   @relation("FiscalDocumentReviewer", fields: [reviewed_by_user_id], references: [id], onDelete: SetNull)
+
+  @@index([company_id])
+  @@index([company_id, fiscal_year, fiscal_period])
+  @@index([document_type])
   @@index([status])
 }
