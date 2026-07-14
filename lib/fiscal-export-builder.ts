@@ -14,6 +14,7 @@ import { buildFiscalSummary, generateResumenCSV } from './fiscal-summary';
 import { buildSpecialExpensesSummary } from './special-expenses';
 import { buildTpvControlReport, generateTpvControlCSV } from './tpv-control';
 import { generateCajaCSV } from './caja-csv';
+import { buildIvaDetalle, generateIvaDetalleCSV } from './iva-detalle';
 import { generateCSV } from './csv-generator';
 import { FISCAL_DOCUMENT_TYPE_LABELS_ES } from './fiscal-document-types';
 
@@ -181,15 +182,18 @@ export async function buildFiscalExportZipFiles(
     }
 
     if (mode === 'complete') {
-      const [registers, tpvReport] = await Promise.all([
+      const [registers, tpvReport, ivaDetalle] = await Promise.all([
         prisma.dailyCashRegister.findMany({
           where: { company_id: companyId, date: { gte: start, lte: end }, status: 'confirmed' },
           orderBy: { date: 'asc' },
+          include: { document: { select: { source_channel: true } } },
         }),
         buildTpvControlReport(companyId, start, end, label),
+        buildIvaDetalle(companyId, start, end),
       ]);
       files['caja_tpv.csv'] = [new TextEncoder().encode(generateCajaCSV(registers)), { level: 0 }];
       files['control_tpv_vs_facturacion.csv'] = [new TextEncoder().encode(generateTpvControlCSV(tpvReport)), { level: 0 }];
+      files['detalle_iva.csv'] = [new TextEncoder().encode(generateIvaDetalleCSV(ivaDetalle)), { level: 0 }];
     }
 
     if (mode === 'fiscal' || mode === 'complete') {

@@ -63,6 +63,7 @@ const EXPORT_TYPE_LABELS: Record<string, string> = {
   quarterly_csv: 'CSV trimestral',
   custom_csv: 'CSV personalizado',
   fiscal_summary: 'Resumen fiscal',
+  detalle_iva: 'Detalle de IVA',
   caja_csv: 'Caja / TPV',
   control_tpv: 'Control TPV vs facturación',
   fiscal_documents_zip: 'Documentación fiscal (ZIP)',
@@ -190,6 +191,7 @@ export default function ExportsPage() {
   const [fiscalYear, setFiscalYear] = useState<number>(fiscalQuarter.year);
   const [fiscalQuarterSel, setFiscalQuarterSel] = useState<number>(fiscalQuarter.quarter);
   const [downloadingFiscalSummary, setDownloadingFiscalSummary] = useState(false);
+  const [downloadingIvaDetalle, setDownloadingIvaDetalle] = useState(false);
 
   const handleDownloadFiscalSummary = async () => {
     setDownloadingFiscalSummary(true);
@@ -202,6 +204,20 @@ export default function ExportsPage() {
       toast.error(err?.message || 'No se pudo generar el resumen fiscal');
     } finally {
       setDownloadingFiscalSummary(false);
+    }
+  };
+
+  const handleDownloadIvaDetalle = async () => {
+    setDownloadingIvaDetalle(true);
+    try {
+      const url = `/api/fiscal-summary/detalle-iva?year=${fiscalYear}&quarter=${fiscalQuarterSel}`;
+      await downloadBlobFrom(url, `detalle_iva_Q${fiscalQuarterSel}_${fiscalYear}.csv`);
+      toast.success('Detalle de IVA descargado');
+      refreshHistory();
+    } catch (err: any) {
+      toast.error(err?.message || 'No se pudo generar el detalle de IVA');
+    } finally {
+      setDownloadingIvaDetalle(false);
     }
   };
 
@@ -489,10 +505,14 @@ export default function ExportsPage() {
               </Select>
             </div>
           </div>
-          <DialogFooter>
-            <Button onClick={handleDownloadFiscalSummary} disabled={downloadingFiscalSummary}>
+          <DialogFooter className="flex-col sm:flex-col gap-2">
+            <Button className="w-full" onClick={handleDownloadFiscalSummary} disabled={downloadingFiscalSummary}>
               {downloadingFiscalSummary ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
               Descargar resumen fiscal
+            </Button>
+            <Button className="w-full" variant="outline" onClick={handleDownloadIvaDetalle} disabled={downloadingIvaDetalle}>
+              {downloadingIvaDetalle ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+              Descargar detalle de IVA por operación
             </Button>
           </DialogFooter>
         </DialogContent>

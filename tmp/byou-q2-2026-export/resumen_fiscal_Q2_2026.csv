@@ -1,0 +1,44 @@
+﻿Resumen fiscal trimestral — Q2 2026
+Documento informativo para revisión por la empresa o gestoría. No es la declaración oficial del Modelo 303.
+
+Mes;Ventas;Compras/Gastos
+2026-04;0.00;6875.21
+2026-05;0.00;11299.66
+2026-06;119.43;10799.90
+
+IVA repercutido (ventas) e IVA soportado (compras), desglosado por tipo. Solo incluye facturas — ver aviso Caja y Cobros más abajo sobre ingresos de Caja/TPV.
+Tipo IVA (%);Base ventas;IVA ventas;Nº facturas venta;Base compras;IVA compras;Nº facturas compra
+0%;0.00;0.00;0;105.56;5.56;2
+4%;0.00;0.00;0;1084.27;43.35;13
+10%;0.00;0.00;0;1797.41;180.19;7
+21%;98.70;20.73;1;8410.72;1766.27;43
+Sin clasificar;0.00;0.00;0;14725.25;1411.43;64
+
+Total ventas (facturas emitidas);119.43
+Total compras/gastos;28974.77
+Base imponible total;26221.91
+IVA repercutido (ventas);20.73
+IVA soportado (compras);3406.80
+Resultado orientativo (repercutido - soportado);-3386.07
+Facturas venta sin tipo de IVA clasificado;0
+Facturas compra sin tipo de IVA clasificado;64
+
+Caja y Cobros (TPV, efectivo, etc.) — total cobrado por método de pago en el periodo
+Efectivo;Tarjeta/TPV;Bizum;Transferencia;Otros;Total cobrado
+19861.52;38289.51;0.00;0.00;0.00;58151.03
+IVA no desglosado en el cierre TPV — el cierre de caja no registra el tipo de IVA por operación. El desglose de IVA (arriba) sale únicamente de facturas/tickets con tipo identificado.
+
+Control: Caja/TPV vs facturas emitidas
+Total facturas emitidas;Total Caja/TPV;Diferencia (Caja - Facturas)
+119.43;58151.03;58031.60
+Informativo — no corrige ni concilia automáticamente. En negocios donde el ingreso se registra vía Caja/TPV y no como factura emitida, esta diferencia es esperable.
+
+Gastos especiales (documentación complementaria)
+Categoría;Estado
+Alquiler / contrato del local;Sin documentación
+Retenciones;Sin documentación
+Notaría / escritura de constitución;Sin documentación
+Registro Mercantil;Sin documentación
+Servicios profesionales;Sin documentación
+Tabaco;Sin documentación
+Otros;Sin documentación

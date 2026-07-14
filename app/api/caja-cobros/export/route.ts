@@ -53,6 +53,7 @@ export async function GET(request: NextRequest) {
   const registers = await prisma.dailyCashRegister.findMany({
     where: { company_id: companyId, date: { gte: range.start, lte: range.end }, status: 'confirmed' },
     orderBy: { date: 'asc' },
+    include: { document: { select: { source_channel: true } } },
   });
 
   const csv = generateCajaCSV(registers);

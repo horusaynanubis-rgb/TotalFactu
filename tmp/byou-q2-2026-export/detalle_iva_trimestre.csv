@@ -1,0 +1,132 @@
+﻿fecha;numero_factura;cliente_proveedor;tipo;base_imponible;tipo_iva;cuota_iva;total;origen;estado_clasificacion;observaciones
+2026-04-01;FE-2474752;FRIOLISA S.A.U.;recibida;28.41;10%;2.84;31.25;Telegram;clasificada (cabecera);
+2026-04-01;260004;RAQUEL SINTES SIMON;recibida;635.30;21%;133.41;648.00;Web;clasificada (cabecera);
+2026-04-01;FA/531;Sistemas Segurmar Costa Brava, S.L.;recibida;25.00;21%;5.25;30.25;Web;clasificada (cabecera);
+2026-04-01;FE-2474099;FRIOLISA S.A.U.;recibida;130.08;10%;13.01;143.09;Web;clasificada (líneas);Tipo de IVA inferido desde las líneas de factura (cabecera sin tipo)
+2026-04-02;FV2601035;EXPLOTACIONS BOSCH TORRENT S.L.;recibida;65.11;sin clasificar;4.96;70.07;Web;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-04-02;2026025386;XINA CENTER;recibida;26.82;21%;5.63;32.46;Telegram;clasificada (líneas);Tipo de IVA inferido desde las líneas de factura (cabecera sin tipo)
+2026-04-03;05/26;CAMPA-ESCUDERO CB;recibida;350.00;21%;73.50;357.00;Telegram;clasificada (cabecera);
+2026-04-07;260024010011304;TRANSGOURMET;recibida;75.16;sin clasificar;6.14;81.30;Telegram;pendiente de clasificación;Sin tipo de IVA en cabecera y sin líneas de detalle — revisar factura
+2026-04-07;255;FECOTUR;recibida;50.00;0%;0.00;50.00;Web;clasificada (cabecera);
+2026-04-07;26A2246;MANEL MARQUEZ S.L.;recibida;55.35;sin clasificar;5.98;61.33;Web;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-04-07;260024010011304;TRANSGOURMET;recibida;-3.95;4%;-0.16;-4.11;Telegram;clasificada (cabecera);
+2026-04-08;260024012000379;Transgourmet Iberica S.A.U.;recibida;-3.95;sin clasificar;-0.16;-4.11;Web;pendiente de clasificación;Sin tipo de IVA en cabecera y sin líneas de detalle — revisar factura
+2026-04-09;26A2358;MANEL MARQUEZ S.L.;recibida;27.74;21%;5.83;33.57;Web;clasificada (líneas);Tipo de IVA inferido desde las líneas de factura (cabecera sin tipo)
+2026-04-09;INV/2026/212426;AGEDI-AIE, OFICINA CONJUNTA DE RECAUDACIÓN DE ARTISTAS Y PRODUCTORES, UTE;recibida;22.23;21%;4.67;26.90;Web;clasificada (cabecera);
+2026-04-09;011885;DuaLsoft.S.L.;recibida;45.37;21%;9.53;54.90;Telegram;clasificada (cabecera);
+2026-04-10;INV/2026/00079;Brugarol La Granja S.L.;recibida;120.00;21%;25.20;145.20;Web;clasificada (cabecera);
+2026-04-10;2604A001345;DISTRIBUCIONS DARNES S.L.;recibida;361.35;sin clasificar;37.36;398.71;Web;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-04-11;290-0004-336012;Leroy Merlin Playa;recibida;46.24;21%;9.71;55.95;Web;clasificada (cabecera);
+2026-04-11;FE-2479735;FRIOLISA S.A.U.;recibida;195.12;sin clasificar;20.03;228.03;Web;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-04-11;FE-2479735;FRIOLISA S.A.U.;recibida;208.00;sin clasificar;20.03;228.03;Telegram;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-04-13;260024010012260;Transgourmet Ibérica, S.A.U.;recibida;148.63;sin clasificar;10.49;159.12;Telegram;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-04-14;P51/507;PROFESSPACK 2017 S.L.;recibida;83.25;21%;17.48;100.73;Web;clasificada (cabecera);
+2026-04-15;S 105844;ambiseint;recibida;27.80;21%;5.84;33.64;Telegram;clasificada (cabecera);
+2026-04-15;2026/2123;JABONES TER, SL;recibida;65.80;21%;13.82;79.62;Web;clasificada (cabecera);
+2026-04-16;P51/547;PROFESSPACK 2017 S.L.;recibida;20.50;21%;4.31;24.81;Web;clasificada (cabecera);
+2026-04-16;2604A001871;DISTRIBUCIONS DARNES S.L.;recibida;125.45;sin clasificar;11.84;137.29;Web;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-04-20;290-0004-338164;Leroy Merlin Espana S.L.U.;recibida;0.00;21%;0.00;0.00;Telegram;clasificada (líneas);Tipo de IVA inferido desde las líneas de factura (cabecera sin tipo)
+2026-04-20;2604A002587;DISTRIBUCIONS DARNES S.L.;recibida;95.65;sin clasificar;11.42;107.07;Web;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-04-20;260024010013221;TRANSGOURMET;recibida;145.37;sin clasificar;11.65;157.02;Telegram;pendiente de clasificación;Sin tipo de IVA en cabecera y sin líneas de detalle — revisar factura
+2026-04-21;26A2657;MANEL MARQUEZ S.L.;recibida;60.74;sin clasificar;8.95;69.69;Web;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-04-22;FE-2485420;FRIOLISA S.A.U.;recibida;149.40;sin clasificar;13.78;163.18;Web;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-04-22;FV2601130;EXPLOTACIONS BOSCH TORRENT S.L. GRANJA EL PROVENÇAL;recibida;145.20;sin clasificar;12.68;157.88;Web;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-04-22;FE-2485420;FRIDOLISA S.A.U.;recibida;149.40;sin clasificar;13.78;163.18;Telegram;pendiente de clasificación;Sin tipo de IVA en cabecera y sin líneas de detalle — revisar factura
+2026-04-24;2026204800136;LIDL SUPERMERCADOS S.A.U.;recibida;4.80;sin clasificar;0.34;5.14;Web;pendiente de clasificación;Sin tipo de IVA en cabecera y sin líneas de detalle — revisar factura
+2026-04-25;ES-0217-147643;VYTAL SP S.L.U.;recibida;222.00;21%;46.62;268.62;Web;clasificada (cabecera);
+2026-04-27;260024010014270;TRANSGOURMET;recibida;149.59;sin clasificar;14.32;163.91;Telegram;pendiente de clasificación;Sin tipo de IVA en cabecera y sin líneas de detalle — revisar factura
+2026-04-28;26A2875;MANEL MARQUEZ S.L.;recibida;82.89;sin clasificar;13.60;96.49;Web;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-04-29;FE-2490616;FRIOLISA S.A.U.;recibida;55.56;sin clasificar;5.56;61.12;Telegram;pendiente de clasificación;Sin tipo de IVA en cabecera y sin líneas de detalle — revisar factura
+2026-04-29;FE-2490013;FRIOLISA S.A.U.;recibida;226.68;sin clasificar;16.87;243.55;Telegram;pendiente de clasificación;Sin tipo de IVA en cabecera y sin líneas de detalle — revisar factura
+2026-04-29;INV/2026/00104;Brugarol La Granja S.L.;recibida;120.00;21%;25.20;145.20;Web;clasificada (cabecera);
+2026-04-29;FE-2490013;FRIOLISA S.A.U.;recibida;226.68;sin clasificar;16.87;243.55;Web;pendiente de clasificación;Sin tipo de IVA en cabecera y sin líneas de detalle — revisar factura
+2026-04-29;FE-2490616;FRIOLISA S.A.U.;recibida;55.56;0.1%;5.56;61.12;Web;clasificada (cabecera);
+2026-04-30;4191360;CULLIGAN WATER SPAIN SL.;recibida;98.70;21%;20.73;119.43;Web;clasificada (cabecera);
+2026-04-30;691735;Pere Cornellà S.A.U.;recibida;594.95;10%;59.50;654.45;Web;clasificada (cabecera);
+2026-04-30;26A 195;Carlos Marin Bermejo;recibida;205.35;4%;8.21;213.56;Web;clasificada (cabecera);
+2026-04-30;02 26000459;LLETERA CAMPLLONG, SCCL;recibida;17.76;4%;0.71;18.47;Web;clasificada (cabecera);
+2026-04-30;2026/2535;JABONES TER, SL;recibida;136.96;21%;28.76;165.72;Web;clasificada (cabecera);
+2026-04-30;2604A004482;DISTRIBUCIONS DARNES S.L.;recibida;290.10;sin clasificar;25.84;315.94;Web;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-04-30;972403637;NIEVES FAJA GIRONES;recibida;56.30;sin clasificar;2.25;58.55;Telegram;pendiente de clasificación;Sin tipo de IVA en cabecera y sin líneas de detalle — revisar factura
+2026-04-30;FV2601204;EXPLOTACIONS BOSCH TORRENT S.L.;recibida;17.60;sin clasificar;1.74;19.34;Web;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-05-01;FA / 665;Sistemas Segurmar Costa Brava, S.L.;recibida;25.00;21%;5.25;30.25;Web;clasificada (cabecera);
+2026-05-01;260005;RAQUEL SINTES SIMON;recibida;635.30;21%;133.41;648.00;Web;clasificada (líneas);Tipo de IVA inferido desde las líneas de factura (cabecera sin tipo)
+2026-05-02;011934;Dualsoft.S.L.;recibida;42.00;21%;8.82;50.82;Web;clasificada (cabecera);
+2026-05-03;06/26;CAMPA-ESCUDERO CB;recibida;350.00;21%;73.50;357.00;Telegram;clasificada (cabecera);
+2026-05-04;260024010015409;Transgourmet Iberica S.A.U.;recibida;-4.18;4%;-0.17;-4.35;Web;clasificada (cabecera);
+2026-05-04;260024010015409;TRANSGOURMET;recibida;25.59;sin clasificar;1.40;26.99;Telegram;pendiente de clasificación;Sin tipo de IVA en cabecera y sin líneas de detalle — revisar factura
+2026-05-04;260024010015398;TRANSGOURMET;recibida;74.22;sin clasificar;5.00;79.22;Telegram;pendiente de clasificación;Sin tipo de IVA en cabecera y sin líneas de detalle — revisar factura
+2026-05-05;26A3132;MANEL MARQUEZ S.L.;recibida;61.82;sin clasificar;9.06;70.88;Web;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-05-05;A10020553532-0526;Orange;recibida;59.59;21%;12.51;72.10;Web;clasificada (cabecera);
+2026-05-10;2605A000972;DISTRIBUCIONS DARNES S.L.;recibida;87.37;sin clasificar;16.55;103.92;Web;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-05-11;260024010016516;TRANSGOURMET;recibida;129.33;sin clasificar;9.41;138.74;Telegram;pendiente de clasificación;Sin tipo de IVA en cabecera y sin líneas de detalle — revisar factura
+2026-05-11;260024010016516;TRANSGOURMET;recibida;129.33;sin clasificar;9.41;138.74;Telegram;pendiente de clasificación;Sin tipo de IVA en cabecera y sin líneas de detalle — revisar factura
+2026-05-12;P51/772;PROFESSPACK 2017 S.L.;recibida;70.95;21%;14.90;85.85;Web;clasificada (cabecera);
+2026-05-12;26A3326;MANEL MARQUEZ S.L.;recibida;78.68;sin clasificar;10.75;89.43;Web;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-05-13;S 107414;ambiseint;recibida;27.80;21%;5.84;33.64;Telegram;clasificada (cabecera);
+2026-05-13;S 107414;Jordi Brugarola Pujol (ambiseint);recibida;27.80;21%;5.84;33.64;Telegram;clasificada (cabecera);
+2026-05-14;FE-2499121;FRIOLISA S.A.U.;recibida;96.60;sin clasificar;3.86;100.46;Telegram;pendiente de clasificación;Sin tipo de IVA en cabecera y sin líneas de detalle — revisar factura
+2026-05-14;FE-2499121;FRIOLISA S.A.U.;recibida;96.60;4%;3.86;100.46;Telegram;clasificada (cabecera);
+2026-05-15;823424/03;Lidl Supermercados S.A.U.;recibida;10.57;4%;0.42;10.99;Telegram;clasificada (cabecera);
+2026-05-15;2026/3007;JABONES TER, SL;recibida;63.32;21%;13.30;76.62;Web;clasificada (cabecera);
+2026-05-18;260024010017469;TRANSGOURMET;recibida;145.61;sin clasificar;11.39;157.00;Telegram;pendiente de clasificación;Sin tipo de IVA en cabecera y sin líneas de detalle — revisar factura
+2026-05-19;26A3508;MANEL MARQUEZ S.L.;recibida;30.75;10%;3.52;34.27;Web;clasificada (líneas);Tipo de IVA inferido desde las líneas de factura (cabecera sin tipo)
+2026-05-20;2605A002466;DISTRIBUCIONS DARNES S.L.;recibida;149.76;sin clasificar;12.66;162.42;Telegram;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-05-20;2605A002466;DISTRIBUCIONS DARNES S.L.;recibida;149.76;sin clasificar;12.66;162.42;Web;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-05-20;2605A002467;DISTRIBUCIONS DARNES S.L.;recibida;491.28;sin clasificar;52.96;544.24;Web;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-05-23;A-418;ASGES ASSESSORIA DE GESTIÓ;recibida;50.00;sin clasificar;10.50;53.00;Web;pendiente de clasificación;Sin tipo de IVA en cabecera y sin líneas de detalle — revisar factura
+2026-05-25;260024010018597;TRANSGOURMET;recibida;153.61;sin clasificar;11.76;165.37;Telegram;pendiente de clasificación;Sin tipo de IVA en cabecera y sin líneas de detalle — revisar factura
+2026-05-26;26A3734;MANEL MARQUEZ S.L.;recibida;88.09;sin clasificar;11.69;99.78;Telegram;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-05-28;A260113;IMSE GIRONA 2014 S.L;recibida;3120.00;21%;655.20;3775.20;Telegram;clasificada (cabecera);
+2026-05-29;459753/02;LIDL SUPERMERCADOS S.A.U.;recibida;8.05;4%;0.32;8.37;Telegram;clasificada (cabecera);
+2026-05-29;2605A004170;DISTRIBUCIONS DARNES S.L.;recibida;659.54;sin clasificar;110.87;770.41;Telegram;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-05-30;1TVTPV/ 2026052713;E.S. AZUR S.L.;recibida;4.00;10%;0.40;4.40;Telegram;clasificada (cabecera);
+2026-05-30;2026/3382;JABONES TER, SL;recibida;115.89;21%;24.34;140.23;Telegram;clasificada (cabecera);
+2026-05-30;FE-2509561;FRIOLISA S.A.U.;recibida;96.60;4%;3.86;100.46;Telegram;clasificada (cabecera);
+2026-05-31;FV2601646;EXPLOTACIONS BOSCH TORRENT S.L.;recibida;11.00;4%;0.44;11.44;Telegram;clasificada (cabecera);
+2026-05-31;02 26000566;LLETERA CAMPLLONG, SCCL;recibida;188.88;4%;7.56;196.44;Telegram;clasificada (cabecera);
+2026-05-31;02 26000520;LLETERA CAMPLLONG, SCCL;recibida;47.28;4%;1.89;49.17;Telegram;clasificada (cabecera);
+2026-05-31;4266465;CULLIGAN WATER SPAIN SL;recibida;98.70;sin clasificar;20.73;119.43;Telegram;pendiente de clasificación;Sin tipo de IVA en cabecera y sin líneas de detalle — revisar factura
+2026-05-31;692591;Pere Cornellà S.A.U.;recibida;1137.40;sin clasificar;114.52;1251.92;Telegram;pendiente de clasificación;Sin tipo de IVA en cabecera y sin líneas de detalle — revisar factura
+2026-05-31;26-0-4.003;GRUVIPA,S.L.;recibida;640.06;sin clasificar;54.56;694.62;Telegram;pendiente de clasificación;Sin tipo de IVA en cabecera y sin líneas de detalle — revisar factura
+2026-05-31;A-V2026-00002743529;MERCADONA S.A.;recibida;520.62;sin clasificar;35.05;555.67;Telegram;pendiente de clasificación;Sin tipo de IVA en cabecera y sin líneas de detalle — revisar factura
+2026-06-01;260006;RAQUEL SINTES SIMON;recibida;635.30;21%;133.41;648.00;Telegram;clasificada (cabecera);
+2026-06-01;012008;Dualsoft.S.L;recibida;42.00;21%;8.82;50.82;Telegram;clasificada (cabecera);
+2026-06-02;26A4026;MANEL MARQUEZ S.L.;recibida;99.35;sin clasificar;15.25;114.60;Telegram;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-06-03;07/26;CAMPA-ESCUDERO CB;recibida;350.00;21%;73.50;357.00;Telegram;clasificada (cabecera);
+2026-06-04;6020102-10426853;ACTION RETAIL SPAIN, S.L.U.;recibida;17.11;sin clasificar;2.25;19.36;Telegram;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-06-04;26/222060;UniEléctrica Energía, S.A.;recibida;235.87;21%;49.53;285.40;Telegram;clasificada (cabecera);
+2026-06-08;260024010020911;TRANSGOURMET IBÉRICA, S.A.U.;recibida;144.69;sin clasificar;10.86;155.55;Telegram;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-06-10;S 109021;ambiseint;recibida;27.80;21%;5.84;33.64;Telegram;clasificada (cabecera);
+2026-06-10;2606A001475;DISTRIBUCIONS DARNES S.L.;recibida;481.80;sin clasificar;43.48;525.28;Telegram;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-06-13;FE-2518640;FRIOLISA S.A.U.;recibida;194.48;sin clasificar;15.59;210.07;Telegram;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-06-13;FE-2518640;FRIOLISA S.A.U.;recibida;194.48;sin clasificar;15.59;210.07;Telegram;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-06-15;26002401002259;TRANSGOURMET;recibida;185.49;sin clasificar;14.63;200.12;Telegram;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-06-15;2026/3902;JABONES TER, SL;recibida;184.17;21%;38.68;222.85;Telegram;clasificada (cabecera);
+2026-06-15;26-0-4.864;GRUVIPA,SL;recibida;640.57;sin clasificar;52.85;693.42;Telegram;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-06-15;26-0-4.818;GRUVIPA,S.L.;recibida;71.57;sin clasificar;4.80;76.37;Telegram;pendiente de clasificación;Sin tipo de IVA en cabecera y sin líneas de detalle — revisar factura
+2026-06-16;26A4494;MANEL MARQUEZ S.L.;recibida;80.58;sin clasificar;8.50;89.08;Telegram;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-06-17;P51/1058;PROFESSPACK 2017 S.L.;recibida;20.50;21%;4.31;24.81;Telegram;clasificada (cabecera);
+2026-06-18;FE-2521317;FRIOLISA S.A.U.;recibida;194.48;sin clasificar;15.59;210.07;Telegram;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-06-18;P51/1061;PROFESSPACK 2017 S.L.;recibida;122.40;21%;25.70;148.10;Telegram;clasificada (cabecera);
+2026-06-22;260024010023682;TRANSGOURMET;recibida;6.28;21%;1.32;7.60;Telegram;clasificada (cabecera);
+2026-06-22;260024010023506;TRANSGOURMET;recibida;157.31;sin clasificar;11.54;168.85;Telegram;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-06-23;A290070870;LUSINI Ibérica S.L.;recibida;67.43;21%;14.16;81.59;Telegram;clasificada (cabecera);
+2026-06-23;26A4773;MANEL MARQUEZ S.L.;recibida;268.89;sin clasificar;50.58;319.47;Telegram;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-06-25;ES-0312-8;VYTAL SP S.L.U.;recibida;10.00;21%;2.10;12.10;Telegram;clasificada (cabecera);
+2026-06-26;837806/03;LIDL SUPERMERCADOS S.A.U.;recibida;9.10;10%;0.91;10.01;Telegram;clasificada (líneas);Tipo de IVA inferido desde las líneas de factura (cabecera sin tipo)
+2026-06-29;S 110166;ambiseint;recibida;27.80;21%;5.84;33.64;Telegram;clasificada (cabecera);
+2026-06-29;260024010024748;TRANSGOURMET;recibida;152.25;sin clasificar;12.39;164.64;Telegram;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-06-30;26A 109;Milfruits Palamos SL;recibida;226.95;4%;9.08;236.03;Telegram;clasificada (líneas);Tipo de IVA inferido desde las líneas de factura (cabecera sin tipo)
+2026-06-30;693784;Pere Cornellà S.A.U.;recibida;1000.12;sin clasificar;99.01;1100.13;Telegram;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-06-30;B / 2604319;EXTINTORS GIROFOC, SLU;recibida;10.40;21%;2.18;12.58;Telegram;clasificada (cabecera);
+2026-06-30;FV2601999;EXPLOTACIONS BOSCH TORRENT S.L.;recibida;135.10;sin clasificar;13.18;148.28;Telegram;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-06-30;4346553;BARBARA VALVERDE CASORRAN;emitida;98.70;21%;20.73;119.43;Telegram;clasificada (cabecera);
+2026-06-30;693784;Pere Cornellà S.A.U.;recibida;1000.12;10%;100.01;1100.13;Telegram;clasificada (cabecera);
+2026-06-30;02 26000702;LLETERA CAMPLLONG, SCCL;recibida;183.36;4%;7.33;190.69;Telegram;clasificada (cabecera);
+2026-06-30;26-0-5.151;GRUVIPA,S.L.;recibida;770.77;sin clasificar;64.95;835.72;Telegram;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-06-30;2606A005000;DISTRIBUCIONS DARNES S.L.;recibida;675.41;sin clasificar;68.70;744.11;Telegram;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-06-30;2026/4307;JABONES TER, SL;recibida;59.41;21%;12.48;71.89;Telegram;clasificada (cabecera);
+2026-06-30;A-V2026-00003335857;MERCADONA S.A.;recibida;1101.71;sin clasificar;74.41;1176.12;Telegram;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+2026-06-30;972403804;NIEVES FAJA GIRONES;recibida;105.54;sin clasificar;6.17;111.71;Telegram;pendiente de clasificación;Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura
+TOTAL;;;;26221.91;;3427.53;29094.20;;64 pendiente(s) de clasificación;
