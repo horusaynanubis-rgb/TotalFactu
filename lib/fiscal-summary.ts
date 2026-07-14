@@ -13,9 +13,11 @@ export interface MonthlyTotals {
   compras: number;
 }
 
-// rate === null bucket = "sin clasificar" (no header tax_rate and either no
-// lines or lines with more than one distinct rate) — never redistributed
-// across 4/10/21, per instrucción explícita de no inventar el desglose.
+// rate === null bucket = "sin clasificar" — only invoices where no source
+// (line rate, header rate, or a base+cuota calculation) identifies a rate,
+// or where lines disagree and the split can't be reconciled against header
+// totals. Invoices with multiple line-level rates are otherwise split across
+// the corresponding 4/10/21 rows — see lib/iva-classification.ts.
 export interface RateBreakdown {
   rate: number | null;
   ventasBase: number;
@@ -76,7 +78,7 @@ export async function buildFiscalSummary(
         tax_amount: true,
         total_amount: true,
         tax_rate: true,
-        invoice_lines: { select: { tax_rate: true } },
+        invoice_lines: { select: { tax_rate: true, total_amount: true } },
       },
     }),
     prisma.dailyCashRegister.findMany({
@@ -108,24 +110,48 @@ export async function buildFiscalSummary(
     }
     monthlyMap.set(monthKey, m);
 
-    const classification = classifyInvoiceRate(inv.tax_rate, inv.invoice_lines.map((l) => l.tax_rate));
-    const rate = classification.rate === null ? null : Math.round(classification.rate);
-    if (rate === null) {
-      if (isVenta) sinClasificarVentasCount++; else sinClasificarComprasCount++;
-    }
-    const r = rateMap.get(rate) ?? { ventasBase: 0, ventasIva: 0, ventasCount: 0, comprasBase: 0, comprasIva: 0, comprasCount: 0 };
-    if (isVenta) {
-      r.ventasBase += inv.subtotal;
-      r.ventasIva += inv.tax_amount;
-      r.ventasCount += 1;
-      ivaRepercutido += inv.tax_amount;
+    const classification = classifyInvoiceRate(inv.tax_rate, inv.invoice_lines, inv.subtotal, inv.tax_amount);
+
+    if (classification.source === 'lines-split' && classification.breakdown) {
+      // Mixed-rate invoice, reconciled against header totals — contribute
+      // base/cuota to each rate row it actually touches instead of one
+      // "sin clasificar" bucket.
+      for (const entry of classification.breakdown) {
+        const rate = Math.round(entry.rate);
+        const r = rateMap.get(rate) ?? { ventasBase: 0, ventasIva: 0, ventasCount: 0, comprasBase: 0, comprasIva: 0, comprasCount: 0 };
+        if (isVenta) {
+          r.ventasBase += entry.base;
+          r.ventasIva += entry.iva;
+          r.ventasCount += 1;
+        } else {
+          r.comprasBase += entry.base;
+          r.comprasIva += entry.iva;
+          r.comprasCount += 1;
+        }
+        rateMap.set(rate, r);
+      }
     } else {
-      r.comprasBase += inv.subtotal;
-      r.comprasIva += inv.tax_amount;
-      r.comprasCount += 1;
-      ivaSoportado += inv.tax_amount;
+      const rate = classification.rate === null ? null : Math.round(classification.rate);
+      if (rate === null) {
+        if (isVenta) sinClasificarVentasCount++; else sinClasificarComprasCount++;
+      }
+      const r = rateMap.get(rate) ?? { ventasBase: 0, ventasIva: 0, ventasCount: 0, comprasBase: 0, comprasIva: 0, comprasCount: 0 };
+      if (isVenta) {
+        r.ventasBase += inv.subtotal;
+        r.ventasIva += inv.tax_amount;
+        r.ventasCount += 1;
+      } else {
+        r.comprasBase += inv.subtotal;
+        r.comprasIva += inv.tax_amount;
+        r.comprasCount += 1;
+      }
+      rateMap.set(rate, r);
     }
-    rateMap.set(rate, r);
+
+    // IVA repercutido/soportado and base imponible totals always come from
+    // the (trusted) header amounts, once per invoice — independent of how
+    // many rate rows the breakdown above touched.
+    if (isVenta) ivaRepercutido += inv.tax_amount; else ivaSoportado += inv.tax_amount;
     totalBaseImponible += inv.subtotal;
   }
 

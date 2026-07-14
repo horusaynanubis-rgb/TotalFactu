@@ -18,7 +18,7 @@ export interface IvaDetalleRow {
   cuotaIva: number;
   total: number;
   origen: string;
-  estadoClasificacion: 'clasificada (cabecera)' | 'clasificada (líneas)' | 'pendiente de clasificación';
+  estadoClasificacion: 'clasificada (cabecera)' | 'clasificada (líneas)' | 'clasificada (calculada)' | 'pendiente de clasificación';
   observaciones: string;
 }
 
@@ -41,34 +41,63 @@ export async function buildIvaDetalle(companyId: string, from: Date, to: Date): 
       tax_amount: true,
       total_amount: true,
       tax_rate: true,
-      invoice_lines: { select: { tax_rate: true } },
+      invoice_lines: { select: { tax_rate: true, total_amount: true } },
       document: { select: { source_channel: true } },
     },
     orderBy: { issue_date: 'asc' },
   });
 
-  return invoices.map((inv) => {
+  const rows: IvaDetalleRow[] = [];
+  for (const inv of invoices) {
     const isVenta = inv.invoice_type === 'issued';
-    const classification = classifyInvoiceRate(inv.tax_rate, inv.invoice_lines.map((l) => l.tax_rate));
+    const classification = classifyInvoiceRate(inv.tax_rate, inv.invoice_lines, inv.subtotal, inv.tax_amount);
+    const fecha = inv.issue_date.toISOString().slice(0, 10);
+    const contraparte = isVenta ? inv.customer_name : inv.supplier_name;
+    const tipo = isVenta ? 'emitida' as const : 'recibida' as const;
+    const origen = SOURCE_CHANNEL_LABELS[inv.document?.source_channel ?? ''] ?? (inv.document?.source_channel ?? 'Desconocido');
+
+    if (classification.source === 'lines-split' && classification.breakdown) {
+      // One row per rate the invoice actually touches, so the detail listing
+      // stays consistent with the split applied in the aggregate summary.
+      for (const entry of classification.breakdown) {
+        rows.push({
+          fecha,
+          numeroFactura: inv.invoice_number,
+          contraparte,
+          tipo,
+          baseImponible: entry.base,
+          tipoIva: entry.rate,
+          cuotaIva: entry.iva,
+          total: entry.base + entry.iva,
+          origen,
+          estadoClasificacion: 'clasificada (líneas)',
+          observaciones: ivaClassificationObservation(classification),
+        });
+      }
+      continue;
+    }
+
     const estadoClasificacion =
       classification.source === 'header' ? 'clasificada (cabecera)' as const :
       classification.source === 'lines' ? 'clasificada (líneas)' as const :
+      classification.source === 'calc' ? 'clasificada (calculada)' as const :
       'pendiente de clasificación' as const;
 
-    return {
-      fecha: inv.issue_date.toISOString().slice(0, 10),
+    rows.push({
+      fecha,
       numeroFactura: inv.invoice_number,
-      contraparte: isVenta ? inv.customer_name : inv.supplier_name,
-      tipo: isVenta ? 'emitida' as const : 'recibida' as const,
+      contraparte,
+      tipo,
       baseImponible: inv.subtotal,
       tipoIva: classification.rate,
       cuotaIva: inv.tax_amount,
       total: inv.total_amount,
-      origen: SOURCE_CHANNEL_LABELS[inv.document?.source_channel ?? ''] ?? (inv.document?.source_channel ?? 'Desconocido'),
+      origen,
       estadoClasificacion,
-      observaciones: ivaClassificationObservation(classification, inv.invoice_lines.length > 0),
-    };
-  });
+      observaciones: ivaClassificationObservation(classification),
+    });
+  }
+  return rows;
 }
 
 function escapeCSV(value: string): string {

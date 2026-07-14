@@ -4,38 +4,143 @@
 // invoice falls into.
 //
 // Why this exists: Invoice.tax_rate (header) is frequently null on
-// OCR-extracted invoices, and InvoiceLine.total_amount is not reliably
-// gross-vs-net across documents (depends on what the source invoice printed),
-// so we never derive a base/cuota split from line amounts. The only line-level
-// signal trusted here is the tax_rate itself — if every line agrees on one
-// rate, that rate is used together with the (internally consistent) header
-// subtotal/tax_amount. Anything else is left unclassified rather than guessed.
-export type IvaClassificationSource = 'header' | 'lines' | 'unclassified';
+// OCR-extracted invoices. Classification order (most to least trusted):
+//   1. InvoiceLine.tax_rate, when every line agrees on one rate, OR when
+//      lines disagree and a per-rate split can be reconciled (see below).
+//   2. Invoice.tax_rate (header) — this already IS the OCR/Gemini result for
+//      the document: extraction is never persisted separately from the
+//      Invoice/InvoiceLine rows (lib/ai-extraction.ts writes nothing else),
+//      so there is no distinct "raw OCR" or "raw Gemini" source to fall back
+//      to beyond these two fields.
+//   3. Calculated from header subtotal + tax_amount, when the implied rate
+//      lands close to a standard Spanish VAT rate (0/4/10/21).
+//   4. Unclassified — only when none of the above identify a rate.
+//
+// Mixed-rate invoices (lines with >=2 distinct tax_rate values): rather than
+// dumping the whole invoice into "sin clasificar", split base/cuota per rate
+// from the line amounts. Line InvoiceLine.total_amount is NOT consistently
+// net-of-tax vs gross-of-tax across documents (depends on what the source
+// invoice printed / how Gemini read it), so we try both interpretations and
+// keep whichever one reconciles with the (trusted) header subtotal/tax_amount
+// within rounding tolerance. If neither reconciles, the split is not
+// trustworthy and the invoice falls through to "unclassified" rather than
+// guessing.
+export type IvaClassificationSource = 'header' | 'lines' | 'calc' | 'lines-split' | 'unclassified';
+
+export interface IvaLineInput {
+  tax_rate: number | null | undefined;
+  total_amount: number | null | undefined;
+}
+
+export interface IvaRateBreakdownEntry {
+  rate: number;
+  base: number;
+  iva: number;
+}
 
 export interface IvaClassification {
-  rate: number | null; // null = sin clasificar
+  rate: number | null; // null = sin clasificar, or split across multiple rates (see breakdown)
   source: IvaClassificationSource;
+  breakdown?: IvaRateBreakdownEntry[]; // present only when source === 'lines-split'
+  unclassifiedReason?: 'no-data' | 'multi-rate-unreconciled';
+}
+
+const STANDARD_RATES = [0, 4, 10, 21];
+const CALC_TOLERANCE_POINTS = 0.6; // percentage points, header calc vs nearest standard rate
+const SPLIT_RECONCILE_TOLERANCE_EUR = 0.15; // absolute EUR, allows cent-rounding across many lines
+
+function splitByInterpretation(lines: IvaLineInput[], lineIsNetBase: boolean): IvaRateBreakdownEntry[] {
+  const byRate = new Map<number, IvaRateBreakdownEntry>();
+  for (const l of lines) {
+    if (l.tax_rate === null || l.tax_rate === undefined || l.total_amount === null || l.total_amount === undefined) continue;
+    const rate = l.tax_rate;
+    const base = lineIsNetBase ? l.total_amount : l.total_amount / (1 + rate / 100);
+    const iva = base * (rate / 100);
+    const entry = byRate.get(rate) ?? { rate, base: 0, iva: 0 };
+    entry.base += base;
+    entry.iva += iva;
+    byRate.set(rate, entry);
+  }
+  return Array.from(byRate.values()).sort((a, b) => a.rate - b.rate);
+}
+
+function reconciles(breakdown: IvaRateBreakdownEntry[], headerSubtotal: number, headerTaxAmount: number): boolean {
+  const base = breakdown.reduce((s, e) => s + e.base, 0);
+  const iva = breakdown.reduce((s, e) => s + e.iva, 0);
+  return (
+    Math.abs(base - headerSubtotal) <= SPLIT_RECONCILE_TOLERANCE_EUR &&
+    Math.abs(iva - headerTaxAmount) <= SPLIT_RECONCILE_TOLERANCE_EUR
+  );
 }
 
 export function classifyInvoiceRate(
   headerTaxRate: number | null | undefined,
-  lineTaxRates: (number | null | undefined)[],
+  lines: IvaLineInput[],
+  headerSubtotal: number,
+  headerTaxAmount: number,
 ): IvaClassification {
+  const distinctLineRates = Array.from(
+    new Set(lines.map((l) => l.tax_rate).filter((r): r is number => r !== null && r !== undefined)),
+  );
+
+  // 1a. Lines disagree on rate -> try to split base/cuota per rate, trusting
+  // whichever line-amount interpretation reconciles with header totals.
+  if (distinctLineRates.length >= 2) {
+    const asNet = splitByInterpretation(lines, true);
+    if (reconciles(asNet, headerSubtotal, headerTaxAmount)) {
+      return { rate: null, source: 'lines-split', breakdown: asNet };
+    }
+    const asGross = splitByInterpretation(lines, false);
+    if (reconciles(asGross, headerSubtotal, headerTaxAmount)) {
+      return { rate: null, source: 'lines-split', breakdown: asGross };
+    }
+    return { rate: null, source: 'unclassified', unclassifiedReason: 'multi-rate-unreconciled' };
+  }
+
+  // 1b. Every line (that has a rate) agrees on one rate.
+  if (distinctLineRates.length === 1) {
+    return { rate: distinctLineRates[0], source: 'lines' };
+  }
+
+  // 2. Header tax_rate.
   if (headerTaxRate !== null && headerTaxRate !== undefined) {
     return { rate: headerTaxRate, source: 'header' };
   }
-  const distinct = Array.from(
-    new Set(lineTaxRates.filter((r): r is number => r !== null && r !== undefined)),
-  );
-  if (distinct.length === 1) {
-    return { rate: distinct[0], source: 'lines' };
+
+  // 3. Calculate from base + cuota when both are known and land close to a
+  // standard rate.
+  if (headerSubtotal !== 0) {
+    const impliedPct = (headerTaxAmount / headerSubtotal) * 100;
+    let nearestRate = STANDARD_RATES[0];
+    let nearestDiff = Math.abs(impliedPct - nearestRate);
+    for (const r of STANDARD_RATES.slice(1)) {
+      const diff = Math.abs(impliedPct - r);
+      if (diff < nearestDiff) {
+        nearestRate = r;
+        nearestDiff = diff;
+      }
+    }
+    if (nearestDiff <= CALC_TOLERANCE_POINTS) {
+      return { rate: nearestRate, source: 'calc' };
+    }
   }
-  return { rate: null, source: 'unclassified' };
+
+  return { rate: null, source: 'unclassified', unclassifiedReason: 'no-data' };
 }
 
-export function ivaClassificationObservation(c: IvaClassification, hasLines: boolean): string {
-  if (c.source === 'header') return '';
-  if (c.source === 'lines') return 'Tipo de IVA inferido desde las líneas de factura (cabecera sin tipo)';
-  if (!hasLines) return 'Sin tipo de IVA en cabecera y sin líneas de detalle — revisar factura';
-  return 'Líneas con varios tipos de IVA distintos — no se reparte automáticamente, revisar factura';
+export function ivaClassificationObservation(c: IvaClassification): string {
+  switch (c.source) {
+    case 'header':
+      return '';
+    case 'lines':
+      return 'Tipo de IVA inferido desde las líneas de factura (cabecera sin tipo)';
+    case 'calc':
+      return 'Tipo de IVA calculado a partir de base imponible y cuota (cabecera y líneas sin tipo) — revisar si es posible';
+    case 'lines-split':
+      return 'Factura con varias líneas a distintos tipos de IVA — repartida automáticamente por tipo (ver detalle por línea)';
+    case 'unclassified':
+      return c.unclassifiedReason === 'multi-rate-unreconciled'
+        ? 'Líneas con varios tipos de IVA pero los importes no cuadran con la cabecera — revisar factura manualmente'
+        : 'Sin tipo de IVA en cabecera y sin líneas de detalle — revisar factura';
+  }
 }
