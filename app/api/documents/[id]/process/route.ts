@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getFileUrl } from '@/lib/storage';
+import { fetchDocumentAsBase64 } from '@/lib/document-file';
 import { extractInvoiceData, extractCashRegisterData, detectRoleAmbiguity, clarifyRolesWithGemini, InvoiceExtraction, CompanyContext } from '@/lib/ai-extraction';
 import { classifyInvoiceType } from '@/lib/invoice-type-classifier';
 import { sendMessage, editMessage } from '@/lib/telegram';
 import { normalizeDescription } from '@/lib/supplier-analysis';
+import { classifyInvoiceRate, IvaLineInput } from '@/lib/iva-classification';
+import { computeFiscalStatus } from '@/lib/fiscal-status';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -73,42 +75,8 @@ export async function POST(
 
     // Download file from Supabase Storage and convert to base64 for Gemini inline_data
     processingPhase = 'storage_download';
-    const fileUrl = await getFileUrl(document.cloud_storage_path, document.is_public);
-    // DIAG: log stored MIME (comes from browser — may differ from actual file)
     console.log(`[process:diag] documentId=${documentId} source_channel=${document.source_channel} storagePath=${document.cloud_storage_path} stored_mimeType=${document.mime_type}`);
-    console.log(`[process] Signed URL obtained (length=${fileUrl.length}). Fetching file...`);
-
-    const fileResponse = await fetch(fileUrl);
-    if (!fileResponse.ok) {
-      throw new Error(`Error guardando archivo — storage fetch failed (${fileResponse.status} ${fileResponse.statusText})`);
-    }
-    const fileBuffer = await fileResponse.arrayBuffer();
-    const fileBase64 = Buffer.from(fileBuffer).toString('base64');
-    // DIAG: log file size and actual content-type from storage
-    const storageMime = fileResponse.headers.get('content-type') ?? 'unknown';
-    const fileSizeKb = Math.round(fileBuffer.byteLength / 1024);
-    console.log(`[process:diag] File downloaded. sizeKb=${fileSizeKb} storage_content_type=${storageMime} base64Length=${fileBase64.length}`);
-
-    // DIAG: detect real MIME from magic bytes (PDF=%PDF, PNG=\x89PNG, JPEG=\xFF\xD8)
-    const magic = Buffer.from(fileBuffer).slice(0, 5).toString('hex');
-    const detectedMime =
-      magic.startsWith('255044462d') ? 'application/pdf' :
-      magic.startsWith('89504e47') ? 'image/png' :
-      magic.startsWith('ffd8ff') ? 'image/jpeg' :
-      'unknown';
-    if (detectedMime !== 'unknown' && !document.mime_type.includes(detectedMime.split('/')[1]) && detectedMime !== document.mime_type) {
-      console.warn(`[process:diag] ⚠️ MIME MISMATCH stored=${document.mime_type} detected_from_magic=${detectedMime}`);
-    } else {
-      console.log(`[process:diag] MIME check: stored=${document.mime_type} detected_from_magic=${detectedMime}`);
-    }
-
-    // Use detected MIME if stored one is generic, to improve Gemini accuracy
-    const effectiveMime = document.mime_type === 'application/octet-stream' && detectedMime !== 'unknown'
-      ? detectedMime
-      : document.mime_type;
-    if (effectiveMime !== document.mime_type) {
-      console.log(`[process:diag] Using corrected MIME: ${effectiveMime} (was: ${document.mime_type})`);
-    }
+    const { fileBase64, effectiveMime } = await fetchDocumentAsBase64(document, 'process:diag');
 
     // Build AI provider config
     const companyProvider = document.company?.ai_provider;
@@ -404,6 +372,29 @@ export async function POST(
       } catch (supplierErr: any) {
         console.error('[process] Supplier/line_items error (non-fatal):', supplierErr?.message);
       }
+    }
+
+    // Fiscal VAT-classification status — independent of processing_status/
+    // review_status above. Local-only (no AI call): reuses the same logic
+    // lib/fiscal-summary.ts already runs at report time, just persisted now
+    // so it's known at ingestion time instead of discovered at quarter-end.
+    try {
+      const linesForClassification: IvaLineInput[] = finalType === 'received'
+        ? extraction.line_items.map((item) => ({ tax_rate: item.tax_rate, total_amount: item.total_amount }))
+        : [];
+      const classificationResult = classifyInvoiceRate(
+        invoice.tax_rate,
+        linesForClassification,
+        invoice.subtotal,
+        invoice.tax_amount,
+      );
+      const { fiscal_status, fiscal_status_reason } = computeFiscalStatus(classificationResult);
+      await prisma.invoice.update({
+        where: { id: invoice.id },
+        data: { fiscal_status, fiscal_status_reason },
+      });
+    } catch (fiscalStatusErr: any) {
+      console.error('[process] fiscal_status classification error (non-fatal):', fiscalStatusErr?.message);
     }
 
     console.log(`[process] ✅ Invoice created. id=${invoice.id} type=${finalType} corrected=${classification.was_corrected} status=${processingStatus} confidence=${extraction.extraction_confidence}`);

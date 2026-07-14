@@ -44,6 +44,7 @@ import {
   History,
   PenLine,
   Filter,
+  RefreshCw,
 } from 'lucide-react';
 import { getUnifiedStatus } from '@/lib/unified-status';
 import { StatusBadge } from '@/components/status-badge';
@@ -88,6 +89,7 @@ interface ClientDetail {
   totalExports: number;
   recentDocuments: DocRow[];
   recentExports: ExportRow[];
+  fiscalClassification: { classified: number; pendingClassification: number; mixedVat: number; manualReview: number };
 }
 
 interface DocRow {
@@ -425,8 +427,7 @@ export default function ClientDetailPage() {
   }, [status, companyType, router]);
 
   // Load summary on mount
-  useEffect(() => {
-    if (companyType !== 'gestoria' || !params.clientCompanyId) return;
+  const loadDetail = () => {
     fetch(`/api/gestoria/clients/${params.clientCompanyId}`)
       .then(async (r) => {
         if (!r.ok) {
@@ -438,7 +439,34 @@ export default function ClientDetailPage() {
       .then((data) => setDetail(data))
       .catch(() => toast.error('Error cargando cliente'))
       .finally(() => setLoadingDetail(false));
+  };
+  useEffect(() => {
+    if (companyType !== 'gestoria' || !params.clientCompanyId) return;
+    loadDetail();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyType, params.clientCompanyId, router]);
+
+  const [reclassifying, setReclassifying] = useState(false);
+  const handleReprocessPending = async () => {
+    setReclassifying(true);
+    try {
+      const res = await fetch(`/api/gestoria/clients/${params.clientCompanyId}/vat-reclassify`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data?.error ?? 'Error al reclasificar');
+        return;
+      }
+      toast.success(
+        `${data.resolved} reclasificada(s), ${data.manualReview} a revisión manual` +
+        (data.remaining > 0 ? ` — quedan ${data.remaining} pendientes, pulsa de nuevo` : ''),
+      );
+      loadDetail();
+    } catch {
+      toast.error('Error inesperado al reclasificar');
+    } finally {
+      setReclassifying(false);
+    }
+  };
 
   const padDoc = (n: number) => String(n).padStart(2, '0');
   const localStrDoc = (d: Date) =>
@@ -969,7 +997,7 @@ export default function ClientDetailPage() {
 
   if (!detail) return null;
 
-  const { company, license, telegramLinked, invoicesThisMonth, pendingReviews, totalExports, recentExports } = detail;
+  const { company, license, telegramLinked, invoicesThisMonth, pendingReviews, totalExports, recentExports, fiscalClassification } = detail;
 
   const hasActiveInvoiceFilters =
     invoiceSearch !== '' ||
@@ -1113,7 +1141,7 @@ export default function ClientDetailPage() {
           </div>
 
           {/* KPI cards row 2 */}
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-3">
             <Card>
               <CardContent className="pt-5 pb-4">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
@@ -1131,6 +1159,40 @@ export default function ClientDetailPage() {
                   {pendingReviews}
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">Total acumulado (histórico)</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-5 pb-4">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
+                  <Receipt className="h-4 w-4" />Clasificación fiscal (IVA)
+                </div>
+                {(() => {
+                  const pending = fiscalClassification.pendingClassification + fiscalClassification.mixedVat;
+                  return (
+                    <>
+                      <p className={`text-2xl font-bold ${pending > 0 ? 'text-yellow-600' : ''}`}>
+                        {pending}
+                        <span className="text-sm font-normal text-muted-foreground"> pendiente(s)</span>
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {fiscalClassification.classified} clasificadas
+                        {fiscalClassification.manualReview > 0 && (
+                          <> · <span className="text-red-600">{fiscalClassification.manualReview} revisión manual</span></>
+                        )}
+                      </p>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="w-full mt-3"
+                        disabled={pending === 0 || reclassifying}
+                        onClick={handleReprocessPending}
+                      >
+                        {reclassifying ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <RefreshCw className="h-3.5 w-3.5 mr-1.5" />}
+                        Reprocesar pendientes
+                      </Button>
+                    </>
+                  );
+                })()}
               </CardContent>
             </Card>
           </div>

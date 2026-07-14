@@ -25,7 +25,14 @@
 // within rounding tolerance. If neither reconciles, the split is not
 // trustworthy and the invoice falls through to "unclassified" rather than
 // guessing.
-export type IvaClassificationSource = 'header' | 'lines' | 'calc' | 'lines-split' | 'unclassified';
+//
+// aiBreakdown (5th param): result of the one-shot VAT-only Gemini micro pass
+// (lib/ai-extraction.ts extractVatBreakdown, persisted to
+// Invoice.ai_vat_breakdown by the gestoria "Reprocesar pendientes" action).
+// Only ever populated for invoices where every local signal above failed —
+// so it's checked FIRST: no local source could contradict it, and re-running
+// the same local logic on every read would be wasted work.
+export type IvaClassificationSource = 'ai-vat' | 'header' | 'lines' | 'calc' | 'lines-split' | 'unclassified';
 
 export interface IvaLineInput {
   tax_rate: number | null | undefined;
@@ -41,7 +48,7 @@ export interface IvaRateBreakdownEntry {
 export interface IvaClassification {
   rate: number | null; // null = sin clasificar, or split across multiple rates (see breakdown)
   source: IvaClassificationSource;
-  breakdown?: IvaRateBreakdownEntry[]; // present only when source === 'lines-split'
+  breakdown?: IvaRateBreakdownEntry[]; // present whenever the invoice spans multiple rates (source 'lines-split' or 'ai-vat')
   unclassifiedReason?: 'no-data' | 'multi-rate-unreconciled';
 }
 
@@ -78,7 +85,16 @@ export function classifyInvoiceRate(
   lines: IvaLineInput[],
   headerSubtotal: number,
   headerTaxAmount: number,
+  aiBreakdown?: IvaRateBreakdownEntry[] | null,
 ): IvaClassification {
+  // 0. Already resolved by the VAT-only Gemini micro pass in a previous
+  // request — this is the final answer, nothing below can override it.
+  if (aiBreakdown && aiBreakdown.length > 0) {
+    return aiBreakdown.length === 1
+      ? { rate: aiBreakdown[0].rate, source: 'ai-vat' }
+      : { rate: null, source: 'ai-vat', breakdown: aiBreakdown };
+  }
+
   const distinctLineRates = Array.from(
     new Set(lines.map((l) => l.tax_rate).filter((r): r is number => r !== null && r !== undefined)),
   );
@@ -132,6 +148,10 @@ export function ivaClassificationObservation(c: IvaClassification): string {
   switch (c.source) {
     case 'header':
       return '';
+    case 'ai-vat':
+      return c.breakdown
+        ? 'Desglose de IVA obtenido mediante verificación adicional con IA (varios tipos)'
+        : 'Tipo de IVA obtenido mediante verificación adicional con IA';
     case 'lines':
       return 'Tipo de IVA inferido desde las líneas de factura (cabecera sin tipo)';
     case 'calc':

@@ -3,7 +3,7 @@
 // "Paquete trimestral" ZIP. No existing helper computes this breakdown —
 // lib/csv-generator.ts only emits a flat per-invoice CSV.
 import { prisma } from './prisma';
-import { classifyInvoiceRate } from './iva-classification';
+import { classifyInvoiceRate, IvaRateBreakdownEntry } from './iva-classification';
 
 const CSV_DELIMITER = ';';
 
@@ -49,6 +49,14 @@ export interface FiscalSummary {
   resultadoOrientativo: number; // ivaRepercutido - ivaSoportado
   sinClasificarVentasCount: number;
   sinClasificarComprasCount: number;
+  // Persisted Invoice.fiscal_status counts for the period — independent of
+  // processing_status/review_status. See lib/fiscal-status.ts.
+  fiscalStatusCounts: {
+    classified: number;
+    pendingClassification: number;
+    mixedVat: number;
+    manualReview: number;
+  };
   caja: CajaTotals;
   control: {
     totalFacturasEmitidas: number;
@@ -78,6 +86,8 @@ export async function buildFiscalSummary(
         tax_amount: true,
         total_amount: true,
         tax_rate: true,
+        fiscal_status: true,
+        ai_vat_breakdown: true,
         invoice_lines: { select: { tax_rate: true, total_amount: true } },
       },
     }),
@@ -96,8 +106,14 @@ export async function buildFiscalSummary(
   let ivaSoportado = 0;
   let sinClasificarVentasCount = 0;
   let sinClasificarComprasCount = 0;
+  const fiscalStatusCounts = { classified: 0, pendingClassification: 0, mixedVat: 0, manualReview: 0 };
 
   for (const inv of invoices) {
+    if (inv.fiscal_status === 'classified') fiscalStatusCounts.classified++;
+    else if (inv.fiscal_status === 'mixed_vat') fiscalStatusCounts.mixedVat++;
+    else if (inv.fiscal_status === 'manual_review') fiscalStatusCounts.manualReview++;
+    else fiscalStatusCounts.pendingClassification++;
+
     const isVenta = inv.invoice_type === 'issued';
     const monthKey = `${inv.issue_date.getFullYear()}-${String(inv.issue_date.getMonth() + 1).padStart(2, '0')}`;
     const m = monthlyMap.get(monthKey) ?? { ventas: 0, compras: 0 };
@@ -110,12 +126,16 @@ export async function buildFiscalSummary(
     }
     monthlyMap.set(monthKey, m);
 
-    const classification = classifyInvoiceRate(inv.tax_rate, inv.invoice_lines, inv.subtotal, inv.tax_amount);
+    let aiBreakdown: IvaRateBreakdownEntry[] | null = null;
+    if (inv.ai_vat_breakdown) {
+      try { aiBreakdown = JSON.parse(inv.ai_vat_breakdown); } catch { aiBreakdown = null; }
+    }
+    const classification = classifyInvoiceRate(inv.tax_rate, inv.invoice_lines, inv.subtotal, inv.tax_amount, aiBreakdown);
 
-    if (classification.source === 'lines-split' && classification.breakdown) {
-      // Mixed-rate invoice, reconciled against header totals — contribute
-      // base/cuota to each rate row it actually touches instead of one
-      // "sin clasificar" bucket.
+    if (classification.breakdown) {
+      // Invoice spans multiple rates (mixed lines reconciled, or a multi-rate
+      // AI answer) — contribute base/cuota to each rate row it actually
+      // touches instead of one "sin clasificar" bucket.
       for (const entry of classification.breakdown) {
         const rate = Math.round(entry.rate);
         const r = rateMap.get(rate) ?? { ventasBase: 0, ventasIva: 0, ventasCount: 0, comprasBase: 0, comprasIva: 0, comprasCount: 0 };
@@ -187,6 +207,7 @@ export async function buildFiscalSummary(
     resultadoOrientativo: ivaRepercutido - ivaSoportado,
     sinClasificarVentasCount,
     sinClasificarComprasCount,
+    fiscalStatusCounts,
     caja,
     control: {
       totalFacturasEmitidas: totalVentas,
@@ -239,6 +260,19 @@ export function generateResumenCSV(summary: FiscalSummary, specialExpenses?: Spe
   lines.push(['Resultado orientativo (repercutido - soportado)', summary.resultadoOrientativo.toFixed(2)].join(CSV_DELIMITER));
   lines.push(['Facturas venta sin tipo de IVA clasificado', String(summary.sinClasificarVentasCount)].join(CSV_DELIMITER));
   lines.push(['Facturas compra sin tipo de IVA clasificado', String(summary.sinClasificarComprasCount)].join(CSV_DELIMITER));
+  lines.push('');
+
+  lines.push(escapeCSV('Clasificación fiscal (estado, no inventa reparto para lo pendiente)'));
+  lines.push(['Clasificadas', 'Pendiente clasificación fiscal', 'IVA mixto sin resolver', 'Revisión manual'].join(CSV_DELIMITER));
+  lines.push([
+    String(summary.fiscalStatusCounts.classified),
+    String(summary.fiscalStatusCounts.pendingClassification),
+    String(summary.fiscalStatusCounts.mixedVat),
+    String(summary.fiscalStatusCounts.manualReview),
+  ].join(CSV_DELIMITER));
+  if (summary.fiscalStatusCounts.manualReview > 0) {
+    lines.push(escapeCSV(`${summary.fiscalStatusCounts.manualReview} factura(s) requieren revisión manual de la gestoría — ver manual_review.csv.`));
+  }
   lines.push('');
 
   lines.push(escapeCSV('Caja y Cobros (TPV, efectivo, etc.) — total cobrado por método de pago en el periodo'));

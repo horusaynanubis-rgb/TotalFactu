@@ -249,6 +249,19 @@ model Invoice {
   gestoria_reviewed_by   String?
   gestoria_review_notes  String?
   gestoria_issue_types   String?   // JSON array: ["amount","vat","supplier",...]
+  // Fiscal VAT-classification status — independent of processing_status /
+  // review_status / gestoria_review_status. A document can be perfectly
+  // processed and still have no reliable VAT breakdown. Computed locally by
+  // lib/iva-classification.ts + lib/fiscal-status.ts at invoice-creation time
+  // (and by scripts/backfill-fiscal-status.ts for pre-existing rows); only
+  // escalates to the Gemini VAT-only micro pass (lib/ai-extraction.ts
+  // extractVatBreakdown, triggered from the gestoria "Reprocesar pendientes"
+  // action) when local classification can't resolve a rate.
+  fiscal_status                   String    @default("pending_classification") // classified | pending_classification | mixed_vat | manual_review
+  fiscal_status_reason            String?   // no-data | multi-rate-unreconciled | header | lines | calc | lines-split | ai-vat | ai-vat-split | ai-unresolved
+  ai_vat_breakdown                String?   // JSON [{rate,base,iva}] — result of the one-shot VAT-only Gemini pass; set once, never overwritten
+  vat_reclassification_attempted  Boolean   @default(false) // true once the VAT-only micro pass has been tried (resolved or not) — never retried automatically after this
+  vat_reclassified_at             DateTime?
   created_at             DateTime @default(now())
   updated_at             DateTime @updatedAt
 
@@ -267,6 +280,7 @@ model Invoice {
   @@index([review_status])
   @@index([supplier_id])
   @@index([invoice_number, supplier_name, issue_date]) // For duplicate detection
+  @@index([fiscal_status])
 }
 
 model DeliveryNote {

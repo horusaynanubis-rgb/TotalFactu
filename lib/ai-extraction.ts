@@ -428,6 +428,82 @@ Respond with raw JSON only (no markdown):
 }
 
 // ---------------------------------------------------------------------------
+// Second-pass: lightweight VAT-only breakdown call
+// ---------------------------------------------------------------------------
+
+export interface VatBreakdownEntry {
+  rate: number;
+  base: number;
+  iva: number;
+}
+
+/**
+ * Makes a lightweight second Gemini call asking ONLY for the VAT breakdown
+ * (base + cuota per rate) — no supplier, date, number, or line concepts.
+ * Only called for invoices whose local classification (lib/iva-classification.ts)
+ * couldn't resolve a rate. Single attempt, no retry loop — this is a one-shot
+ * escalation (see Invoice.vat_reclassification_attempted), not a pipeline
+ * that should hammer Gemini. Returns null on any error (caller treats that
+ * the same as "still unresolved").
+ */
+export async function extractVatBreakdown(
+  fileBase64: string,
+  mimeType: string,
+): Promise<{ breakdown: VatBreakdownEntry[] } | null> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+
+  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash-preview-04-17';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+  const prompt = `Mira esta factura. Extrae ÚNICAMENTE el desglose de IVA: para cada tipo de IVA presente (0%, 4%, 10% o 21%), indica la base imponible y la cuota de IVA correspondientes a ese tipo.
+
+NO extraigas proveedor, fecha, número de factura, conceptos ni productos — solo el desglose fiscal.
+
+Responde con JSON puro (sin markdown):
+{
+  "breakdown": [
+    {"rate": 21, "base": 100.00, "iva": 21.00}
+  ]
+}
+
+Si la factura tiene un único tipo de IVA, incluye solo una entrada. Si no puedes determinar el desglose de IVA con certeza, responde {"breakdown": []}.`;
+
+  try {
+    const body = {
+      contents: [{ parts: [{ inlineData: { mimeType, data: fileBase64 } }, { text: prompt }] }],
+      generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 512, temperature: 0 },
+    };
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      console.warn(`[gemini:vat-breakdown] HTTP ${response.status} — treating as unresolved`);
+      return null;
+    }
+
+    const data = await response.json();
+    const content = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!content) return null;
+
+    const parsed = JSON.parse(content);
+    const rawBreakdown = Array.isArray(parsed?.breakdown) ? parsed.breakdown : [];
+    const breakdown: VatBreakdownEntry[] = rawBreakdown
+      .filter((e: any) => typeof e?.rate === 'number' && typeof e?.base === 'number' && typeof e?.iva === 'number')
+      .map((e: any) => ({ rate: e.rate, base: e.base, iva: e.iva }));
+
+    return { breakdown };
+  } catch (err: any) {
+    console.error('[gemini:vat-breakdown] VAT-only second pass failed:', err?.message);
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Provider helpers (unchanged)
 // ---------------------------------------------------------------------------
 

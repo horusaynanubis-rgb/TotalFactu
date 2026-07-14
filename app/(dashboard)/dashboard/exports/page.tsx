@@ -141,6 +141,19 @@ export default function ExportsPage() {
       .catch(() => {});
   }, [fiscalQuarter.year, fiscalQuarter.quarter]);
 
+  // ── Aviso: clasificación fiscal (IVA) del periodo — solo lectura; el botón
+  // de reprocesar vive en el panel de gestoría, no aquí ────────────────────
+  const [fiscalClassification, setFiscalClassification] = useState<{
+    classified: number; pendingClassification: number; mixedVat: number; manualReview: number; total: number;
+  } | null>(null);
+  useEffect(() => {
+    const params = new URLSearchParams({ year: String(fiscalQuarter.year), quarter: String(fiscalQuarter.quarter) });
+    fetch(`/api/fiscal-summary/classification-status?${params.toString()}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (data) setFiscalClassification(data); })
+      .catch(() => {});
+  }, [fiscalQuarter.year, fiscalQuarter.quarter]);
+
   // ── Contabilidad: monthly / quarterly / custom invoice CSV (existing) ────
   const [contabilidadOpen, setContabilidadOpen] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -361,6 +374,25 @@ export default function ExportsPage() {
           <Link href="/dashboard/fiscal-documents">Ver documentación fiscal</Link>
         </Button>
       </div>
+
+      {/* Aviso: clasificación fiscal (IVA) del periodo — solo lectura */}
+      {fiscalClassification && fiscalClassification.total > 0 && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm">
+          <div className="flex items-center gap-2 text-slate-800">
+            <SlidersHorizontal className="h-4 w-4 shrink-0" />
+            <span>
+              Clasificación fiscal (Q{fiscalQuarter.quarter} {fiscalQuarter.year}):{' '}
+              <strong>{fiscalClassification.classified}</strong> clasificadas ·{' '}
+              <strong className={fiscalClassification.pendingClassification + fiscalClassification.mixedVat > 0 ? 'text-amber-600' : ''}>
+                {fiscalClassification.pendingClassification + fiscalClassification.mixedVat}
+              </strong> pendientes ·{' '}
+              <strong className={fiscalClassification.manualReview > 0 ? 'text-red-600' : ''}>
+                {fiscalClassification.manualReview}
+              </strong> revisión manual.
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* 4 category cards */}
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">

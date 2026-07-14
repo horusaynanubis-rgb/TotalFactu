@@ -4,7 +4,7 @@
 // with lib/fiscal-summary.ts (lib/iva-classification.ts) so the per-invoice
 // listing always agrees with the aggregate totals.
 import { prisma } from './prisma';
-import { classifyInvoiceRate, ivaClassificationObservation } from './iva-classification';
+import { classifyInvoiceRate, ivaClassificationObservation, IvaRateBreakdownEntry } from './iva-classification';
 
 const CSV_DELIMITER = ';';
 
@@ -18,7 +18,7 @@ export interface IvaDetalleRow {
   cuotaIva: number;
   total: number;
   origen: string;
-  estadoClasificacion: 'clasificada (cabecera)' | 'clasificada (líneas)' | 'clasificada (calculada)' | 'pendiente de clasificación';
+  estadoClasificacion: 'clasificada (cabecera)' | 'clasificada (líneas)' | 'clasificada (calculada)' | 'clasificada (IA)' | 'pendiente de clasificación';
   observaciones: string;
 }
 
@@ -41,6 +41,7 @@ export async function buildIvaDetalle(companyId: string, from: Date, to: Date): 
       tax_amount: true,
       total_amount: true,
       tax_rate: true,
+      ai_vat_breakdown: true,
       invoice_lines: { select: { tax_rate: true, total_amount: true } },
       document: { select: { source_channel: true } },
     },
@@ -50,15 +51,21 @@ export async function buildIvaDetalle(companyId: string, from: Date, to: Date): 
   const rows: IvaDetalleRow[] = [];
   for (const inv of invoices) {
     const isVenta = inv.invoice_type === 'issued';
-    const classification = classifyInvoiceRate(inv.tax_rate, inv.invoice_lines, inv.subtotal, inv.tax_amount);
+    let aiBreakdown: IvaRateBreakdownEntry[] | null = null;
+    if (inv.ai_vat_breakdown) {
+      try { aiBreakdown = JSON.parse(inv.ai_vat_breakdown); } catch { aiBreakdown = null; }
+    }
+    const classification = classifyInvoiceRate(inv.tax_rate, inv.invoice_lines, inv.subtotal, inv.tax_amount, aiBreakdown);
     const fecha = inv.issue_date.toISOString().slice(0, 10);
     const contraparte = isVenta ? inv.customer_name : inv.supplier_name;
     const tipo = isVenta ? 'emitida' as const : 'recibida' as const;
     const origen = SOURCE_CHANNEL_LABELS[inv.document?.source_channel ?? ''] ?? (inv.document?.source_channel ?? 'Desconocido');
 
-    if (classification.source === 'lines-split' && classification.breakdown) {
-      // One row per rate the invoice actually touches, so the detail listing
-      // stays consistent with the split applied in the aggregate summary.
+    if (classification.breakdown) {
+      // One row per rate the invoice actually touches (mixed lines reconciled,
+      // or a multi-rate AI answer), so the detail listing stays consistent
+      // with the split applied in the aggregate summary.
+      const estado = classification.source === 'ai-vat' ? 'clasificada (IA)' as const : 'clasificada (líneas)' as const;
       for (const entry of classification.breakdown) {
         rows.push({
           fecha,
@@ -70,7 +77,7 @@ export async function buildIvaDetalle(companyId: string, from: Date, to: Date): 
           cuotaIva: entry.iva,
           total: entry.base + entry.iva,
           origen,
-          estadoClasificacion: 'clasificada (líneas)',
+          estadoClasificacion: estado,
           observaciones: ivaClassificationObservation(classification),
         });
       }
@@ -81,6 +88,7 @@ export async function buildIvaDetalle(companyId: string, from: Date, to: Date): 
       classification.source === 'header' ? 'clasificada (cabecera)' as const :
       classification.source === 'lines' ? 'clasificada (líneas)' as const :
       classification.source === 'calc' ? 'clasificada (calculada)' as const :
+      classification.source === 'ai-vat' ? 'clasificada (IA)' as const :
       'pendiente de clasificación' as const;
 
     rows.push({

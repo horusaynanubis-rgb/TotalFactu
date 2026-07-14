@@ -54,6 +54,7 @@ export async function GET(
     licenseWithInvitation,
     recentDocuments,
     recentExports,
+    fiscalStatusGroups,
   ] = await Promise.all([
     prisma.company.findUnique({
       where: { id: cid },
@@ -115,10 +116,25 @@ export async function GET(
         company: { select: { export_email: true } },
       },
     }),
+    prisma.invoice.groupBy({
+      by: ['fiscal_status'],
+      where: { company_id: cid },
+      _count: true,
+    }),
   ]);
 
   if (!company) {
     return NextResponse.json({ error: 'Client not found' }, { status: 404 });
+  }
+
+  // All-time (not month-scoped like invoicesThisMonth) — the gestoría cares
+  // about clearing the whole backlog, not just this month's.
+  const fiscalClassification = { classified: 0, pendingClassification: 0, mixedVat: 0, manualReview: 0 };
+  for (const g of fiscalStatusGroups) {
+    if (g.fiscal_status === 'classified') fiscalClassification.classified = g._count;
+    else if (g.fiscal_status === 'pending_classification') fiscalClassification.pendingClassification = g._count;
+    else if (g.fiscal_status === 'mixed_vat') fiscalClassification.mixedVat = g._count;
+    else if (g.fiscal_status === 'manual_review') fiscalClassification.manualReview = g._count;
   }
 
   return NextResponse.json({
@@ -131,5 +147,6 @@ export async function GET(
     totalExports,
     recentDocuments,
     recentExports,
+    fiscalClassification,
   });
 }
