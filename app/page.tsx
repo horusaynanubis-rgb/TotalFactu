@@ -21,6 +21,7 @@ import {
   Rocket,
   Gift,
   Layers,
+  MapPin,
 } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n/context';
 import { LanguageSelector } from '@/components/language-selector';
@@ -425,6 +426,13 @@ export default function LandingPage() {
             <div className="text-sm">
               © 2026 TotalFactu. {t.landing.allRightsReserved}
             </div>
+          </div>
+          <div className="mt-6 pt-6 border-t border-gray-800 text-center text-xs text-gray-500">
+            <div className="flex items-center justify-center gap-1.5 mb-1">
+              <MapPin className="h-3 w-3 flex-shrink-0" />
+              <span className="font-semibold text-gray-400">HORUS NETWORK SOLUTIONS SLU</span>
+            </div>
+            <div>Pasaje Rey Don Jaime nº 8, 1-1 · 12001 Castellón de la Plana · España</div>
           </div>
         </div>
       </footer>
