@@ -34,10 +34,21 @@ const BETA_ACCOUNTS = [
     companyName: "TotalFactu Interno - Jordi",
     taxId: "BETA-JO-003",
   },
+  {
+    name: "Jordi",
+    email: "jordi.parthenia@totalfactu.com",
+    password: "oHVd3V*4L-Ls3T-@fv8c",
+    companyName: "Parthenia Proyectos SL",
+    taxId: "B26902916",
+    address: "Pasaje Rey Don Jaime nº 8, 1-1, 12001 Castellón de la Plana",
+    country: "ES",
+  },
 ];
 
 async function createBetaAccount(account: (typeof BETA_ACCOUNTS)[0]) {
   const { name, email, password, companyName, taxId } = account;
+  const address = "address" in account ? account.address : undefined;
+  const country = "country" in account ? account.country : "ES";
 
   // Check if user already exists
   const existingUser = await prisma.user.findUnique({ where: { email } });
@@ -89,7 +100,8 @@ async function createBetaAccount(account: (typeof BETA_ACCOUNTS)[0]) {
         export_email: email,
         company_type: "individual",
         is_beta: true,
-        country: "ES",
+        address,
+        country,
       },
     });
 
