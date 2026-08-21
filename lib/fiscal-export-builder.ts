@@ -175,7 +175,7 @@ export async function buildFiscalExportZipFiles(
 
       const invoices = await prisma.invoice.findMany({
         where: { company_id: companyId, issue_date: { gte: start, lte: end } },
-        include: { document: true },
+        include: { document: true, invoice_lines: true },
         orderBy: { issue_date: 'asc' },
       });
       files['facturas.csv'] = [new TextEncoder().encode(generateCSV(invoices as any)), { level: 0 }];

@@ -4,7 +4,8 @@
 // with lib/fiscal-summary.ts (lib/iva-classification.ts) so the per-invoice
 // listing always agrees with the aggregate totals.
 import { prisma } from './prisma';
-import { classifyInvoiceRate, ivaClassificationObservation, IvaRateBreakdownEntry } from './iva-classification';
+import { ivaClassificationObservation } from './iva-classification';
+import { getInvoiceFiscalBreakdown } from './fiscal-breakdown';
 
 const CSV_DELIMITER = ';';
 
@@ -42,6 +43,7 @@ export async function buildIvaDetalle(companyId: string, from: Date, to: Date): 
       total_amount: true,
       tax_rate: true,
       ai_vat_breakdown: true,
+      vat_reclassification_attempted: true,
       invoice_lines: { select: { tax_rate: true, total_amount: true } },
       document: { select: { source_channel: true } },
     },
@@ -51,11 +53,17 @@ export async function buildIvaDetalle(companyId: string, from: Date, to: Date): 
   const rows: IvaDetalleRow[] = [];
   for (const inv of invoices) {
     const isVenta = inv.invoice_type === 'issued';
-    let aiBreakdown: IvaRateBreakdownEntry[] | null = null;
-    if (inv.ai_vat_breakdown) {
-      try { aiBreakdown = JSON.parse(inv.ai_vat_breakdown); } catch { aiBreakdown = null; }
-    }
-    const classification = classifyInvoiceRate(inv.tax_rate, inv.invoice_lines, inv.subtotal, inv.tax_amount, aiBreakdown);
+    // Single fiscal source of truth for every exporter — see lib/fiscal-breakdown.ts.
+    const breakdown = getInvoiceFiscalBreakdown({
+      tax_rate: inv.tax_rate,
+      subtotal: inv.subtotal,
+      tax_amount: inv.tax_amount,
+      total_amount: inv.total_amount,
+      invoice_lines: inv.invoice_lines,
+      ai_vat_breakdown: inv.ai_vat_breakdown,
+      vat_reclassification_attempted: inv.vat_reclassification_attempted,
+    });
+    const classification = breakdown.raw;
     const fecha = inv.issue_date.toISOString().slice(0, 10);
     const contraparte = isVenta ? inv.customer_name : inv.supplier_name;
     const tipo = isVenta ? 'emitida' as const : 'recibida' as const;

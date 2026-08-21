@@ -56,6 +56,18 @@ const STANDARD_RATES = [0, 4, 10, 21];
 const CALC_TOLERANCE_POINTS = 0.6; // percentage points, header calc vs nearest standard rate
 const SPLIT_RECONCILE_TOLERANCE_EUR = 0.15; // absolute EUR, allows cent-rounding across many lines
 
+// Defensive normalization for a known OCR/extraction defect: a rate stored as
+// a fraction (0.1) instead of a percentage (10). Spanish VAT only has
+// 0/4/10/21 — any non-zero rate strictly between -1 and 1 is unambiguously a
+// fraction-vs-percentage mixup, never a real rate. Confirmed in production
+// (auditoría 2026-07-15): Invoice.tax_rate = 0.1 on a BYOU Q2 invoice that
+// should have been 10 — silently classified as ~0% before this fix.
+function normalizeRatePercent(rate: number | null | undefined): number | null | undefined {
+  if (rate === null || rate === undefined) return rate;
+  if (rate !== 0 && Math.abs(rate) < 1) return rate * 100;
+  return rate;
+}
+
 function splitByInterpretation(lines: IvaLineInput[], lineIsNetBase: boolean): IvaRateBreakdownEntry[] {
   const byRate = new Map<number, IvaRateBreakdownEntry>();
   for (const l of lines) {
@@ -94,6 +106,9 @@ export function classifyInvoiceRate(
       ? { rate: aiBreakdown[0].rate, source: 'ai-vat' }
       : { rate: null, source: 'ai-vat', breakdown: aiBreakdown };
   }
+
+  headerTaxRate = normalizeRatePercent(headerTaxRate);
+  lines = lines.map((l) => ({ ...l, tax_rate: normalizeRatePercent(l.tax_rate) }));
 
   const distinctLineRates = Array.from(
     new Set(lines.map((l) => l.tax_rate).filter((r): r is number => r !== null && r !== undefined)),

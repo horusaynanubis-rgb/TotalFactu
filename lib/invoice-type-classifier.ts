@@ -45,8 +45,11 @@ export function normalizeCompanyName(s: string | null | undefined): string {
 /**
  * Strips spaces, dashes and dots; uppercases.
  * "B-12 345.678" → "B12345678"
+ *
+ * Exported for lib/duplicate-detection.ts — same normalization is needed to
+ * compare a newly-extracted supplier_tax_id against existing invoices.
  */
-function normalizeTaxId(s: string | null | undefined): string {
+export function normalizeTaxId(s: string | null | undefined): string {
   if (!s) return '';
   return s.replace(/[\s.\-]/g, '').toUpperCase();
 }
@@ -55,8 +58,10 @@ function normalizeTaxId(s: string | null | undefined): string {
  * Returns true if normalized name `a` and `b` are considered the same company.
  * Requires exact equality OR one is a substring of the other (min 5 chars
  * to avoid coincidental short-string matches like "SA" inside "NESPRESSO").
+ *
+ * Exported for lib/duplicate-detection.ts.
  */
-function namesMatch(a: string, b: string): boolean {
+export function namesMatch(a: string, b: string): boolean {
   if (!a || !b) return false;
   if (a === b) return true;
   const shorter = a.length <= b.length ? a : b;

@@ -6,7 +6,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "test": "tsx scripts/test-csv-encoding.ts && tsx scripts/test-fiscal-breakdown.ts && tsx scripts/test-duplicate-detection.ts && tsx scripts/test-stuck-documents.ts && tsx scripts/test-resolve-duplicates-safety.ts"
   },
   "prisma": {
     "seed": "tsx --require dotenv/config scripts/safe-seed.ts"

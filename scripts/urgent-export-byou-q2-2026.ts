@@ -49,7 +49,7 @@ async function main() {
     buildTpvControlReport(company.id, PERIOD_START, PERIOD_END, PERIOD_LABEL),
     prisma.invoice.findMany({
       where: { company_id: company.id, issue_date: { gte: PERIOD_START, lte: PERIOD_END } },
-      include: { document: true },
+      include: { document: true, invoice_lines: true },
       orderBy: { issue_date: 'asc' },
     }),
   ]);

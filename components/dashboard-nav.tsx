@@ -26,6 +26,7 @@ import {
   Inbox,
   Wallet,
   FileStack,
+  Gauge,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useState, useEffect } from 'react';
@@ -44,6 +45,7 @@ export function DashboardNav() {
   const hasMultipleCompanies = ((session?.user as any)?.companyCount ?? 1) > 1;
   const adminEmails = (process.env.NEXT_PUBLIC_ADMIN_EMAILS ?? '').split(',').map((e) => e.trim()).filter(Boolean);
   const isAdmin = adminEmails.includes(session?.user?.email ?? '');
+  const isPlatformAdmin = Boolean((session?.user as any)?.isPlatformAdmin);
 
   const [dashboardMode, setDashboardMode] = useState<DashboardMode>('gestoria');
   const [unreadMessages, setUnreadMessages] = useState(0);
@@ -80,6 +82,7 @@ export function DashboardNav() {
         { name: 'Panel Gestoría', href: '/dashboard/gestoria', icon: Building2 },
         { name: 'Clientes', href: '/dashboard/gestoria/clients', icon: Users, matchPrefix: true },
         ...(isAdmin ? [{ name: 'Admin Demo', href: '/dashboard/admin/demo', icon: ShieldCheck, adminBadge: true }] : []),
+        ...(isPlatformAdmin ? [{ name: 'Admin Control', href: '/dashboard/admin', icon: Gauge, matchAdminControl: true, adminBadge: true }] : []),
         { name: t.nav.settings, href: '/dashboard/settings', icon: Settings },
         { name: t.nav.billing, href: '/dashboard/billing', icon: CreditCard },
       ]
@@ -96,6 +99,7 @@ export function DashboardNav() {
         { name: 'Documentación fiscal', href: '/dashboard/fiscal-documents', icon: FileStack },
         ...(hasMultipleCompanies ? [{ name: t.nav.companies, href: '/dashboard/companies', icon: Building }] : []),
         ...(isAdmin ? [{ name: 'Admin Demo', href: '/dashboard/admin/demo', icon: ShieldCheck, adminBadge: true }] : []),
+        ...(isPlatformAdmin ? [{ name: 'Admin Control', href: '/dashboard/admin', icon: Gauge, matchAdminControl: true, adminBadge: true }] : []),
         { name: t.nav.settings, href: '/dashboard/settings', icon: Settings },
         { name: t.nav.billing, href: '/dashboard/billing', icon: CreditCard },
       ];
@@ -145,7 +149,9 @@ export function DashboardNav() {
           <div className="flex-grow flex flex-col">
             <nav className="flex-1 px-2 py-4 space-y-1">
               {navigation.map((item: any) => {
-                const isActive = item?.matchPrefix
+                const isActive = (item as any)?.matchAdminControl
+                  ? pathname === item?.href || (pathname.startsWith(item?.href + '/') && !pathname.startsWith('/dashboard/admin/demo'))
+                  : item?.matchPrefix
                   ? pathname.startsWith(item?.href)
                   : pathname === item?.href;
                 return (
@@ -273,7 +279,9 @@ export function DashboardNav() {
             )}
             <nav className="px-2 py-4 space-y-1">
               {navigation.map((item: any) => {
-                const isActive = item?.matchPrefix
+                const isActive = (item as any)?.matchAdminControl
+                  ? pathname === item?.href || (pathname.startsWith(item?.href + '/') && !pathname.startsWith('/dashboard/admin/demo'))
+                  : item?.matchPrefix
                   ? pathname.startsWith(item?.href)
                   : pathname === item?.href;
                 return (

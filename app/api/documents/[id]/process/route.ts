@@ -7,6 +7,7 @@ import { sendMessage, editMessage } from '@/lib/telegram';
 import { normalizeDescription } from '@/lib/supplier-analysis';
 import { classifyInvoiceRate, IvaLineInput } from '@/lib/iva-classification';
 import { computeFiscalStatus } from '@/lib/fiscal-status';
+import { checkDuplicate, candidateLookupWindow, DuplicateInvoiceRef } from '@/lib/duplicate-detection';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -301,6 +302,103 @@ export async function POST(
       console.log(`[process] ℹ️  invoice_type unconfirmed (no company match) — forcing needs_review`);
     }
 
+    // Duplicate detection — BEFORE creating a new Invoice. Root cause fixed
+    // 2026-07-15: BYOU Q2 2026 had 9 confirmed duplicate invoices (1.341,21 €)
+    // from the same document re-entering via a second channel or a resend
+    // weeks later; nothing blocked it. See lib/duplicate-detection.ts.
+    processingPhase = 'duplicate_check';
+    let dupResult: ReturnType<typeof checkDuplicate> = { strongMatch: null, probableMatches: [] };
+    try {
+      const issueDateForCheck = extraction.issue_date ? new Date(extraction.issue_date) : null;
+      const existingCandidates = await prisma.invoice.findMany({
+        where: {
+          company_id: document.company_id,
+          invoice_type: finalType,
+          ...(candidateLookupWindow(issueDateForCheck) ? { issue_date: candidateLookupWindow(issueDateForCheck) } : {}),
+        },
+        select: {
+          id: true, document_id: true, invoice_number: true, supplier_name: true, supplier_tax_id: true,
+          issue_date: true, total_amount: true, created_at: true,
+          document: { select: { source_channel: true, original_filename: true } },
+        },
+      });
+
+      const existingRefs: DuplicateInvoiceRef[] = existingCandidates.map((c) => ({
+        invoiceId: c.id,
+        documentId: c.document_id,
+        invoiceNumber: c.invoice_number,
+        supplierName: c.supplier_name,
+        supplierTaxId: c.supplier_tax_id,
+        issueDate: c.issue_date,
+        totalAmount: c.total_amount,
+        sourceChannel: c.document?.source_channel ?? null,
+        originalFilename: c.document?.original_filename ?? null,
+        createdAt: c.created_at,
+      }));
+
+      dupResult = checkDuplicate(
+        {
+          invoiceNumber: extraction.invoice_number,
+          supplierName: extraction.supplier_name,
+          supplierTaxId: extraction.supplier_tax_id,
+          issueDate: issueDateForCheck,
+          totalAmount: extraction.total_amount,
+          sourceChannel: document.source_channel,
+          originalFilename: document.original_filename,
+        },
+        existingRefs,
+      );
+
+      if (dupResult.strongMatch) {
+        console.log(
+          `[DUPLICATE-DETECTION] documentId=${documentId} STRONG match matchedOn=${dupResult.strongMatch.matchedOn.join(',')} ` +
+          `existingInvoiceId=${dupResult.strongMatch.existing.invoiceId} newChannel=${document.source_channel} existingChannel=${dupResult.strongMatch.existing.sourceChannel ?? 'unknown'}`,
+        );
+      } else if (dupResult.probableMatches.length > 0) {
+        console.log(
+          `[DUPLICATE-DETECTION] documentId=${documentId} ${dupResult.probableMatches.length} probable match(es): ` +
+          dupResult.probableMatches.map((m) => `invoiceId=${m.existing.invoiceId} matchedOn=${m.matchedOn.join('+')}`).join('; '),
+        );
+      }
+    } catch (dupErr: any) {
+      console.error('[DUPLICATE-DETECTION] check failed (non-fatal, proceeding without a duplicate verdict):', dupErr?.message);
+    }
+
+    // Strong match: never create a second Invoice for the same document.
+    // Document is marked completed (it WAS processed successfully — it's
+    // just redundant), never deleted, never auto-merged into the existing
+    // Invoice (that requires a schema change — see auditoría entregable).
+    if (dupResult.strongMatch) {
+      const matchedInvoiceId = dupResult.strongMatch.existing.invoiceId;
+      const updatedDocument = await prisma.document.update({
+        where: { id: documentId },
+        data: { processing_status: 'completed', confidence_score: extraction.extraction_confidence },
+      });
+      await prisma.auditLog.create({
+        data: {
+          company_id: document.company_id,
+          user_id: null,
+          entity_type: 'document',
+          entity_id: documentId,
+          action: 'duplicate_detected_blocked',
+          new_values: JSON.stringify({
+            matched_invoice_id: matchedInvoiceId,
+            matched_on: dupResult.strongMatch.matchedOn,
+            source_channel: document.source_channel,
+            existing_source_channel: dupResult.strongMatch.existing.sourceChannel,
+          }),
+        },
+      }).catch((auditErr: any) => console.error('[DUPLICATE-DETECTION] AuditLog write failed (non-fatal):', auditErr?.message));
+
+      const existingInvoice = await prisma.invoice.findUnique({ where: { id: matchedInvoiceId } });
+      console.log(`[process] ⛔ Duplicate blocked — no Invoice created. documentId=${documentId} matchedInvoiceId=${matchedInvoiceId}`);
+      return NextResponse.json({
+        document: updatedDocument,
+        invoice: existingInvoice,
+        duplicate: { blocked: true, matchType: 'strong', matchedInvoiceId },
+      });
+    }
+
     const processingStatus = needsReview ? 'needs_review' : 'completed';
 
     const updatedDocument = await prisma.document.update({
@@ -318,6 +416,26 @@ export async function POST(
       review_status: needsReview ? 'pending' : 'approved',
     };
     const invoice = await prisma.invoice.create({ data: invoiceData });
+
+    // Non-blocking: the Invoice was created normally, but flag it for a
+    // human to glance at — see lib/duplicate-detection.ts.
+    if (dupResult.probableMatches.length > 0) {
+      await prisma.auditLog.create({
+        data: {
+          company_id: document.company_id,
+          user_id: null,
+          entity_type: 'invoice',
+          entity_id: invoice.id,
+          action: 'possible_duplicate_flagged',
+          new_values: JSON.stringify({
+            document_id: documentId,
+            candidate_invoice_ids: dupResult.probableMatches.map((m) => m.existing.invoiceId),
+            matched_on: Array.from(new Set(dupResult.probableMatches.flatMap((m) => m.matchedOn))),
+            source_channel: document.source_channel,
+          }),
+        },
+      }).catch((auditErr: any) => console.error('[DUPLICATE-DETECTION] AuditLog write failed (non-fatal):', auditErr?.message));
+    }
 
     // Audit log when AI type was automatically corrected
     if (classification.was_corrected) {

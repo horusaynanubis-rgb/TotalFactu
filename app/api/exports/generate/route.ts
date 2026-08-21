@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
         company_id: companyId,
         issue_date: { gte: start, lte: end },
       },
-      include: { document: true },
+      include: { document: true, invoice_lines: true },
       orderBy: { issue_date: 'desc' },
     });
 

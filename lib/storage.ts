@@ -163,6 +163,43 @@ export async function deleteFile(path: string): Promise<void> {
 }
 
 /**
+ * Read-only existence/size check — lists the containing "directory" and
+ * looks for the exact filename, rather than downloading the object.
+ * Never throws.
+ *
+ * exists is `null` (not `false`) whenever the check itself couldn't run —
+ * e.g. SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY not configured in this
+ * environment, or a network/API error. Confirmed necessary: an earlier
+ * version returned `false` in that case, which a diagnostics script then
+ * reported as "file confirmed missing" for every document it checked, in an
+ * environment that in fact had no Storage credentials at all — a false
+ * finding. Callers must treat exists === null as "unknown", not "absent".
+ */
+export async function getFileInfo(path: string): Promise<{ exists: boolean | null; sizeBytes?: number }> {
+  const lastSlash = path.lastIndexOf('/');
+  const dir = lastSlash >= 0 ? path.slice(0, lastSlash) : '';
+  const filename = lastSlash >= 0 ? path.slice(lastSlash + 1) : path;
+
+  let client: SupabaseClient;
+  try {
+    client = getClient();
+  } catch {
+    return { exists: null }; // e.g. SUPABASE_URL not set in this environment
+  }
+
+  try {
+    const { data, error } = await client.storage.from(bucket()).list(dir, { search: filename });
+    if (error || !data) return { exists: null };
+    const found = data.find((f) => f.name === filename);
+    if (!found) return { exists: false };
+    const sizeBytes = (found.metadata as { size?: number } | null)?.size;
+    return { exists: true, sizeBytes };
+  } catch {
+    return { exists: null };
+  }
+}
+
+/**
  * Health-check: upload a tiny probe file, read its signed URL, then delete it.
  * Returns a structured result object — never throws.
  */

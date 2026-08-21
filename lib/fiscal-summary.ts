@@ -3,9 +3,13 @@
 // "Paquete trimestral" ZIP. No existing helper computes this breakdown —
 // lib/csv-generator.ts only emits a flat per-invoice CSV.
 import { prisma } from './prisma';
-import { classifyInvoiceRate, IvaRateBreakdownEntry } from './iva-classification';
+import { getInvoiceFiscalBreakdown } from './fiscal-breakdown';
 
 const CSV_DELIMITER = ';';
+// Sentinel for "rate outside 0/4/10/21" (IGIC/IPSI, OCR artifact) — distinct
+// from `null` ("sin clasificar"). See lib/fiscal-breakdown.ts otherBase/otherVat.
+const OTHER_RATE = -1;
+const STANDARD_RATE_SORT_CEILING = 999; // sorts OTHER_RATE after 21%, before "sin clasificar"
 
 export interface MonthlyTotals {
   month: string; // YYYY-MM
@@ -17,7 +21,10 @@ export interface MonthlyTotals {
 // (line rate, header rate, or a base+cuota calculation) identifies a rate,
 // or where lines disagree and the split can't be reconciled against header
 // totals. Invoices with multiple line-level rates are otherwise split across
-// the corresponding 4/10/21 rows — see lib/iva-classification.ts.
+// the corresponding 0/4/10/21 rows — see lib/fiscal-breakdown.ts. rate ===
+// OTHER_RATE (-1, rendered "Otro tipo (no estándar)") is a rate outside
+// 0/4/10/21 (IGIC/IPSI, or an extraction artifact) — kept separate so it's
+// never silently folded into "sin clasificar" or a wrong standard bucket.
 export interface RateBreakdown {
   rate: number | null;
   ventasBase: number;
@@ -49,8 +56,10 @@ export interface FiscalSummary {
   resultadoOrientativo: number; // ivaRepercutido - ivaSoportado
   sinClasificarVentasCount: number;
   sinClasificarComprasCount: number;
-  // Persisted Invoice.fiscal_status counts for the period — independent of
-  // processing_status/review_status. See lib/fiscal-status.ts.
+  // Live-computed via lib/fiscal-breakdown.ts (getInvoiceFiscalBreakdown),
+  // not read from the persisted Invoice.fiscal_status column — this is the
+  // one place that decides the count, so it can never drift from what the
+  // rest of this summary shows. Independent of processing_status/review_status.
   fiscalStatusCounts: {
     classified: number;
     pendingClassification: number;
@@ -86,8 +95,8 @@ export async function buildFiscalSummary(
         tax_amount: true,
         total_amount: true,
         tax_rate: true,
-        fiscal_status: true,
         ai_vat_breakdown: true,
+        vat_reclassification_attempted: true,
         invoice_lines: { select: { tax_rate: true, total_amount: true } },
       },
     }),
@@ -109,9 +118,20 @@ export async function buildFiscalSummary(
   const fiscalStatusCounts = { classified: 0, pendingClassification: 0, mixedVat: 0, manualReview: 0 };
 
   for (const inv of invoices) {
-    if (inv.fiscal_status === 'classified') fiscalStatusCounts.classified++;
-    else if (inv.fiscal_status === 'mixed_vat') fiscalStatusCounts.mixedVat++;
-    else if (inv.fiscal_status === 'manual_review') fiscalStatusCounts.manualReview++;
+    // Single fiscal source of truth for every exporter — see lib/fiscal-breakdown.ts.
+    const breakdown = getInvoiceFiscalBreakdown({
+      tax_rate: inv.tax_rate,
+      subtotal: inv.subtotal,
+      tax_amount: inv.tax_amount,
+      total_amount: inv.total_amount,
+      invoice_lines: inv.invoice_lines,
+      ai_vat_breakdown: inv.ai_vat_breakdown,
+      vat_reclassification_attempted: inv.vat_reclassification_attempted,
+    });
+
+    if (breakdown.classificationStatus === 'classified') fiscalStatusCounts.classified++;
+    else if (breakdown.classificationStatus === 'mixed_vat') fiscalStatusCounts.mixedVat++;
+    else if (breakdown.classificationStatus === 'manual_review') fiscalStatusCounts.manualReview++;
     else fiscalStatusCounts.pendingClassification++;
 
     const isVenta = inv.invoice_type === 'issued';
@@ -126,46 +146,36 @@ export async function buildFiscalSummary(
     }
     monthlyMap.set(monthKey, m);
 
-    let aiBreakdown: IvaRateBreakdownEntry[] | null = null;
-    if (inv.ai_vat_breakdown) {
-      try { aiBreakdown = JSON.parse(inv.ai_vat_breakdown); } catch { aiBreakdown = null; }
-    }
-    const classification = classifyInvoiceRate(inv.tax_rate, inv.invoice_lines, inv.subtotal, inv.tax_amount, aiBreakdown);
+    // Expand the breakdown's fixed buckets into the rate rows this invoice
+    // actually touches — mirrors the old per-entry loop, but now every
+    // exporter (facturas.csv, detalle_iva.csv, this file) derives the same
+    // buckets from the same function instead of re-deriving them.
+    const rateEntries: { rate: number | null; base: number; iva: number }[] = [];
+    if (breakdown.base0 !== 0 || breakdown.vat0 !== 0) rateEntries.push({ rate: 0, base: breakdown.base0, iva: breakdown.vat0 });
+    if (breakdown.base4 !== 0 || breakdown.vat4 !== 0) rateEntries.push({ rate: 4, base: breakdown.base4, iva: breakdown.vat4 });
+    if (breakdown.base10 !== 0 || breakdown.vat10 !== 0) rateEntries.push({ rate: 10, base: breakdown.base10, iva: breakdown.vat10 });
+    if (breakdown.base21 !== 0 || breakdown.vat21 !== 0) rateEntries.push({ rate: 21, base: breakdown.base21, iva: breakdown.vat21 });
+    if (breakdown.otherBase !== 0 || breakdown.otherVat !== 0) rateEntries.push({ rate: OTHER_RATE, base: breakdown.otherBase, iva: breakdown.otherVat });
 
-    if (classification.breakdown) {
-      // Invoice spans multiple rates (mixed lines reconciled, or a multi-rate
-      // AI answer) — contribute base/cuota to each rate row it actually
-      // touches instead of one "sin clasificar" bucket.
-      for (const entry of classification.breakdown) {
-        const rate = Math.round(entry.rate);
-        const r = rateMap.get(rate) ?? { ventasBase: 0, ventasIva: 0, ventasCount: 0, comprasBase: 0, comprasIva: 0, comprasCount: 0 };
-        if (isVenta) {
-          r.ventasBase += entry.base;
-          r.ventasIva += entry.iva;
-          r.ventasCount += 1;
-        } else {
-          r.comprasBase += entry.base;
-          r.comprasIva += entry.iva;
-          r.comprasCount += 1;
-        }
-        rateMap.set(rate, r);
-      }
-    } else {
-      const rate = classification.rate === null ? null : Math.round(classification.rate);
-      if (rate === null) {
-        if (isVenta) sinClasificarVentasCount++; else sinClasificarComprasCount++;
-      }
-      const r = rateMap.get(rate) ?? { ventasBase: 0, ventasIva: 0, ventasCount: 0, comprasBase: 0, comprasIva: 0, comprasCount: 0 };
+    if (rateEntries.length === 0) {
+      // Genuinely unclassified — never invent a split; the invoice's real
+      // money still needs a home, so it goes in the "sin clasificar" row.
+      if (isVenta) sinClasificarVentasCount++; else sinClasificarComprasCount++;
+      rateEntries.push({ rate: null, base: inv.subtotal, iva: inv.tax_amount });
+    }
+
+    for (const entry of rateEntries) {
+      const r = rateMap.get(entry.rate) ?? { ventasBase: 0, ventasIva: 0, ventasCount: 0, comprasBase: 0, comprasIva: 0, comprasCount: 0 };
       if (isVenta) {
-        r.ventasBase += inv.subtotal;
-        r.ventasIva += inv.tax_amount;
+        r.ventasBase += entry.base;
+        r.ventasIva += entry.iva;
         r.ventasCount += 1;
       } else {
-        r.comprasBase += inv.subtotal;
-        r.comprasIva += inv.tax_amount;
+        r.comprasBase += entry.base;
+        r.comprasIva += entry.iva;
         r.comprasCount += 1;
       }
-      rateMap.set(rate, r);
+      rateMap.set(entry.rate, r);
     }
 
     // IVA repercutido/soportado and base imponible totals always come from
@@ -179,8 +189,11 @@ export async function buildFiscalSummary(
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([month, v]) => ({ month, ...v }));
 
+  // Sort order: 0/4/10/21 ascending, then "otro tipo" (OTHER_RATE), then
+  // "sin clasificar" (null) last.
+  const sortKey = (rate: number | null) => (rate === null ? Infinity : rate === OTHER_RATE ? STANDARD_RATE_SORT_CEILING : rate);
   const rates = Array.from(rateMap.entries())
-    .sort(([a], [b]) => (a === null ? 1 : b === null ? -1 : a - b))
+    .sort(([a], [b]) => sortKey(a) - sortKey(b))
     .map(([rate, v]) => ({ rate, ...v }));
 
   const caja: CajaTotals = cajaRegisters.reduce(
@@ -244,8 +257,9 @@ export function generateResumenCSV(summary: FiscalSummary, specialExpenses?: Spe
     'Tipo IVA (%)', 'Base ventas', 'IVA ventas', 'Nº facturas venta', 'Base compras', 'IVA compras', 'Nº facturas compra',
   ].join(CSV_DELIMITER));
   for (const r of summary.rates) {
+    const label = r.rate === null ? 'Sin clasificar' : r.rate === OTHER_RATE ? 'Otro tipo (no estándar)' : `${r.rate}%`;
     lines.push([
-      r.rate === null ? 'Sin clasificar' : `${r.rate}%`,
+      label,
       r.ventasBase.toFixed(2), r.ventasIva.toFixed(2), String(r.ventasCount),
       r.comprasBase.toFixed(2), r.comprasIva.toFixed(2), String(r.comprasCount),
     ].join(CSV_DELIMITER));

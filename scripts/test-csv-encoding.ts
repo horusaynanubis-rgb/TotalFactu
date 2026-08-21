@@ -28,6 +28,9 @@ const mockInvoices: Partial<InvoiceWithDocument>[] = [
     extraction_confidence: 0.95,
     review_status: 'approved',
     document: { source_channel: 'email' } as any,
+    invoice_lines: [],
+    ai_vat_breakdown: null,
+    vat_reclassification_attempted: false,
   },
   {
     invoice_type: 'issued',
@@ -49,6 +52,9 @@ const mockInvoices: Partial<InvoiceWithDocument>[] = [
     extraction_confidence: undefined,
     review_status: 'pending',
     document: { source_channel: 'telegram' } as any,
+    invoice_lines: [],
+    ai_vat_breakdown: null,
+    vat_reclassification_attempted: false,
   },
 ];
 
@@ -92,6 +98,15 @@ assert(csv.includes('\r\n'), 'Saltos de línea CRLF (\\r\\n)');
 
 // Values with semicolons are quoted
 assert(csv.includes('"Cafetería; José Núñez"'), 'Valores con ; se encierran en comillas');
+
+// Fiscal breakdown columns (auditoría 2026-07-15 fix) present and correct
+const headerLine = csv.split('\r\n')[0];
+assert(headerLine.includes('estado_fiscal'), 'Columna estado_fiscal presente');
+assert(headerLine.includes('fuente_clasificacion'), 'Columna fuente_clasificacion presente');
+assert(headerLine.includes('base_iva_21'), 'Columna base_iva_21 presente');
+assert(headerLine.includes('iva_mixto'), 'Columna iva_mixto presente');
+// Both mock invoices are single-rate 21% classified via header — must land in base_iva_21, not blank.
+assert(csv.includes(';classified;invoice_header;'), 'Factura de 21% se clasifica como classified/invoice_header (no falsy-0 en blanco)');
 
 console.log(`\n${passed + failed} comprobaciones: ${passed} pasadas, ${failed} fallidas`);
 

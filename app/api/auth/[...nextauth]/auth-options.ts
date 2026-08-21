@@ -87,6 +87,16 @@ export const authOptions: NextAuthOptions = {
         token.companyId = membership?.company.id ?? null;
         token.companyType = membership?.company.company_type ?? 'individual';
         token.companyCount = await prisma.membership.count({ where: { user_id: token.id as string } });
+
+        // platform_admin is a Membership.role value (see lib/admin/platform-admin.ts) —
+        // independent of the ADMIN_EMAILS allowlist used by the older admin/demo tools.
+        // Checked across ALL memberships, not just the active/preferred one, so switching
+        // "active company" never accidentally drops backoffice access.
+        const platformAdminMembership = await prisma.membership.findFirst({
+          where: { user_id: token.id as string, role: 'platform_admin' },
+          select: { id: true },
+        });
+        token.isPlatformAdmin = !!platformAdminMembership;
       }
       return token;
     },
@@ -96,6 +106,7 @@ export const authOptions: NextAuthOptions = {
         session.user.companyId = token.companyId;
         session.user.companyType = token.companyType;
         session.user.companyCount = token.companyCount ?? 1;
+        session.user.isPlatformAdmin = token.isPlatformAdmin ?? false;
       }
       return session;
     },

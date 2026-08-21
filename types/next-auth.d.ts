@@ -10,6 +10,7 @@ declare module 'next-auth' {
       companyId?: string | null;
       companyType?: string | null;
       companyCount?: number;
+      isPlatformAdmin?: boolean;
     };
   }
 
@@ -26,5 +27,6 @@ declare module 'next-auth/jwt' {
     companyId?: string | null;
     companyType?: string | null;
     companyCount?: number;
+    isPlatformAdmin?: boolean;
   }
 }
