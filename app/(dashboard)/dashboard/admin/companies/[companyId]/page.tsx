@@ -103,7 +103,7 @@ export default async function CompanyDetailPage({ params }: { params: { companyI
             <p className="font-medium">{company.country}</p>
           </div>
           <div>
-            <p className="text-gray-500">Tipo</p>
+            <p className="text-gray-500">Tipo de cuenta</p>
             <p className="font-medium capitalize">{company.companyType}</p>
           </div>
           <div>
