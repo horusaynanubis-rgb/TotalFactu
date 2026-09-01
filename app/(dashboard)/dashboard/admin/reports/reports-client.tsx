@@ -9,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { formatCurrency } from '@/lib/utils';
 import {
   BarChart,
   Bar,
@@ -29,6 +30,7 @@ interface OverviewCharts {
   charts: {
     newCompaniesByMonth: { month: string; count: number }[];
     documentsInvoicesByMonth: { month: string; documents: number; invoices: number }[];
+    revenueByMonth: { month: string; amountCents: number }[];
   };
 }
 
@@ -41,11 +43,15 @@ interface ReportResponse {
     documentsProcessed: number;
     invoicesProcessed: number;
     exportsPerformed: number;
+    startedPayingCount: number;
+    trialsEnded: number;
+    totalPaidCents: number;
+    paymentsFailed: number;
   };
-  snapshot: { activeCompanies: number; payingCustomers: number; betaCompanies: number } | null;
+  snapshot: { activeCompanies: number; payingCustomers: number; betaCompanies: number; mrrCents: number } | null;
 }
 
-function StatBlock({ label, value }: { label: string; value: number }) {
+function StatBlock({ label, value }: { label: string; value: number | string }) {
   return (
     <div>
       <p className="text-2xl font-bold">{value}</p>
@@ -121,16 +127,24 @@ export function ReportsClient() {
                 <StatBlock label="Facturas procesadas" value={report.flow.invoicesProcessed} />
                 <StatBlock label="Exportaciones realizadas" value={report.flow.exportsPerformed} />
               </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 pt-6 border-t">
+                <StatBlock label="Empezaron a pagar" value={report.flow.startedPayingCount} />
+                <StatBlock label="Trials terminados" value={report.flow.trialsEnded} />
+                <StatBlock label="Total cobrado" value={formatCurrency(report.flow.totalPaidCents / 100)} />
+                <StatBlock label="Pagos fallidos" value={report.flow.paymentsFailed} />
+              </div>
               {report.snapshot ? (
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-6 pt-6 border-t">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 pt-6 border-t">
                   <StatBlock label="Clientes activos (ahora)" value={report.snapshot.activeCompanies} />
                   <StatBlock label="Clientes de pago (ahora)" value={report.snapshot.payingCustomers} />
                   <StatBlock label="Clientes beta (ahora)" value={report.snapshot.betaCompanies} />
+                  <StatBlock label="MRR al cierre" value={formatCurrency(report.snapshot.mrrCents / 100)} />
                 </div>
               ) : (
                 <p className="text-xs text-gray-400 mt-6 pt-6 border-t">
-                  Los recuentos de clientes activos/pago/beta solo se muestran para el mes en curso — no existe un
-                  histórico de cambios de estado de suscripción para reconstruirlos en meses pasados.
+                  Los recuentos de clientes activos/pago/beta y el MRR de cierre solo se muestran para el mes en curso —
+                  no existe un histórico de cambios de estado de suscripción para reconstruirlos en meses pasados.
+                  "Total cobrado" y "Pagos fallidos" sí son fiables para cualquier mes pasado — vienen de PaymentRecord.
                 </p>
               )}
             </>
@@ -140,6 +154,25 @@ export function ReportsClient() {
 
       {overview && (
         <>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Ingresos recibidos por mes</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={overview.charts.revenueByMonth.map((d) => ({ month: d.month, amount: d.amountCents / 100 }))}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                    <YAxis allowDecimals={false} />
+                    <Tooltip formatter={(v: number) => formatCurrency(v)} />
+                    <Bar dataKey="amount" name="Ingresos" fill="#10b981" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Nuevas empresas por mes</CardTitle>

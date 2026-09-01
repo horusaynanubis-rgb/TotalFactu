@@ -3,10 +3,12 @@ import { requirePlatformAdmin } from "@/lib/admin/platform-admin";
 import { prisma } from "@/lib/prisma";
 import {
   EXCLUDE_INTERNAL_WHERE,
+  EXCLUDE_NON_REVENUE_WHERE,
   getGroupCompanyIds,
   getLatestSubscriptionMap,
 } from "@/lib/admin/company-metrics";
 import { classifyCompanyBucket, getPaymentStatusLabel, CompanyBucket } from "@/lib/admin/company-classification";
+import { mrrContributionCents } from "@/lib/admin/billing-status";
 
 export const dynamic = "force-dynamic";
 
@@ -36,30 +38,67 @@ export async function GET(_request: NextRequest) {
 
   const now = new Date();
   const startOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const startOfYear = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
   const twelveMonthsAgo = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - (MONTHS_BACK - 1), 1));
 
-  const [companies, groupCompanyIds, newCompaniesWindow, documentsWindow, invoicesWindow, documentsThisMonth, invoicesThisMonth] =
-    await Promise.all([
-      prisma.company.findMany({
-        where: EXCLUDE_INTERNAL_WHERE,
-        select: { id: true, company_type: true, is_beta: true, created_at: true },
-      }),
-      getGroupCompanyIds(),
-      prisma.company.findMany({
-        where: { ...EXCLUDE_INTERNAL_WHERE, created_at: { gte: twelveMonthsAgo } },
-        select: { created_at: true },
-      }),
-      prisma.document.findMany({
-        where: { created_at: { gte: twelveMonthsAgo }, company: EXCLUDE_INTERNAL_WHERE },
-        select: { created_at: true },
-      }),
-      prisma.invoice.findMany({
-        where: { created_at: { gte: twelveMonthsAgo }, company: EXCLUDE_INTERNAL_WHERE },
-        select: { created_at: true },
-      }),
-      prisma.document.count({ where: { created_at: { gte: startOfMonth }, company: EXCLUDE_INTERNAL_WHERE } }),
-      prisma.invoice.count({ where: { created_at: { gte: startOfMonth }, company: EXCLUDE_INTERNAL_WHERE } }),
-    ]);
+  const [
+    companies,
+    groupCompanyIds,
+    newCompaniesWindow,
+    documentsWindow,
+    invoicesWindow,
+    documentsThisMonth,
+    invoicesThisMonth,
+    paidThisMonthAgg,
+    paidThisYearAgg,
+    paidAllTimeAgg,
+    failedThisMonthCount,
+    revenueWindow,
+  ] = await Promise.all([
+    prisma.company.findMany({
+      where: EXCLUDE_INTERNAL_WHERE,
+      select: { id: true, company_type: true, is_beta: true, created_at: true },
+    }),
+    getGroupCompanyIds(),
+    prisma.company.findMany({
+      where: { ...EXCLUDE_INTERNAL_WHERE, created_at: { gte: twelveMonthsAgo } },
+      select: { created_at: true },
+    }),
+    prisma.document.findMany({
+      where: { created_at: { gte: twelveMonthsAgo }, company: EXCLUDE_INTERNAL_WHERE },
+      select: { created_at: true },
+    }),
+    prisma.invoice.findMany({
+      where: { created_at: { gte: twelveMonthsAgo }, company: EXCLUDE_INTERNAL_WHERE },
+      select: { created_at: true },
+    }),
+    prisma.document.count({ where: { created_at: { gte: startOfMonth }, company: EXCLUDE_INTERNAL_WHERE } }),
+    prisma.invoice.count({ where: { created_at: { gte: startOfMonth }, company: EXCLUDE_INTERNAL_WHERE } }),
+    // Revenue KPIs always use EXCLUDE_NON_REVENUE_WHERE (excludes beta too,
+    // not just internal) — see plan section 19, "beta excluido de MRR" /
+    // "demo excluida de ingresos". Amounts come only from PaymentRecord rows
+    // written by confirmed Stripe invoice.paid/invoice.payment_failed
+    // events — never client-count × list-price.
+    prisma.paymentRecord.aggregate({
+      where: { status: "paid", paid_at: { gte: startOfMonth }, company: EXCLUDE_NON_REVENUE_WHERE },
+      _sum: { amount_cents: true },
+    }),
+    prisma.paymentRecord.aggregate({
+      where: { status: "paid", paid_at: { gte: startOfYear }, company: EXCLUDE_NON_REVENUE_WHERE },
+      _sum: { amount_cents: true },
+    }),
+    prisma.paymentRecord.aggregate({
+      where: { status: "paid", company: EXCLUDE_NON_REVENUE_WHERE },
+      _sum: { amount_cents: true },
+    }),
+    prisma.paymentRecord.count({
+      where: { status: "failed", failed_at: { gte: startOfMonth }, company: EXCLUDE_NON_REVENUE_WHERE },
+    }),
+    prisma.paymentRecord.findMany({
+      where: { status: "paid", paid_at: { gte: twelveMonthsAgo }, company: EXCLUDE_NON_REVENUE_WHERE },
+      select: { amount_cents: true, paid_at: true },
+    }),
+  ]);
 
   const subscriptionMap = await getLatestSubscriptionMap(companies.map((c) => c.id));
 
@@ -68,15 +107,39 @@ export async function GET(_request: NextRequest) {
   let payingCustomers = 0;
   let incidentSubscriptions = 0;
   let newThisMonth = 0;
+  let mrrCents = 0;
+  let trialCount = 0;
 
   for (const company of companies) {
     const bucket = classifyCompanyBucket(company, groupCompanyIds.has(company.id));
     distribution[bucket]++;
-    const label = getPaymentStatusLabel(company, subscriptionMap.get(company.id) ?? null);
+    const subscription = subscriptionMap.get(company.id) ?? null;
+    const label = getPaymentStatusLabel(company, subscription);
     if (label === "Activa" || label === "Beta") activeCompanies++;
     if (label === "Activa") payingCustomers++;
     if (label === "Pago pendiente") incidentSubscriptions++;
     if (company.created_at >= startOfMonth) newThisMonth++;
+
+    if (!company.is_beta && subscription) {
+      const stillInTrial = subscription.trial_end ? subscription.trial_end.getTime() > now.getTime() : false;
+      if (subscription.status === "active" && stillInTrial) trialCount++;
+      mrrCents += mrrContributionCents(
+        {
+          isBeta: company.is_beta,
+          status: subscription.status,
+          trialEnd: subscription.trial_end,
+          unitAmountCents: subscription.unit_amount_cents,
+        },
+        now,
+      );
+    }
+  }
+
+  const revenueByMonthMap = new Map(lastNMonthKeys(MONTHS_BACK).map((k) => [k, 0]));
+  for (const p of revenueWindow) {
+    if (!p.paid_at) continue;
+    const k = monthKey(p.paid_at);
+    if (revenueByMonthMap.has(k)) revenueByMonthMap.set(k, revenueByMonthMap.get(k)! + p.amount_cents);
   }
 
   const monthKeys = lastNMonthKeys(MONTHS_BACK);
@@ -109,6 +172,14 @@ export async function GET(_request: NextRequest) {
       incidentSubscriptions,
       documentsThisMonth,
       invoicesThisMonth,
+      // Revenue KPIs — all from confirmed PaymentRecord rows, never
+      // client-count × list-price (plan section 7).
+      totalPaidThisMonthCents: paidThisMonthAgg._sum.amount_cents ?? 0,
+      totalPaidThisYearCents: paidThisYearAgg._sum.amount_cents ?? 0,
+      totalPaidAllTimeCents: paidAllTimeAgg._sum.amount_cents ?? 0,
+      mrrCents,
+      trialCount,
+      paymentsFailedThisMonth: failedThisMonthCount,
     },
     charts: {
       newCompaniesByMonth: monthKeys.map((k) => ({ month: k, count: newCompaniesByMonth.get(k)! })),
@@ -117,6 +188,7 @@ export async function GET(_request: NextRequest) {
         documents: documentsByMonth.get(k)!,
         invoices: invoicesByMonth.get(k)!,
       })),
+      revenueByMonth: monthKeys.map((k) => ({ month: k, amountCents: revenueByMonthMap.get(k)! })),
       distribution: (Object.keys(distribution) as CompanyBucket[])
         .filter((b) => b !== "interna")
         .map((bucket) => ({ bucket, count: distribution[bucket] })),

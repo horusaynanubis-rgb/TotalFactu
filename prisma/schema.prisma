@@ -114,6 +114,8 @@ model Company {
   daily_cash_registers  DailyCashRegister[]
   fiscal_documents      FiscalDocument[]
   export_logs           ExportLog[]
+  payment_records       PaymentRecord[]
+  payment_alerts        PaymentAlertLog[]
 
   @@index([tax_id])
   @@index([company_type])
@@ -143,14 +145,71 @@ model Subscription {
   status                 String    @default("active") // active, inactive, cancelled, past_due
   current_period_start   DateTime?
   current_period_end     DateTime?
+  // Trial dates as reported by Stripe (source of truth — see lib/admin/billing-status.ts).
+  // Not computed in parallel; only mirrored from the Stripe Subscription object.
+  trial_start            DateTime?
+  trial_end              DateTime?
+  cancel_at_period_end   Boolean   @default(false)
+  // Price of the current subscription item, mirrored from Stripe at sync time.
+  // Used for MRR so it's never derived by multiplying client count × list price.
+  unit_amount_cents      Int?
+  currency               String    @default("EUR")
+  // Incremented on every invoice.payment_failed for the current billing cycle;
+  // reset to 0 by a subsequent invoice.paid. See app/api/webhooks/stripe/route.ts.
+  payment_failure_count  Int       @default(0)
   created_at             DateTime  @default(now())
   updated_at             DateTime  @updatedAt
-  
+
   company Company @relation(fields: [company_id], references: [id], onDelete: Cascade)
 
   @@index([company_id])
   @@index([stripe_customer_id])
   @@index([stripe_subscription_id])
+}
+
+// One row per Stripe invoice event (paid or failed) — the durable payment
+// history Admin Control reads for "histórico de pagos" and revenue KPIs.
+// stripe_invoice_id is unique so webhook retries/duplicates upsert instead
+// of double-counting revenue.
+model PaymentRecord {
+  id                       String    @id @default(cuid())
+  company_id               String
+  stripe_invoice_id        String    @unique
+  stripe_payment_intent_id String?
+  stripe_subscription_id   String?
+  amount_cents             Int
+  currency                 String    @default("EUR")
+  status                   String    // paid, failed, refunded, pending
+  period_start             DateTime?
+  period_end               DateTime?
+  paid_at                  DateTime?
+  failed_at                DateTime?
+  created_at               DateTime  @default(now())
+
+  company Company @relation(fields: [company_id], references: [id], onDelete: Cascade)
+
+  @@index([company_id])
+  @@index([stripe_subscription_id])
+  @@index([status])
+  @@index([paid_at])
+}
+
+// Dedup control for internal impago alerts (see plan section 11 — one alert
+// per concrete incident, not one per hour). stripe_invoice_id defaults to ""
+// (not null) for alert types not tied to a single invoice (e.g. past_due),
+// so the unique constraint still dedups them — Postgres treats NULL as
+// distinct-from-NULL, which would defeat a nullable column here.
+model PaymentAlertLog {
+  id                String   @id @default(cuid())
+  company_id        String
+  alert_type        String   // payment_failed, past_due, unpaid, trial_ended_no_payment
+  stripe_invoice_id String   @default("")
+  sent_at           DateTime @default(now())
+
+  company Company @relation(fields: [company_id], references: [id], onDelete: Cascade)
+
+  @@unique([company_id, alert_type, stripe_invoice_id])
+  @@index([company_id])
 }
 
 model Document {

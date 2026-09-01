@@ -7,10 +7,12 @@ import {
   getDocumentStatsMap,
   getGroupCompanyIds,
   getInvoiceStatsMap,
+  getLastPaymentMap,
   getLatestSubscriptionMap,
   getMembershipCountMap,
 } from "@/lib/admin/company-metrics";
 import { classifyCompanyBucket, getPaymentStatusLabel } from "@/lib/admin/company-classification";
+import { computeBillingRowStatus } from "@/lib/admin/billing-status";
 
 export const dynamic = "force-dynamic";
 
@@ -61,13 +63,15 @@ export async function GET(request: NextRequest) {
   });
 
   const companyIds = companies.map((c) => c.id);
-  const [groupCompanyIds, subscriptionMap, membershipCountMap, documentStatsMap, invoiceStatsMap] = await Promise.all([
-    getGroupCompanyIds(),
-    getLatestSubscriptionMap(companyIds),
-    getMembershipCountMap(companyIds),
-    getDocumentStatsMap(companyIds),
-    getInvoiceStatsMap(companyIds),
-  ]);
+  const [groupCompanyIds, subscriptionMap, membershipCountMap, documentStatsMap, invoiceStatsMap, lastPaymentMap] =
+    await Promise.all([
+      getGroupCompanyIds(),
+      getLatestSubscriptionMap(companyIds),
+      getMembershipCountMap(companyIds),
+      getDocumentStatsMap(companyIds),
+      getInvoiceStatsMap(companyIds),
+      getLastPaymentMap(companyIds),
+    ]);
 
   const typeFilterMap: Record<string, string> = { gestorias: "gestoria", empresas: "individual" };
   const statusFilterMap: Record<string, string> = {
@@ -81,6 +85,16 @@ export async function GET(request: NextRequest) {
     const subscription = subscriptionMap.get(company.id) ?? null;
     const bucket = classifyCompanyBucket(company, groupCompanyIds.has(company.id));
     const status = getPaymentStatusLabel(company, subscription);
+    const billingRow = subscription
+      ? computeBillingRowStatus({
+          status: subscription.status,
+          trial_end: subscription.trial_end,
+          cancel_at_period_end: subscription.cancel_at_period_end,
+          payment_failure_count: subscription.payment_failure_count,
+          current_period_end: subscription.current_period_end,
+        })
+      : null;
+    const lastPayment = lastPaymentMap.get(company.id) ?? null;
     const documentStats = documentStatsMap.get(company.id);
     const invoiceStats = invoiceStatsMap.get(company.id);
     const lastActivityCandidates = [documentStats?.lastUploadAt, invoiceStats?.lastCreatedAt].filter(
@@ -100,6 +114,11 @@ export async function GET(request: NextRequest) {
       planName: subscription?.plan_name ?? null,
       isBeta: company.is_beta,
       status,
+      billingStatusLabel: billingRow?.label ?? null,
+      nextPaymentDate: billingRow?.nextPaymentDate ?? null,
+      lastPaymentDate: lastPayment?.paidAt ?? null,
+      lastPaymentAmountCents: lastPayment?.amountCents ?? null,
+      lastPaymentCurrency: lastPayment?.currency ?? null,
       userCount: membershipCountMap.get(company.id) ?? 0,
       documentCount: documentStats?.count ?? 0,
       invoiceCount: invoiceStats?.count ?? 0,
@@ -111,6 +130,12 @@ export async function GET(request: NextRequest) {
     rows = rows.filter((r) => r.companyType === typeFilterMap[filter]);
   } else if (filter === "grupos") {
     rows = rows.filter((r) => r.bucket === "grupo");
+  } else if (filter === "reales") {
+    // "Solo clientes reales" (plan section 15): excludes beta and internal —
+    // demo/test seed companies aren't flagged in the DB (no is_demo column),
+    // so they aren't filtered out here; see the diagnosis for why that's a
+    // deliberate scope cut, not an oversight.
+    rows = rows.filter((r) => r.bucket !== "beta" && r.bucket !== "interna");
   } else if (filter in statusFilterMap) {
     rows = rows.filter((r) => r.status === statusFilterMap[filter]);
   } else if (filter === "sin_pago") {

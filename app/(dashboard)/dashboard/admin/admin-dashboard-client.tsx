@@ -13,8 +13,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Building2, Users, TrendingUp, CreditCard, Sparkles, AlertTriangle, FileText, Receipt, Copy, Check } from 'lucide-react';
-import { formatDate } from '@/lib/utils';
+import { Building2, Users, TrendingUp, CreditCard, Sparkles, AlertTriangle, FileText, Receipt, Copy, Check, Euro, Clock, XCircle } from 'lucide-react';
+import { formatDate, formatCurrency } from '@/lib/utils';
 import {
   PieChart,
   Pie,
@@ -22,6 +22,11 @@ import {
   Tooltip,
   ResponsiveContainer,
   Legend,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
 } from 'recharts';
 
 interface Overview {
@@ -34,9 +39,16 @@ interface Overview {
     incidentSubscriptions: number;
     documentsThisMonth: number;
     invoicesThisMonth: number;
+    totalPaidThisMonthCents: number;
+    totalPaidThisYearCents: number;
+    totalPaidAllTimeCents: number;
+    mrrCents: number;
+    trialCount: number;
+    paymentsFailedThisMonth: number;
   };
   charts: {
     distribution: { bucket: string; count: number }[];
+    revenueByMonth: { month: string; amountCents: number }[];
   };
 }
 
@@ -50,6 +62,11 @@ interface CompanyRow {
   planName: string | null;
   isBeta: boolean;
   status: string;
+  billingStatusLabel: string | null;
+  nextPaymentDate: string | null;
+  lastPaymentDate: string | null;
+  lastPaymentAmountCents: number | null;
+  lastPaymentCurrency: string | null;
   userCount: number;
   documentCount: number;
   invoiceCount: number;
@@ -66,6 +83,26 @@ const STATUS_BADGE: Record<string, 'success' | 'info' | 'warning' | 'destructive
   'Sin suscripción': 'secondary',
 };
 
+// Colors per plan section 12: verde=pagado/activa, azul=trial,
+// amarillo=cobro próximo, rojo=past_due/failed/unpaid, gris=beta/demo/interna/cancelada.
+const BILLING_STATUS_BADGE: Record<string, 'success' | 'info' | 'warning' | 'destructive' | 'secondary'> = {
+  'En prueba': 'info',
+  'Cobro próximo': 'warning',
+  'Activa / pagada': 'success',
+  'Pago pendiente': 'destructive',
+  Impagada: 'destructive',
+  Cancelada: 'secondary',
+  'Sin suscripción': 'secondary',
+};
+
+/** bucket-aware display status so beta/interna always render gray, matching section 12. */
+function displayStatus(row: CompanyRow): { label: string; variant: 'success' | 'info' | 'warning' | 'destructive' | 'secondary' } {
+  if (row.bucket === 'beta') return { label: 'Beta', variant: 'secondary' };
+  if (row.bucket === 'interna') return { label: 'Interna', variant: 'secondary' };
+  if (row.billingStatusLabel) return { label: row.billingStatusLabel, variant: BILLING_STATUS_BADGE[row.billingStatusLabel] ?? 'secondary' };
+  return { label: row.status, variant: STATUS_BADGE[row.status] ?? 'secondary' };
+}
+
 const BUCKET_LABEL: Record<string, string> = {
   pago: 'Pago',
   beta: 'Beta',
@@ -77,6 +114,7 @@ const PIE_COLORS = ['#2563eb', '#8b5cf6', '#f59e0b', '#10b981'];
 
 const FILTERS = [
   { value: 'all', label: 'Todas' },
+  { value: 'reales', label: 'Solo clientes reales' },
   { value: 'activas', label: 'Activas' },
   { value: 'beta', label: 'Beta' },
   { value: 'pago_pendiente', label: 'Pago pendiente' },
@@ -88,7 +126,7 @@ const FILTERS = [
   { value: 'internas', label: 'Internas' },
 ];
 
-function KpiCard({ icon: Icon, label, value }: { icon: any; label: string; value: number }) {
+function KpiCard({ icon: Icon, label, value }: { icon: any; label: string; value: number | string }) {
   return (
     <Card>
       <CardContent className="p-4 flex items-center gap-3">
@@ -183,6 +221,38 @@ export function AdminControlDashboard() {
             <KpiCard icon={FileText} label="Documentos procesados (mes)" value={overview.kpis.documentsThisMonth} />
           </div>
 
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <KpiCard icon={Euro} label="Cobrado este mes" value={formatCurrency(overview.kpis.totalPaidThisMonthCents / 100)} />
+            <KpiCard icon={Euro} label="Cobrado este año" value={formatCurrency(overview.kpis.totalPaidThisYearCents / 100)} />
+            <KpiCard icon={Euro} label="Cobrado histórico" value={formatCurrency(overview.kpis.totalPaidAllTimeCents / 100)} />
+            <KpiCard icon={TrendingUp} label="MRR actual" value={formatCurrency(overview.kpis.mrrCents / 100)} />
+            <KpiCard icon={Clock} label="En trial" value={overview.kpis.trialCount} />
+            <KpiCard icon={XCircle} label="Pagos fallidos (mes)" value={overview.kpis.paymentsFailedThisMonth} />
+          </div>
+          <p className="text-xs text-gray-400 -mt-2">
+            Ingresos y MRR excluyen clientes beta/internos y salen únicamente de pagos Stripe confirmados
+            (PaymentRecord) — nunca de nº de clientes × precio de lista.
+          </p>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Ingresos recibidos por mes</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={overview.charts.revenueByMonth.map((d) => ({ month: d.month, amount: d.amountCents / 100 }))}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                    <YAxis allowDecimals={false} />
+                    <Tooltip formatter={(v: number) => formatCurrency(v)} />
+                    <Bar dataKey="amount" name="Ingresos" fill="#10b981" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Distribución de clientes</CardTitle>
@@ -258,6 +328,8 @@ export function AdminControlDashboard() {
                     <th className="text-left py-2 px-3 font-medium text-gray-700">Alta</th>
                     <th className="text-left py-2 px-3 font-medium text-gray-700">Plan</th>
                     <th className="text-left py-2 px-3 font-medium text-gray-700">Estado</th>
+                    <th className="text-left py-2 px-3 font-medium text-gray-700">Próximo cobro</th>
+                    <th className="text-left py-2 px-3 font-medium text-gray-700">Último pago</th>
                     <th className="text-left py-2 px-3 font-medium text-gray-700">Usuarios</th>
                     <th className="text-left py-2 px-3 font-medium text-gray-700">Docs</th>
                     <th className="text-left py-2 px-3 font-medium text-gray-700">Facturas</th>
@@ -265,7 +337,9 @@ export function AdminControlDashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {companies.map((c) => (
+                  {companies.map((c) => {
+                    const ds = displayStatus(c);
+                    return (
                     <tr key={c.id} className="border-b hover:bg-gray-50">
                       <td className="py-2 px-3">
                         <Link href={`/dashboard/admin/companies/${c.id}`} className="font-medium text-primary hover:underline">
@@ -280,14 +354,21 @@ export function AdminControlDashboard() {
                       <td className="py-2 px-3 text-gray-600">{formatDate(c.createdAt)}</td>
                       <td className="py-2 px-3 text-gray-600">{c.planName ?? '—'}</td>
                       <td className="py-2 px-3">
-                        <Badge variant={STATUS_BADGE[c.status] ?? 'secondary'}>{c.status}</Badge>
+                        <Badge variant={ds.variant}>{ds.label}</Badge>
+                      </td>
+                      <td className="py-2 px-3 text-gray-600">{c.nextPaymentDate ? formatDate(c.nextPaymentDate) : '—'}</td>
+                      <td className="py-2 px-3 text-gray-600">
+                        {c.lastPaymentDate
+                          ? `${formatDate(c.lastPaymentDate)} — ${formatCurrency((c.lastPaymentAmountCents ?? 0) / 100, c.lastPaymentCurrency ?? 'EUR')}`
+                          : '—'}
                       </td>
                       <td className="py-2 px-3 text-gray-600">{c.userCount}</td>
                       <td className="py-2 px-3 text-gray-600">{c.documentCount}</td>
                       <td className="py-2 px-3 text-gray-600">{c.invoiceCount}</td>
                       <td className="py-2 px-3 text-gray-600">{c.lastActivity ? formatDate(c.lastActivity) : '—'}</td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

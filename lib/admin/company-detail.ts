@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { findStuckDocuments } from "@/lib/stuck-documents";
 import { classifyCompanyBucket, getPaymentStatusLabel } from "./company-classification";
+import { getBillingStatus, getBillingStatusLabel } from "./billing-status";
 
 // Shared by app/api/admin/companies/[companyId]/route.ts and
 // app/(dashboard)/dashboard/admin/companies/[companyId]/page.tsx — the page
@@ -32,6 +33,7 @@ export async function getCompanyDetail(companyId: string) {
     telegramLinkCount,
     fiscalDocsSizeAgg,
     stuckDocuments,
+    paymentRecords,
   ] = await Promise.all([
     prisma.membership.findMany({
       where: { company_id: companyId },
@@ -54,7 +56,17 @@ export async function getCompanyDetail(companyId: string) {
     prisma.telegramLink.count({ where: { company_id: companyId } }),
     prisma.fiscalDocument.aggregate({ where: { company_id: companyId }, _sum: { size_bytes: true }, _count: { _all: true } }),
     findStuckDocuments(prisma, { companyId }),
+    // Ordered by period_end, not created_at — a historical backfill inserts
+    // rows out of chronological order (see summarizePayments in
+    // billing-status.ts for the bug this caused), so created_at can't be
+    // trusted as "most recent first" for anything but live webhook inserts.
+    prisma.paymentRecord.findMany({
+      where: { company_id: companyId },
+      orderBy: [{ period_end: { sort: "desc", nulls: "last" } }, { created_at: "desc" }],
+    }),
   ]);
+
+  const billing = await getBillingStatus(companyId);
 
   // "Grupo empresarial" = any of this company's users also belongs to
   // another company (same concept as hasMultipleCompanies in
@@ -97,6 +109,20 @@ export async function getCompanyDetail(companyId: string) {
           currentPeriodEnd: subscription.current_period_end,
         }
       : null,
+    billing,
+    billingStatusLabel: billing ? getBillingStatusLabel(billing) : null,
+    paymentHistory: paymentRecords.map((p) => ({
+      id: p.id,
+      periodStart: p.period_start,
+      periodEnd: p.period_end,
+      amountCents: p.amount_cents,
+      currency: p.currency,
+      status: p.status,
+      paidAt: p.paid_at,
+      failedAt: p.failed_at,
+      stripeInvoiceId: p.stripe_invoice_id,
+      stripePaymentIntentId: p.stripe_payment_intent_id,
+    })),
     usage: {
       documentsTotal: documentCount,
       documentsThisMonth,

@@ -4,8 +4,8 @@ import { requirePlatformAdmin } from "@/lib/admin/platform-admin";
 import { getCompanyDetail } from "@/lib/admin/company-detail";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { formatDate, formatDateTime } from "@/lib/utils";
-import { ArrowLeft, Building2, Users, CreditCard, BarChart3, Activity, AlertTriangle } from "lucide-react";
+import { formatDate, formatDateTime, formatCurrency } from "@/lib/utils";
+import { ArrowLeft, Building2, Users, CreditCard, BarChart3, Activity, AlertTriangle, History } from "lucide-react";
 import { CopyIdButton } from "./copy-id-button";
 
 export const dynamic = "force-dynamic";
@@ -19,6 +19,29 @@ const STATUS_BADGE: Record<string, "success" | "info" | "warning" | "destructive
   Interna: "secondary",
   "Sin suscripción": "secondary",
 };
+
+// Colors per plan section 12: verde=pagado/activa, azul=trial,
+// amarillo=cobro próximo, rojo=past_due/failed/unpaid, gris=cancelada/sin suscripción.
+const BILLING_STATUS_BADGE: Record<string, "success" | "info" | "warning" | "destructive" | "secondary"> = {
+  "En prueba": "info",
+  "Cobro próximo": "warning",
+  "Activa / pagada": "success",
+  "Pago pendiente": "destructive",
+  Impagada: "destructive",
+  Cancelada: "secondary",
+  "Sin suscripción": "secondary",
+};
+
+const PAYMENT_RECORD_STATUS_LABEL: Record<string, string> = {
+  paid: "Pagado",
+  failed: "Fallido",
+  refunded: "Reembolsado",
+  pending: "Pendiente",
+};
+
+function money(cents: number, currency: string) {
+  return formatCurrency(cents / 100, currency);
+}
 
 const BUCKET_LABEL: Record<string, string> = {
   interna: "Empresa interna",
@@ -41,7 +64,7 @@ export default async function CompanyDetailPage({ params }: { params: { companyI
   const detail = await getCompanyDetail(params.companyId);
   if (!detail) notFound();
 
-  const { company, users, subscription, usage, activity, incidents } = detail;
+  const { company, users, subscription, usage, activity, incidents, billing, billingStatusLabel, paymentHistory } = detail;
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
@@ -129,30 +152,141 @@ export default async function CompanyDetailPage({ params }: { params: { companyI
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
             <CreditCard className="h-4 w-4" /> Suscripción
+            {billingStatusLabel && (
+              <Badge variant={BILLING_STATUS_BADGE[billingStatusLabel] ?? "secondary"}>{billingStatusLabel}</Badge>
+            )}
           </CardTitle>
         </CardHeader>
         <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-          {subscription ? (
+          {subscription && billing ? (
             <>
               <div>
                 <p className="text-gray-500">Plan</p>
-                <p className="font-medium">{subscription.planName}</p>
+                <p className="font-medium capitalize">{billing.plan}</p>
               </div>
               <div>
                 <p className="text-gray-500">Estado Stripe</p>
-                <p className="font-medium">{subscription.status}</p>
+                <p className="font-medium">{billing.subscriptionStatus}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">Fecha de alta</p>
+                <p className="font-medium">{formatDate(company.createdAt)}</p>
               </div>
               <div>
                 <p className="text-gray-500">Stripe Customer ID</p>
-                <p className="font-mono text-xs">{subscription.stripeCustomerId ?? "—"}</p>
+                <p className="font-mono text-xs">{billing.stripeCustomerId ?? "—"}</p>
+              </div>
+
+              <div>
+                <p className="text-gray-500">Trial hasta</p>
+                <p className="font-medium">
+                  {billing.trialEnd ? formatDate(billing.trialEnd) : "—"}
+                  {billing.daysUntilTrialEnd !== null && billing.daysUntilTrialEnd >= 0 && (
+                    <span className="text-gray-400"> ({billing.daysUntilTrialEnd}d restantes)</span>
+                  )}
+                </p>
               </div>
               <div>
                 <p className="text-gray-500">Próximo cobro</p>
-                <p className="font-medium">{subscription.currentPeriodEnd ? formatDate(subscription.currentPeriodEnd) : "—"}</p>
+                <p className="font-medium">
+                  {billing.nextPaymentDate ? formatDate(billing.nextPaymentDate) : "—"}
+                  {billing.daysOverdue !== null && billing.daysOverdue > 0 && (
+                    <span className="text-red-600"> ({billing.daysOverdue}d de retraso en la sync)</span>
+                  )}
+                </p>
+              </div>
+              <div>
+                <p className="text-gray-500">Último pago</p>
+                <p className="font-medium">
+                  {billing.lastPaymentDate
+                    ? `${formatDate(billing.lastPaymentDate)} — ${money(billing.lastPaymentAmountCents ?? 0, billing.currency)}`
+                    : "—"}
+                </p>
+              </div>
+              <div>
+                <p className="text-gray-500">Cancelación programada</p>
+                <p className="font-medium">{billing.cancelAtPeriodEnd ? "Sí, al final del periodo" : "No"}</p>
+              </div>
+
+              <div>
+                <p className="text-gray-500">Total pagado</p>
+                <p className="font-medium">{money(billing.totalPaidCents, billing.currency)}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">Meses pagados</p>
+                <p className="font-medium">{billing.monthsPaid}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">Incidencias de pago</p>
+                <p className="font-medium">{billing.paymentFailures}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">Stripe Subscription ID</p>
+                <p className="font-mono text-xs">{billing.stripeSubscriptionId ?? "—"}</p>
               </div>
             </>
           ) : (
             <p className="text-gray-500 col-span-full">Sin suscripción registrada.</p>
+          )}
+        </CardContent>
+        {billing && (
+          <CardContent className="pt-0">
+            <p className="text-xs text-gray-400">
+              Fechas de periodo/trial: sincronizadas por el webhook de Stripe (pueden quedar desactualizadas si Stripe no logra
+              entregar un evento). Total pagado / meses pagados: histórico real desde que empezó a registrarse
+              (facturas anteriores a esta fecha no están incluidas salvo backfill manual).
+            </p>
+          </CardContent>
+        )}
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <History className="h-4 w-4" /> Histórico de pagos ({paymentHistory.length})
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {paymentHistory.length === 0 ? (
+            <p className="text-gray-500 text-sm">
+              Sin pagos registrados todavía. Se completará automáticamente con cada invoice.paid / invoice.payment_failed que
+              llegue desde Stripe a partir de ahora.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left py-2 px-3 font-medium text-gray-700">Periodo</th>
+                    <th className="text-left py-2 px-3 font-medium text-gray-700">Fecha pago</th>
+                    <th className="text-left py-2 px-3 font-medium text-gray-700">Importe</th>
+                    <th className="text-left py-2 px-3 font-medium text-gray-700">Estado</th>
+                    <th className="text-left py-2 px-3 font-medium text-gray-700">Stripe Invoice</th>
+                    <th className="text-left py-2 px-3 font-medium text-gray-700">Stripe Payment Intent</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paymentHistory.map((p) => (
+                    <tr key={p.id} className="border-b last:border-0">
+                      <td className="py-2 px-3 text-gray-600">
+                        {p.periodStart && p.periodEnd ? `${formatDate(p.periodStart)} – ${formatDate(p.periodEnd)}` : "—"}
+                      </td>
+                      <td className="py-2 px-3 text-gray-600">
+                        {p.paidAt ? formatDate(p.paidAt) : p.failedAt ? formatDate(p.failedAt) : "—"}
+                      </td>
+                      <td className="py-2 px-3 font-medium">{money(p.amountCents, p.currency)}</td>
+                      <td className="py-2 px-3">
+                        <Badge variant={p.status === "paid" ? "success" : p.status === "failed" ? "destructive" : "secondary"}>
+                          {PAYMENT_RECORD_STATUS_LABEL[p.status] ?? p.status}
+                        </Badge>
+                      </td>
+                      <td className="py-2 px-3 font-mono text-xs">{p.stripeInvoiceId}</td>
+                      <td className="py-2 px-3 font-mono text-xs">{p.stripePaymentIntentId ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </CardContent>
       </Card>

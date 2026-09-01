@@ -12,6 +12,10 @@ export interface SubscriptionSummary {
   stripe_customer_id: string | null;
   current_period_start: Date | null;
   current_period_end: Date | null;
+  trial_end: Date | null;
+  cancel_at_period_end: boolean;
+  payment_failure_count: number;
+  unit_amount_cents: number | null;
   created_at: Date;
 }
 
@@ -34,6 +38,10 @@ export async function getLatestSubscriptionMap(
       stripe_customer_id: true,
       current_period_start: true,
       current_period_end: true,
+      trial_end: true,
+      cancel_at_period_end: true,
+      payment_failure_count: true,
+      unit_amount_cents: true,
       created_at: true,
     },
   });
@@ -47,8 +55,34 @@ export async function getLatestSubscriptionMap(
         stripe_customer_id: row.stripe_customer_id,
         current_period_start: row.current_period_start,
         current_period_end: row.current_period_end,
+        trial_end: row.trial_end,
+        cancel_at_period_end: row.cancel_at_period_end,
+        payment_failure_count: row.payment_failure_count,
+        unit_amount_cents: row.unit_amount_cents,
         created_at: row.created_at,
       });
+    }
+  }
+  return map;
+}
+
+export interface LastPaymentInfo {
+  amountCents: number;
+  currency: string;
+  paidAt: Date;
+}
+
+/** Most recent *paid* PaymentRecord per company — used for the "Último pago" column. */
+export async function getLastPaymentMap(companyIds?: string[]): Promise<Map<string, LastPaymentInfo>> {
+  const rows = await prisma.paymentRecord.findMany({
+    where: { status: "paid", ...(companyIds ? { company_id: { in: companyIds } } : {}) },
+    orderBy: { paid_at: "desc" },
+    select: { company_id: true, amount_cents: true, currency: true, paid_at: true },
+  });
+  const map = new Map<string, LastPaymentInfo>();
+  for (const row of rows) {
+    if (!map.has(row.company_id) && row.paid_at) {
+      map.set(row.company_id, { amountCents: row.amount_cents, currency: row.currency, paidAt: row.paid_at });
     }
   }
   return map;
@@ -122,3 +156,11 @@ export async function getGroupCompanyIds(): Promise<Set<string>> {
 
 /** Excludes the internal TotalFactu company from a Company `where` clause. */
 export const EXCLUDE_INTERNAL_WHERE = { company_type: { not: INTERNAL_COMPANY_TYPE } };
+
+/**
+ * Excludes internal AND beta companies — use this (not EXCLUDE_INTERNAL_WHERE)
+ * for anything that touches money: MRR, "total cobrado", revenue charts.
+ * Beta accounts have no real billing and must never inflate revenue KPIs
+ * (plan section 19 — "beta excluido de MRR").
+ */
+export const EXCLUDE_NON_REVENUE_WHERE = { company_type: { not: INTERNAL_COMPANY_TYPE }, is_beta: false };

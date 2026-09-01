@@ -7,7 +7,7 @@
     "start": "next start",
     "lint": "next lint",
     "postinstall": "prisma generate",
-    "test": "tsx scripts/test-csv-encoding.ts && tsx scripts/test-fiscal-breakdown.ts && tsx scripts/test-duplicate-detection.ts && tsx scripts/test-stuck-documents.ts && tsx scripts/test-resolve-duplicates-safety.ts"
+    "test": "tsx scripts/test-csv-encoding.ts && tsx scripts/test-fiscal-breakdown.ts && tsx scripts/test-duplicate-detection.ts && tsx scripts/test-stuck-documents.ts && tsx scripts/test-resolve-duplicates-safety.ts && tsx scripts/test-billing.ts"
   },
   "prisma": {
     "seed": "tsx --require dotenv/config scripts/safe-seed.ts"
