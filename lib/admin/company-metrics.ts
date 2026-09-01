@@ -88,6 +88,27 @@ export async function getLastPaymentMap(companyIds?: string[]): Promise<Map<stri
   return map;
 }
 
+/**
+ * Latest active LicensePack.period_end per gestoria company — fallback for
+ * "próximo cobro" on gestoria-plan companies, whose Subscription.current_
+ * period_end is deliberately left null (see app/api/stripe/checkout/route.ts:
+ * LicensePack, not Subscription, is the source of truth for gestoria billing
+ * periods; only LicensePack.stripe_subscription_id is matched by the
+ * customer.subscription.updated webhook handler for these plans).
+ */
+export async function getLicensePackPeriodEndMap(companyIds?: string[]): Promise<Map<string, Date | null>> {
+  const rows = await prisma.licensePack.findMany({
+    where: { status: "active", ...(companyIds ? { gestoria_company_id: { in: companyIds } } : {}) },
+    orderBy: { created_at: "desc" },
+    select: { gestoria_company_id: true, period_end: true },
+  });
+  const map = new Map<string, Date | null>();
+  for (const row of rows) {
+    if (!map.has(row.gestoria_company_id)) map.set(row.gestoria_company_id, row.period_end);
+  }
+  return map;
+}
+
 export async function getMembershipCountMap(companyIds?: string[]): Promise<Map<string, number>> {
   const rows = await prisma.membership.groupBy({
     by: ["company_id"],

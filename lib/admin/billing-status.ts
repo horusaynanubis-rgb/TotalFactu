@@ -41,7 +41,7 @@ export interface BillingStatus {
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
   dataSource: {
-    periodDates: "stripe-webhook-sync";
+    periodDates: "stripe-webhook-sync" | "license-pack-sync";
     payments: "db-payment-records";
   };
 }
@@ -130,6 +130,24 @@ export async function getBillingStatus(companyId: string): Promise<BillingStatus
   const { totalPaidCents, monthsPaid, lastPaymentDate, lastPaymentAmountCents, paymentFailures } =
     summarizePayments(payments);
 
+  // Gestoria plans leave Subscription.current_period_end null by design —
+  // LicensePack.period_end is the source of truth there (see
+  // app/api/stripe/checkout/route.ts). Fall back to it so "próximo cobro"
+  // isn't blank for gestorías; costs one extra query, only for this plan.
+  let effectivePeriodEnd = subscription.current_period_end;
+  let periodDatesSource: "stripe-webhook-sync" | "license-pack-sync" = "stripe-webhook-sync";
+  if (!effectivePeriodEnd && subscription.plan_name === "gestoria") {
+    const pack = await prisma.licensePack.findFirst({
+      where: { gestoria_company_id: companyId, status: "active" },
+      orderBy: { created_at: "desc" },
+      select: { period_end: true },
+    });
+    if (pack?.period_end) {
+      effectivePeriodEnd = pack.period_end;
+      periodDatesSource = "license-pack-sync";
+    }
+  }
+
   const now = new Date();
   const pastDue = subscription.status === "past_due";
   const canceled = subscription.status === "cancelled";
@@ -141,7 +159,7 @@ export async function getBillingStatus(companyId: string): Promise<BillingStatus
 
   const nextPaymentDate =
     subscription.status === "active" && !subscription.cancel_at_period_end
-      ? subscription.current_period_end
+      ? effectivePeriodEnd
       : null;
 
   const daysUntilTrialEnd = subscription.trial_end
@@ -149,10 +167,10 @@ export async function getBillingStatus(companyId: string): Promise<BillingStatus
     : null;
 
   const daysOverdue =
-    subscription.current_period_end &&
-    subscription.current_period_end.getTime() < now.getTime() &&
+    effectivePeriodEnd &&
+    effectivePeriodEnd.getTime() < now.getTime() &&
     subscription.status === "active"
-      ? Math.floor((now.getTime() - subscription.current_period_end.getTime()) / MS_PER_DAY)
+      ? Math.floor((now.getTime() - effectivePeriodEnd.getTime()) / MS_PER_DAY)
       : null;
 
   return {
@@ -161,7 +179,7 @@ export async function getBillingStatus(companyId: string): Promise<BillingStatus
     trialStart: subscription.trial_start,
     trialEnd: subscription.trial_end,
     currentPeriodStart: subscription.current_period_start,
-    currentPeriodEnd: subscription.current_period_end,
+    currentPeriodEnd: effectivePeriodEnd,
     nextPaymentDate,
     lastPaymentDate,
     lastPaymentAmountCents,
@@ -178,7 +196,7 @@ export async function getBillingStatus(companyId: string): Promise<BillingStatus
     stripeCustomerId: subscription.stripe_customer_id,
     stripeSubscriptionId: subscription.stripe_subscription_id,
     dataSource: {
-      periodDates: "stripe-webhook-sync",
+      periodDates: periodDatesSource,
       payments: "db-payment-records",
     },
   };

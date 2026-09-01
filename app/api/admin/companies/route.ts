@@ -9,6 +9,7 @@ import {
   getInvoiceStatsMap,
   getLastPaymentMap,
   getLatestSubscriptionMap,
+  getLicensePackPeriodEndMap,
   getMembershipCountMap,
 } from "@/lib/admin/company-metrics";
 import { classifyCompanyBucket, getPaymentStatusLabel } from "@/lib/admin/company-classification";
@@ -63,15 +64,23 @@ export async function GET(request: NextRequest) {
   });
 
   const companyIds = companies.map((c) => c.id);
-  const [groupCompanyIds, subscriptionMap, membershipCountMap, documentStatsMap, invoiceStatsMap, lastPaymentMap] =
-    await Promise.all([
-      getGroupCompanyIds(),
-      getLatestSubscriptionMap(companyIds),
-      getMembershipCountMap(companyIds),
-      getDocumentStatsMap(companyIds),
-      getInvoiceStatsMap(companyIds),
-      getLastPaymentMap(companyIds),
-    ]);
+  const [
+    groupCompanyIds,
+    subscriptionMap,
+    membershipCountMap,
+    documentStatsMap,
+    invoiceStatsMap,
+    lastPaymentMap,
+    licensePackPeriodEndMap,
+  ] = await Promise.all([
+    getGroupCompanyIds(),
+    getLatestSubscriptionMap(companyIds),
+    getMembershipCountMap(companyIds),
+    getDocumentStatsMap(companyIds),
+    getInvoiceStatsMap(companyIds),
+    getLastPaymentMap(companyIds),
+    getLicensePackPeriodEndMap(companyIds),
+  ]);
 
   const typeFilterMap: Record<string, string> = { gestorias: "gestoria", empresas: "individual" };
   const statusFilterMap: Record<string, string> = {
@@ -91,7 +100,10 @@ export async function GET(request: NextRequest) {
           trial_end: subscription.trial_end,
           cancel_at_period_end: subscription.cancel_at_period_end,
           payment_failure_count: subscription.payment_failure_count,
-          current_period_end: subscription.current_period_end,
+          // Gestoria plans leave Subscription.current_period_end null by
+          // design (LicensePack.period_end is the source of truth there) —
+          // fall back to it so "próximo cobro" isn't blank for gestorías.
+          current_period_end: subscription.current_period_end ?? licensePackPeriodEndMap.get(company.id) ?? null,
         })
       : null;
     const lastPayment = lastPaymentMap.get(company.id) ?? null;
