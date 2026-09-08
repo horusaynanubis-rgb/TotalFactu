@@ -636,10 +636,21 @@ async function extractWithGemini(
 
   const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash-preview-04-17';
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-  const maxOutputTokens = 32000;
+  // 2026-09-08 optimization (LOCAL ONLY, not yet deployed): the previous
+  // 32000 was raised twice (2000→4000 in 8e75238, 4000→32000 in edddd9e),
+  // both times undocumented and both reacting to MAX_TOKENS failures,
+  // without ever checking usageMetadata.thoughtsTokenCount. Real samples
+  // captured 2026-09-08 show thinking alone reached 5411 tokens on an
+  // ordinary 8-line invoice (67% of total tokens) — far more than the
+  // visible JSON output (483–1066 tokens across 6 successful calls, n=6).
+  // With thinkingBudget capped below, 8000 gives ~7x headroom over the
+  // highest observed thinking+output total (6424) while staying 4x below
+  // the old ceiling — see diagnóstico 2026-09-08 for the full token study.
+  const maxOutputTokens = 8000;
+  const thinkingBudget = 1024;
 
   const fileSizeKb = Math.round((fileBase64.length * 3) / 4 / 1024);
-  console.log(`[gemini:diag] provider=gemini model=${model} mimeType=${mimeType} base64Length=${fileBase64.length} estimatedSizeKb=${fileSizeKb} maxOutputTokens=${maxOutputTokens} hasCompanyCtx=${!!companyContext}`);
+  console.log(`[gemini:diag] provider=gemini model=${model} mimeType=${mimeType} base64Length=${fileBase64.length} estimatedSizeKb=${fileSizeKb} maxOutputTokens=${maxOutputTokens} thinkingBudget=${thinkingBudget} hasCompanyCtx=${!!companyContext}`);
 
   const prompt = buildExtractionPrompt(companyContext);
 
@@ -653,6 +664,7 @@ async function extractWithGemini(
     generationConfig: {
       responseMimeType: 'application/json',
       maxOutputTokens,
+      thinkingConfig: { thinkingBudget },
     },
   };
 
