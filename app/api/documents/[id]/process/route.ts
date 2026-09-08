@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { fetchDocumentAsBase64 } from '@/lib/document-file';
 import { extractInvoiceData, extractCashRegisterData, detectRoleAmbiguity, clarifyRolesWithGemini, isBillingExhaustedGeminiError, isGeminiTimeoutError, InvoiceExtraction, CompanyContext } from '@/lib/ai-extraction';
+import { isStorageTimeoutError } from '@/lib/document-file';
 import { classifyInvoiceType } from '@/lib/invoice-type-classifier';
 import { sendMessage, editMessage } from '@/lib/telegram';
 import { normalizeDescription } from '@/lib/supplier-analysis';
@@ -584,13 +585,16 @@ export async function POST(
     const errorMessage: string = error?.message ?? 'Unknown error';
     const billingExhausted = isBillingExhaustedGeminiError(error);
     const geminiTimedOut = isGeminiTimeoutError(error);
+    const storageTimedOut = isStorageTimeoutError(error);
     const errorType = billingExhausted
       ? 'billing_exhausted'
       : geminiTimedOut
         ? 'timeout'
-        : (errorMessage.includes('429') || errorMessage.includes('503') || errorMessage.includes('RESOURCE_EXHAUSTED') || errorMessage.includes('UNAVAILABLE') || errorMessage.includes('high demand'))
-          ? 'rate_limit_transient'
-          : 'other';
+        : storageTimedOut
+          ? 'storage_timeout'
+          : (errorMessage.includes('429') || errorMessage.includes('503') || errorMessage.includes('RESOURCE_EXHAUSTED') || errorMessage.includes('UNAVAILABLE') || errorMessage.includes('high demand'))
+            ? 'rate_limit_transient'
+            : 'other';
 
     console.error(
       '[process] ❌ FAILED',
