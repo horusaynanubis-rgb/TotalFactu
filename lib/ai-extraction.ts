@@ -693,10 +693,23 @@ export const GEMINI_TIMEOUT_MARKER = 'Gemini:TIMEOUT:';
 // the Telegram webhook that calls it synchronously (whose own clock starts
 // even earlier). Too risky: a slow write or network blip could get the
 // whole function SIGKILLed before reaching the catch block — the exact
-// failure mode this timeout exists to prevent. Real fix is decoupling
-// long Gemini calls from the synchronous webhook request (see diagnóstico
-// 2026-09-08) rather than stretching this timeout further.
+// failure mode this timeout exists to prevent. These stay the DEFAULTS for
+// the synchronous flow (unchanged). The async worker (Paso 0 confirmed
+// ~150s is safely available there) passes larger overrides — see
+// GeminiTimeoutOverrides below and app/api/jobs/process-queue/route.ts.
 const GEMINI_FETCH_TIMEOUT_MS = 40_000;
+
+/**
+ * Optional per-call timeout overrides, threaded through from
+ * extractInvoiceData(). Undefined/omitted fields keep today's defaults —
+ * the synchronous route never passes this, so its behavior is byte-for-byte
+ * unchanged. Only the async worker passes larger values.
+ */
+export interface GeminiTimeoutOverrides {
+  normalMs?: number;
+  headerMs?: number;
+  linesMs?: number;
+}
 
 /**
  * fetch() with an AbortController-based timeout. Node's fetch has no
@@ -748,6 +761,7 @@ async function extractWithGemini(
   mimeType: string,
   companyContext?: CompanyContext,
   documentId?: string,
+  timeoutMs: number = GEMINI_FETCH_TIMEOUT_MS,
 ): Promise<InvoiceExtraction> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
@@ -771,7 +785,7 @@ async function extractWithGemini(
 
   const fileSizeKb = Math.round((fileBase64.length * 3) / 4 / 1024);
   console.log(`[gemini:mode] normal documentId=${documentId ?? 'n/a'}`);
-  console.log(`[gemini:diag] documentId=${documentId ?? 'n/a'} provider=gemini model=${model} mimeType=${mimeType} base64Length=${fileBase64.length} estimatedSizeKb=${fileSizeKb} maxOutputTokens=${maxOutputTokens} thinkingBudget=${thinkingBudget} hasCompanyCtx=${!!companyContext}`);
+  console.log(`[gemini:diag] documentId=${documentId ?? 'n/a'} provider=gemini model=${model} mimeType=${mimeType} base64Length=${fileBase64.length} estimatedSizeKb=${fileSizeKb} maxOutputTokens=${maxOutputTokens} thinkingBudget=${thinkingBudget} timeoutMs=${timeoutMs} hasCompanyCtx=${!!companyContext}`);
   const callStartedAt = Date.now();
 
   const prompt = buildExtractionPrompt(companyContext);
@@ -804,7 +818,7 @@ async function extractWithGemini(
     // attempt 1 — never retried. If Gemini hung once on this exact file,
     // retrying immediately is very likely to hang again; failing fast and
     // cleanly is strictly better than burning the request's time budget.
-    const response = await fetchGeminiWithTimeout(url, body);
+    const response = await fetchGeminiWithTimeout(url, body, timeoutMs);
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => response.statusText);
@@ -929,6 +943,7 @@ async function extractInvoiceHeaderOnly(
   mimeType: string,
   companyContext?: CompanyContext,
   documentId?: string,
+  timeoutMs: number = LARGE_INVOICE_HEADER_TIMEOUT_MS,
 ): Promise<InvoiceExtraction> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
@@ -949,7 +964,7 @@ async function extractInvoiceHeaderOnly(
   console.log(`[gemini:mode] large_invoice_header documentId=${documentId ?? 'n/a'}`);
   const callStartedAt = Date.now();
 
-  const response = await fetchGeminiWithTimeout(url, body, LARGE_INVOICE_HEADER_TIMEOUT_MS);
+  const response = await fetchGeminiWithTimeout(url, body, timeoutMs);
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => response.statusText);
@@ -997,6 +1012,7 @@ async function extractInvoiceLinesOnly(
   fileBase64: string,
   mimeType: string,
   documentId?: string,
+  timeoutMs: number = LARGE_INVOICE_LINES_TIMEOUT_MS,
 ): Promise<InvoiceLineItem[]> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
@@ -1016,7 +1032,7 @@ async function extractInvoiceLinesOnly(
   console.log(`[gemini:mode] large_invoice_lines documentId=${documentId ?? 'n/a'}`);
   const callStartedAt = Date.now();
 
-  const response = await fetchGeminiWithTimeout(url, body, LARGE_INVOICE_LINES_TIMEOUT_MS);
+  const response = await fetchGeminiWithTimeout(url, body, timeoutMs);
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => response.statusText);
@@ -1101,9 +1117,10 @@ async function extractWithGeminiAdaptive(
   mimeType: string,
   companyContext?: CompanyContext,
   documentId?: string,
+  timeouts?: GeminiTimeoutOverrides,
 ): Promise<InvoiceExtraction> {
   try {
-    return await extractWithGemini(fileBase64, mimeType, companyContext, documentId);
+    return await extractWithGemini(fileBase64, mimeType, companyContext, documentId, timeouts?.normalMs);
   } catch (err) {
     if (!isMaxTokensGeminiError(err)) {
       throw err; // timeout/billing/429/503/safety/invalid-json — unchanged policy
@@ -1113,8 +1130,8 @@ async function extractWithGeminiAdaptive(
 
     // Never retries NORMAL again — this is the only place LARGE_INVOICE is
     // triggered, and it always originates from a NORMAL attempt above.
-    const header = await extractInvoiceHeaderOnly(fileBase64, mimeType, companyContext, documentId);
-    const lineItems = await extractInvoiceLinesOnly(fileBase64, mimeType, documentId);
+    const header = await extractInvoiceHeaderOnly(fileBase64, mimeType, companyContext, documentId, timeouts?.headerMs);
+    const lineItems = await extractInvoiceLinesOnly(fileBase64, mimeType, documentId, timeouts?.linesMs);
     return mergeLargeInvoiceResult(header, lineItems);
   }
 }
@@ -1257,9 +1274,10 @@ export async function extractInvoiceData(
   providerConfig?: AIProviderConfig,
   companyContext?: CompanyContext,
   documentId?: string,
+  timeouts?: GeminiTimeoutOverrides,
 ): Promise<InvoiceExtraction> {
   if (isGeminiProvider(providerConfig)) {
-    return extractWithGeminiAdaptive(fileBase64, mimeType, companyContext, documentId);
+    return extractWithGeminiAdaptive(fileBase64, mimeType, companyContext, documentId, timeouts);
   }
 
   // Fallback: OpenAI-compatible (Ollama or external)

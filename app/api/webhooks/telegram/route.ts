@@ -11,6 +11,10 @@ import {
   TelegramUpdate,
 } from '@/lib/telegram';
 import { shouldWebhookSendFallbackMessage } from '@/lib/telegram-webhook-helpers';
+import { computeContentHash } from '@/lib/document-dedup';
+import { checkContentHashDuplicate } from '@/lib/document-processing';
+import { enqueueJob } from '@/lib/processing-job';
+import { shouldUseAsyncProcessing } from '@/lib/process-queue-helpers';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -523,11 +527,63 @@ async function handleFileUpload(
     const baseUrl = process.env.NEXTAUTH_URL || vercelUrl || 'http://localhost:3000';
 
     // Pre-screen caption + filename for cash register keywords (free — no AI call)
+    // Computed here (before the sync/async fork) so BOTH branches can use it.
     const caption = message.caption ?? '';
     const hintText = `${caption} ${fileName}`;
     const cashCloseoutHint = hasCashCloseoutHint(hintText);
     if (cashCloseoutHint) {
       console.log(`[Telegram upload] [TELEGRAM-DOC-TYPE] Cash closeout hint detected from caption/filename: "${caption.slice(0, 80)}"`);
+    }
+
+    // ASYNC PATH — prepared but INERT: Company.processing_mode defaults to
+    // 'sync' for every company (2026-09-08 async worker MVP, not yet
+    // activated for anyone). When flagged 'async' for a company, this skips
+    // the synchronous fetch below (which shares this webhook's own
+    // maxDuration=60s with Gemini) and instead queues a ProcessingJob for
+    // app/api/jobs/process-queue/route.ts (maxDuration=180s) to pick up.
+    // Known limitation while inert/unflagged: the worker trigger below is a
+    // best-effort fire-and-forget fetch with no cron/scheduled drain behind
+    // it yet — acceptable only because no company uses this path yet.
+    const companyMode = await prisma.company.findUnique({
+      where: { id: link.company_id },
+      select: { processing_mode: true },
+    });
+
+    if (shouldUseAsyncProcessing(companyMode?.processing_mode)) {
+      // Dedup MUST run before a ProcessingJob is created — otherwise a
+      // resent duplicate would waste a queued job + worker invocation
+      // before ever being recognized (2026-09-08 spec point 10). Hashes the
+      // same base64 representation fetchDocumentAsBase64() would later
+      // derive from the exact same bytes via the storage round-trip, so
+      // this hash is identical to the one processDocument() computes.
+      const contentHash = computeContentHash(fileBuffer.toString('base64'));
+      const dedupResult = await checkContentHashDuplicate(document.id, link.company_id, contentHash, {
+        telegramChatId: chatId,
+        telegramMessageId: statusMsg?.message_id ?? null,
+        originalFilename: originalFileName,
+        sourceChannel: 'telegram',
+      });
+      if (dedupResult) {
+        // checkContentHashDuplicate() already sent/edited the Telegram message.
+        console.log(`[Telegram upload] Duplicate skipped BEFORE job creation. documentId=${document.id}`);
+        return;
+      }
+
+      await enqueueJob(prisma, document.id, link.company_id, cashCloseoutHint ? 'cash_closeout' : undefined);
+
+      const receivedMsg = '📨 <b>Documento recibido</b>\n⏳ Lo estoy procesando, te aviso en cuanto termine...';
+      if (statusMsg) {
+        await editMessage(botToken, chatId, statusMsg.message_id, receivedMsg);
+      } else {
+        await sendMessage(botToken, chatId, receivedMsg);
+      }
+
+      fetch(`${baseUrl}/api/jobs/process-queue`, {
+        method: 'POST',
+        headers: { 'x-internal-secret': process.env.TELEGRAM_WEBHOOK_SECRET ?? '' },
+      }).catch((err) => console.error('[Telegram upload] Failed to trigger async worker (non-fatal, job stays queued):', err?.message));
+
+      return;
     }
 
     const processUrl = `${baseUrl}/api/documents/${document.id}/process${cashCloseoutHint ? '?hint=cash_closeout' : ''}`;

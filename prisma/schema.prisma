@@ -87,6 +87,7 @@ model Company {
   ai_api_key               String?
   ai_api_endpoint          String?
   company_type             String         @default("individual") // individual | gestoria
+  processing_mode          String         @default("sync") // sync | async — feature flag, see lib/processing-job.ts. Default unchanged for all existing companies.
   is_beta                  Boolean        @default(false)
   created_at               DateTime       @default(now())
   updated_at               DateTime       @updatedAt
@@ -116,6 +117,7 @@ model Company {
   export_logs           ExportLog[]
   payment_records       PaymentRecord[]
   payment_alerts        PaymentAlertLog[]
+  processing_jobs       ProcessingJob[]
 
   @@index([tax_id])
   @@index([company_type])
@@ -237,12 +239,45 @@ model Document {
   invoice             Invoice?
   delivery_note       DeliveryNote?
   daily_cash_register DailyCashRegister?
+  processing_job      ProcessingJob?
 
   @@index([company_id])
   @@index([processing_status])
   @@index([source_channel])
   @@index([upload_timestamp])
   @@index([company_id, content_hash])
+}
+
+// Async processing queue (2026-09-08 MVP) — decouples Telegram/web upload
+// from the actual Gemini call, so a document can legitimately take 60-120s
+// without depending on the synchronous webhook request's own maxDuration.
+// See lib/processing-job.ts and app/api/jobs/process-queue/route.ts.
+// Coexists with the synchronous flow during migration — gated per company
+// by Company.processing_mode, defaulting to 'sync' (unchanged behavior)
+// until a company is explicitly flagged 'async'.
+model ProcessingJob {
+  id              String    @id @default(cuid())
+  document_id     String    @unique // at most one ACTIVE job per Document — see lib/processing-job.ts#enqueueJob
+  company_id      String
+  status          String    @default("queued") // queued, claimed, done, failed, dead
+  attempts        Int       @default(0)
+  max_attempts    Int       @default(2)
+  next_attempt_at DateTime  @default(now())
+  claimed_at      DateTime?
+  claimed_by      String?   // worker invocation id — for stale-claim detection/debugging
+  completed_at    DateTime?
+  last_error      String?
+  error_code      String?   // billing_exhausted | timeout | storage_timeout | rate_limit_transient | max_tokens | invalid_json | other
+  hint            String?   // e.g. 'cash_closeout' — carries the Telegram caption/filename pre-screen through to the worker, mirroring the ?hint= query param the sync route reads directly from the request
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @updatedAt
+
+  document Document @relation(fields: [document_id], references: [id], onDelete: Cascade)
+  company  Company  @relation(fields: [company_id], references: [id], onDelete: Cascade)
+
+  @@index([status, next_attempt_at])
+  @@index([company_id])
+  @@index([claimed_at])
 }
 
 model TelegramLink {
