@@ -546,10 +546,84 @@ function getProviderConfig(config?: AIProviderConfig): { apiUrl: string; apiKey:
 const GEMINI_MAX_RETRIES = 3;
 const GEMINI_RETRY_DELAYS_MS = [1000, 3000];
 
+// Marker prefix used to tag errors caused by a permanently exhausted prepaid
+// balance, so callers (process/route.ts) can show a distinct message without
+// re-parsing raw Gemini error text. See findings from the 2026-09-07 incident:
+// a depleted-credits 429 was being retried 3x per document like a transient
+// rate limit, tripling the wasted request volume for zero benefit (retrying
+// never helps until billing is topped up).
+export const GEMINI_BILLING_EXHAUSTED_MARKER = 'Gemini:BILLING_EXHAUSTED:';
+
+/**
+ * True only for the specific "prepaid credits are gone" flavor of 429 —
+ * a permanent block that will keep returning 429 on every attempt until a
+ * human tops up billing. Distinct from a transient per-minute/per-day rate
+ * limit, which also returns 429 but recovers on its own.
+ */
+export function isBillingExhaustedError(status: number, body: string): boolean {
+  if (status !== 429) return false;
+  return /prepayment credits are depleted|billing#prepay|please enable billing/i.test(body);
+}
+
+export function isBillingExhaustedGeminiError(err: unknown): boolean {
+  return err instanceof Error && err.message.startsWith(GEMINI_BILLING_EXHAUSTED_MARKER);
+}
+
 function isGeminiRetriableError(status: number, body: string): boolean {
+  if (isBillingExhaustedError(status, body)) return false; // permanent — retrying wastes calls, never helps
   if (status === 429 || status === 503) return true;
   if (body.includes('UNAVAILABLE') || body.includes('high demand') || body.includes('RESOURCE_EXHAUSTED')) return true;
   return false;
+}
+
+// Marker for a request that never got a response from Gemini in time.
+// Root cause of the 2026-09-08 live incident: a specific file made Gemini's
+// generateContent call hang indefinitely (no HTTP error, no response — just
+// silence), which meant the process route's own maxDuration (60s) — or the
+// calling webhook's — eventually SIGKILLed the function before it ever
+// reached a catch block. Result: the Document stayed "processing" forever,
+// no AuditLog entry, no Telegram message, and the user resent the same file
+// every ~1-2 minutes for hours because nothing ever told them it failed.
+// A client-side timeout turns that silent hang into a clean, fast failure.
+export const GEMINI_TIMEOUT_MARKER = 'Gemini:TIMEOUT:';
+
+// Kept safely under the 60s maxDuration of both app/api/documents/[id]/process
+// and the webhook route that calls it synchronously and waits — leaves
+// headroom for storage download, DB writes, and the Telegram round-trip.
+const GEMINI_FETCH_TIMEOUT_MS = 40_000;
+
+/**
+ * fetch() with an AbortController-based timeout. Node's fetch has no
+ * built-in timeout, so without this a hung Gemini response is
+ * indistinguishable from a slow-but-working one until the whole serverless
+ * function is killed by the platform — too late to fail cleanly.
+ */
+async function fetchGeminiWithTimeout(
+  url: string,
+  body: unknown,
+  timeoutMs: number = GEMINI_FETCH_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      throw new Error(`${GEMINI_TIMEOUT_MARKER} no response after ${timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export function isGeminiTimeoutError(err: unknown): boolean {
+  return err instanceof Error && err.message.startsWith(GEMINI_TIMEOUT_MARKER);
 }
 
 async function extractWithGemini(
@@ -591,15 +665,24 @@ async function extractWithGemini(
       await new Promise(r => setTimeout(r, delayMs));
     }
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+    // No try/catch around this call is intentional: a timeout (or any other
+    // network-level throw) propagates immediately out of this function on
+    // attempt 1 — never retried. If Gemini hung once on this exact file,
+    // retrying immediately is very likely to hang again; failing fast and
+    // cleanly is strictly better than burning the request's time budget.
+    const response = await fetchGeminiWithTimeout(url, body);
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => response.statusText);
       console.error(`[gemini] HTTP ${response.status} attempt=${attempt}/${GEMINI_MAX_RETRIES} error body (truncated):`, errorText.slice(0, 500));
+
+      if (isBillingExhaustedError(response.status, errorText)) {
+        // Permanent block — every retry would just get the same 429 for free
+        // (no tokens billed on a rejected request, but it still burns request
+        // quota and wall-clock time). Fail on attempt 1, no retry.
+        console.error(`[gemini] ⛔ Billing exhausted — not retrying (would waste ${GEMINI_MAX_RETRIES - attempt} more attempts for nothing)`);
+        throw new Error(`${GEMINI_BILLING_EXHAUSTED_MARKER} ${errorText.slice(0, 300)}`);
+      }
 
       const retriable = isGeminiRetriableError(response.status, errorText);
       lastError = new Error(`Gemini API error (${response.status}): ${errorText.slice(0, 300)}`);
@@ -914,14 +997,19 @@ export async function extractCashRegisterData(
     if (attempt > 1) await new Promise(r => setTimeout(r, attempt === 2 ? 1000 : 3000));
 
     try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
+      // Shorter timeout than the main extraction call — this is a small,
+      // specialized request (maxOutputTokens: 1024).
+      const response = await fetchGeminiWithTimeout(url, body, 25_000);
 
       if (!response.ok) {
         const text = await response.text().catch(() => '');
+        if (isBillingExhaustedError(response.status, text)) {
+          // Permanent block — surface distinctly instead of silently
+          // returning null (which the caller would otherwise misread as
+          // "low-confidence screenshot" rather than "AI unavailable").
+          console.error(`[gemini:cash_register] ⛔ Billing exhausted — not retrying`);
+          throw new Error(`${GEMINI_BILLING_EXHAUSTED_MARKER} ${text.slice(0, 300)}`);
+        }
         if ((response.status === 429 || response.status === 503) && attempt < 3) continue;
         console.error(`[gemini:cash_register] HTTP ${response.status} attempt=${attempt}:`, text.slice(0, 300));
         return null;
@@ -973,6 +1061,8 @@ export async function extractCashRegisterData(
         extraction_confidence: confidence,
       };
     } catch (err: any) {
+      if (isBillingExhaustedGeminiError(err)) throw err; // permanent — don't swallow into the retry loop
+      if (isGeminiTimeoutError(err)) throw err; // hung once on this file — retrying is likely to hang again
       console.error(`[gemini:cash_register] attempt=${attempt} error:`, err?.message);
       if (attempt === 3) return null;
     }

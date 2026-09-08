@@ -10,6 +10,7 @@ import {
   isSupportedFile,
   TelegramUpdate,
 } from '@/lib/telegram';
+import { shouldWebhookSendFallbackMessage } from '@/lib/telegram-webhook-helpers';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -546,7 +547,12 @@ async function handleFileUpload(
 
       let finalText = '';
 
-      if (cashRegister) {
+      if (result.duplicate) {
+        // process/route.ts already edited/sent the Telegram message directly
+        // for this case (lib/document-dedup.ts) — sending another one here
+        // would silently overwrite it. Just log for our own visibility.
+        console.log(`[Telegram upload] Duplicate skipped by content hash. documentId=${document.id} verdict=${result.duplicate.kind} matched=${result.duplicate.matchedDocumentId}`);
+      } else if (cashRegister) {
         const fmtAmt = (v: number) => v.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
         if (cashRegister.is_screenshot) {
@@ -621,16 +627,24 @@ async function handleFileUpload(
       }
     } else {
       console.error(`[Telegram upload] ❌ Process failed. documentId=${document.id} status=${processResponse.status} body=${processBody}`);
-      let failText = '❌ <b>Error extrayendo datos</b>\n\nNo se pudo procesar este archivo.';
-      if (isPhotoMessage) {
-        failText += '\n\n💡 <b>Consejo:</b> Para mejores resultados, envía la foto como <b>archivo</b> (botón de clip → Archivo) en lugar de como foto. Así se preserva la calidad original.';
-      } else {
-        failText += '\n\nInténtalo de nuevo o sube la factura desde el panel web.';
-      }
-      if (statusMsg) {
-        await editMessage(botToken, chatId, statusMsg.message_id, failText);
-      } else {
-        await sendMessage(botToken, chatId, failText);
+
+      // process/route.ts's own catch block already sends a specific,
+      // accurate Telegram message (it has doc.telegram_chat_id by the time
+      // it fails) — see the 2026-09-07 diagnóstico: this branch used to
+      // ALWAYS overwrite that specific message ("Servicio de IA ocupado...",
+      // billing-exhausted, etc.) with this generic one, so users never saw
+      // the real reason. Only send a fallback here for statuses where
+      // process/route.ts could NOT have reached its own error handler.
+      if (shouldWebhookSendFallbackMessage(processResponse.status)) {
+        let failText = '❌ <b>Documento no encontrado</b>\n\nInténtalo de nuevo o sube la factura desde el panel web.';
+        if (isPhotoMessage) {
+          failText += '\n\n💡 <b>Consejo:</b> Para mejores resultados, envía la foto como <b>archivo</b> (botón de clip → Archivo) en lugar de como foto. Así se preserva la calidad original.';
+        }
+        if (statusMsg) {
+          await editMessage(botToken, chatId, statusMsg.message_id, failText);
+        } else {
+          await sendMessage(botToken, chatId, failText);
+        }
       }
     }
   } catch (error: any) {

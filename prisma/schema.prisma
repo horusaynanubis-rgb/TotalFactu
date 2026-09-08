@@ -226,6 +226,9 @@ model Document {
   is_public            Boolean  @default(false)
   telegram_chat_id     String?  // For sending status updates via Telegram
   telegram_message_id  Int?     // Message ID for editing status messages
+  content_hash         String?  // sha256 of the extracted file content — used to detect
+                                 // the same file being (re)sent multiple times before
+                                 // burning another Gemini call. See lib/document-dedup.ts.
   created_at           DateTime @default(now())
   updated_at           DateTime @updatedAt
 
@@ -239,6 +242,7 @@ model Document {
   @@index([processing_status])
   @@index([source_channel])
   @@index([upload_timestamp])
+  @@index([company_id, content_hash])
 }
 
 model TelegramLink {

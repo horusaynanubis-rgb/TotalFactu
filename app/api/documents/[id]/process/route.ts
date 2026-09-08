@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { fetchDocumentAsBase64 } from '@/lib/document-file';
-import { extractInvoiceData, extractCashRegisterData, detectRoleAmbiguity, clarifyRolesWithGemini, InvoiceExtraction, CompanyContext } from '@/lib/ai-extraction';
+import { extractInvoiceData, extractCashRegisterData, detectRoleAmbiguity, clarifyRolesWithGemini, isBillingExhaustedGeminiError, isGeminiTimeoutError, InvoiceExtraction, CompanyContext } from '@/lib/ai-extraction';
 import { classifyInvoiceType } from '@/lib/invoice-type-classifier';
 import { sendMessage, editMessage } from '@/lib/telegram';
 import { normalizeDescription } from '@/lib/supplier-analysis';
 import { classifyInvoiceRate, IvaLineInput } from '@/lib/iva-classification';
 import { computeFiscalStatus } from '@/lib/fiscal-status';
 import { checkDuplicate, candidateLookupWindow, DuplicateInvoiceRef } from '@/lib/duplicate-detection';
+import { computeContentHash, evaluateDuplicate, DUPLICATE_USER_MESSAGES, DUPLICATE_STATUS_BY_VERDICT } from '@/lib/document-dedup';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -78,6 +79,66 @@ export async function POST(
     processingPhase = 'storage_download';
     console.log(`[process:diag] documentId=${documentId} source_channel=${document.source_channel} storagePath=${document.cloud_storage_path} stored_mimeType=${document.mime_type}`);
     const { fileBase64, effectiveMime } = await fetchDocumentAsBase64(document, 'process:diag');
+
+    // ── Pre-Gemini duplicate detection by raw file content ─────────────────
+    // Persist the hash unconditionally (needed for future lookups even when
+    // this particular document isn't itself a duplicate), then check whether
+    // this exact file is already being handled — before spending a Gemini call.
+    processingPhase = 'duplicate_hash_check';
+    const contentHash = computeContentHash(fileBase64);
+    await prisma.document.update({ where: { id: documentId }, data: { content_hash: contentHash } });
+
+    const priorSameFile = await prisma.document.findFirst({
+      where: { company_id: document.company_id, content_hash: contentHash, NOT: { id: documentId } },
+      orderBy: { updated_at: 'desc' },
+      select: { id: true, processing_status: true, updated_at: true },
+    });
+    const dupVerdict = evaluateDuplicate(priorSameFile);
+
+    if (dupVerdict.kind !== 'none') {
+      const skipStatus = DUPLICATE_STATUS_BY_VERDICT[dupVerdict.kind];
+      const userMessage = DUPLICATE_USER_MESSAGES[dupVerdict.kind];
+      console.log(`[dedup] documentId=${documentId} verdict=${dupVerdict.kind} matchedDocumentId=${dupVerdict.matchedDocumentId} — skipping Gemini call`);
+
+      const updatedDocument = await prisma.document.update({
+        where: { id: documentId },
+        data: { processing_status: skipStatus },
+      });
+
+      await prisma.auditLog.create({
+        data: {
+          company_id: document.company_id,
+          user_id: null,
+          entity_type: 'document',
+          entity_id: documentId,
+          action: 'file_hash_duplicate_skipped',
+          new_values: JSON.stringify({
+            verdict: dupVerdict.kind,
+            matched_document_id: dupVerdict.matchedDocumentId,
+            original_filename: document.original_filename,
+            source_channel: document.source_channel,
+          }),
+        },
+      }).catch((auditErr: any) => console.error('[dedup] AuditLog write failed (non-fatal):', auditErr?.message));
+
+      // Notify Telegram directly here (same convention as the main catch
+      // block below) since we return before the normal success/error flow.
+      if (document.telegram_chat_id) {
+        const botToken = process.env.TELEGRAM_BOT_TOKEN;
+        if (botToken) {
+          if (document.telegram_message_id) {
+            await editMessage(botToken, document.telegram_chat_id, document.telegram_message_id, userMessage);
+          } else {
+            await sendMessage(botToken, document.telegram_chat_id, userMessage);
+          }
+        }
+      }
+
+      return NextResponse.json({
+        document: updatedDocument,
+        duplicate: { blocked: true, kind: dupVerdict.kind, matchedDocumentId: dupVerdict.matchedDocumentId, message: userMessage },
+      });
+    }
 
     // Build AI provider config
     const companyProvider = document.company?.ai_provider;
@@ -521,11 +582,21 @@ export async function POST(
     return NextResponse.json({ document: updatedDocument, invoice });
   } catch (error: any) {
     const errorMessage: string = error?.message ?? 'Unknown error';
+    const billingExhausted = isBillingExhaustedGeminiError(error);
+    const geminiTimedOut = isGeminiTimeoutError(error);
+    const errorType = billingExhausted
+      ? 'billing_exhausted'
+      : geminiTimedOut
+        ? 'timeout'
+        : (errorMessage.includes('429') || errorMessage.includes('503') || errorMessage.includes('RESOURCE_EXHAUSTED') || errorMessage.includes('UNAVAILABLE') || errorMessage.includes('high demand'))
+          ? 'rate_limit_transient'
+          : 'other';
 
     console.error(
       '[process] ❌ FAILED',
       `documentId=${params.id}`,
       `phase=${processingPhase}`,
+      `errorType=${errorType}`,
       `error=${errorMessage}`,
       '\nStack:', error?.stack,
     );
@@ -547,6 +618,7 @@ export async function POST(
           action: 'process_error',
           new_values: JSON.stringify({
             phase: processingPhase,
+            error_type: errorType,
             original_filename: doc.original_filename,
             source_channel: doc.source_channel,
             mime_type: doc.mime_type,
@@ -565,7 +637,17 @@ export async function POST(
         let msg: string;
         const isImage = doc.mime_type.startsWith('image/');
 
-        if (processingPhase === 'storage_download' || errorMessage.includes('storage fetch failed')) {
+        if (billingExhausted) {
+          // Permanent block, not a "try again in a few minutes" situation —
+          // saying that would just invite the exact resend storm from the
+          // 2026-09-07 incident. No technical/billing details exposed.
+          msg = '⚠️ <b>Servicio de IA no disponible</b>\n\nNuestro equipo ya ha sido notificado y está trabajando en ello. Inténtalo más tarde o sube la factura desde el panel web.';
+        } else if (geminiTimedOut) {
+          // Root cause of the 2026-09-08 live incident: this specific file
+          // made Gemini hang past our timeout. Retrying the exact same file
+          // immediately tends to hang again — steer them to the web panel.
+          msg = '⏳ <b>El documento tardó demasiado en procesarse</b>\n\nPuede deberse a un archivo complejo o muy pesado. Sube la factura desde el panel web, donde el procesamiento puede tomarse más tiempo.';
+        } else if (processingPhase === 'storage_download' || errorMessage.includes('storage fetch failed')) {
           msg = '❌ <b>No se pudo subir el archivo</b>\n\nError al acceder al documento guardado. Inténtalo de nuevo.';
         } else if (processingPhase === 'cash_register') {
           if (errorMessage.includes('429') || errorMessage.includes('503') || errorMessage.includes('RESOURCE_EXHAUSTED') || errorMessage.includes('UNAVAILABLE')) {
