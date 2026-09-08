@@ -75,24 +75,12 @@ export interface CompanyContext {
 // Prompt builder — injects company context when available
 // ---------------------------------------------------------------------------
 
-function buildExtractionPrompt(ctx?: CompanyContext): string {
-  const contextBlock = ctx
-    ? `
-ACCOUNT OWNER CONTEXT — use this to determine invoice roles:
-  Legal name: ${ctx.name}
-  Tax ID (CIF/NIF): ${ctx.tax_id}${ctx.aliases && ctx.aliases.length > 0 ? `
-  Known aliases: ${ctx.aliases.join(', ')}` : ''}
-
-  - If the account owner appears as RECIPIENT/CUSTOMER → invoice_type = "received"
-  - If the account owner appears as ISSUER/SUPPLIER → invoice_type = "issued"
-  - Tax ID match takes priority over name match.
-`
-    : '';
-
-  return `You are a document data extraction system. Extract structured data from this document.
-Support multilingual documents (Spanish, English, French, German, Italian, Portuguese).
-${contextBlock}
-ROLE IDENTIFICATION RULES — apply these carefully before setting supplier_name and customer_name:
+// Shared between the NORMAL prompt and the LARGE_INVOICE header-only prompt —
+// both need correct issuer/recipient identification; only NORMAL also asks
+// for line_items. Factored out so the two prompts can never drift apart on
+// this logic. See lib/document-dedup.ts-style rationale comments below for
+// why LARGE_INVOICE exists at all (2026-09-08 MAX_TOKENS incidents).
+const ROLE_IDENTIFICATION_RULES = `ROLE IDENTIFICATION RULES — apply these carefully before setting supplier_name and customer_name:
 
 1. ISSUER/SUPPLIER (emisor/proveedor) is the company that:
    - Appears in the document HEADER with its logo, full address, phone, web, and fiscal registration data
@@ -107,7 +95,30 @@ ROLE IDENTIFICATION RULES — apply these carefully before setting supplier_name
 
 4. If a company has a prominent header position with logo/web/phone/address, that company is the issuer regardless of other mentions.
 
-5. supplier_name must be the ISSUER (header company). customer_name must be the RECIPIENT (Cliente/Centro block).
+5. supplier_name must be the ISSUER (header company). customer_name must be the RECIPIENT (Cliente/Centro block).`;
+
+function buildAccountOwnerContextBlock(ctx?: CompanyContext): string {
+  return ctx
+    ? `
+ACCOUNT OWNER CONTEXT — use this to determine invoice roles:
+  Legal name: ${ctx.name}
+  Tax ID (CIF/NIF): ${ctx.tax_id}${ctx.aliases && ctx.aliases.length > 0 ? `
+  Known aliases: ${ctx.aliases.join(', ')}` : ''}
+
+  - If the account owner appears as RECIPIENT/CUSTOMER → invoice_type = "received"
+  - If the account owner appears as ISSUER/SUPPLIER → invoice_type = "issued"
+  - Tax ID match takes priority over name match.
+`
+    : '';
+}
+
+function buildExtractionPrompt(ctx?: CompanyContext): string {
+  const contextBlock = buildAccountOwnerContextBlock(ctx);
+
+  return `You are a document data extraction system. Extract structured data from this document.
+Support multilingual documents (Spanish, English, French, German, Italian, Portuguese).
+${contextBlock}
+${ROLE_IDENTIFICATION_RULES}
 
 Rules:
 - Do NOT hallucinate or invent values. If a field is not found, use null or empty string.
@@ -167,6 +178,98 @@ Rules for line_items:
 - quantity, unit_price, tax_rate, total_amount can be null if not visible for a line.
 - description must be non-empty for each item.`;
 }
+
+// ---------------------------------------------------------------------------
+// LARGE_INVOICE mode — two-pass extraction for documents that overflow the
+// normal single-call JSON (see extractWithGeminiAdaptive below for the
+// selection/fallback logic). Header-only and lines-only prompts, each with
+// its own tight token budget, instead of one JSON response that has to fit
+// header + every line simultaneously.
+// ---------------------------------------------------------------------------
+
+/**
+ * Same header fields as buildExtractionPrompt(), deliberately WITHOUT
+ * line_items — asking for everything except the potentially-huge line
+ * array is what keeps this pass's output small and fast regardless of how
+ * many products/services the invoice actually has.
+ */
+function buildHeaderOnlyPrompt(ctx?: CompanyContext): string {
+  const contextBlock = buildAccountOwnerContextBlock(ctx);
+
+  return `You are a document data extraction system. Extract ONLY the header/summary fields from this document — do NOT extract individual line items, they will be requested separately.
+Support multilingual documents (Spanish, English, French, German, Italian, Portuguese).
+${contextBlock}
+${ROLE_IDENTIFICATION_RULES}
+
+Rules:
+- Do NOT hallucinate or invent values. If a field is not found, use null or empty string.
+- Dates must be in YYYY-MM-DD format when possible. If only partial date is found, normalize it.
+- All monetary amounts must be numbers (not strings).
+- document_type: "invoice" if it is a tax invoice (factura), "delivery_note" if it is a delivery note / albaran / albarán / bon de livraison / Lieferschein (NOT a fiscal document), "cash_register" if it is a daily TPV/cash closure report, "unknown" if unclear.
+- delivery_note_number: the delivery note number if document_type is "delivery_note", otherwise null.
+- invoice_type: "received" if this is an invoice received from a supplier, "issued" if sent to a customer. Use "received" for delivery_note documents.
+- subtotal/tax_amount/total_amount: the document's TOTALS as printed (not a sum you compute from lines — you are not seeing the lines in this pass).
+- extraction_confidence: a number between 0 and 1 indicating overall extraction quality.
+- needs_review: true if confidence < 0.7 or if critical fields are missing.
+- issuer_name/issuer_tax_id: exact company name/tax ID found in the document header/logo area.
+- recipient_name/recipient_tax_id: exact company name/tax ID found inside a Cliente/Centro/Destinatario block.
+
+Respond with raw JSON only (no markdown, no code blocks). Use this exact structure — do NOT include a line_items field:
+{
+  "document_type": "invoice" or "delivery_note" or "cash_register" or "unknown",
+  "delivery_note_number": null,
+  "invoice_type": "received" or "issued",
+  "invoice_number": "string or empty",
+  "issue_date": "YYYY-MM-DD or empty",
+  "due_date": "YYYY-MM-DD or null",
+  "supplier_name": "ISSUER company name (from header/logo area — NOT from Cliente block)",
+  "supplier_tax_id": "string or null",
+  "customer_name": "RECIPIENT company name (from Cliente/Centro/Destinatario block)",
+  "customer_tax_id": "string or null",
+  "subtotal": 0.00,
+  "tax_amount": 0.00,
+  "total_amount": 0.00,
+  "currency": "EUR",
+  "tax_rate": null,
+  "payment_method": null,
+  "category": null,
+  "notes": null,
+  "extraction_confidence": 0.95,
+  "needs_review": false,
+  "issuer_name": "company name found in document header/logo area",
+  "issuer_tax_id": null,
+  "recipient_name": "company name found in Cliente/Centro/Destinatario block",
+  "recipient_tax_id": null
+}`;
+}
+
+/**
+ * The ONLY fields InvoiceLine actually persists today (description,
+ * quantity, unit_price, tax_rate, total_amount) — deliberately matches
+ * InvoiceLineItem exactly, no more. No supplier/customer/dates/reasoning
+ * repeated here, which is the whole point: this pass's output scales only
+ * with the number of real lines, not with header field count too.
+ */
+const LARGE_INVOICE_LINES_PROMPT = `You are looking at an invoice/receipt document. Extract ONLY the individual line items (products, services, fees) — do NOT extract supplier, customer, dates, or totals, they were already extracted separately.
+
+Rules:
+- Extract every line from the invoice (products, services, fees), across all pages if there are several.
+- Do NOT invent or estimate lines. Only include what is explicitly shown.
+- quantity, unit_price, tax_rate, total_amount can be null if not visible for a line.
+- description must be non-empty for each item.
+
+Respond with raw JSON only (no markdown, no code blocks). Use this exact structure:
+{
+  "line_items": [
+    {
+      "description": "Product or service name as shown on the document",
+      "quantity": 1.0,
+      "unit_price": 9.99,
+      "tax_rate": 21.0,
+      "total_amount": 12.09
+    }
+  ]
+}`;
 
 // ---------------------------------------------------------------------------
 // Role ambiguity detection
@@ -584,9 +687,15 @@ function isGeminiRetriableError(status: number, body: string): boolean {
 // A client-side timeout turns that silent hang into a clean, fast failure.
 export const GEMINI_TIMEOUT_MARKER = 'Gemini:TIMEOUT:';
 
-// Kept safely under the 60s maxDuration of both app/api/documents/[id]/process
-// and the webhook route that calls it synchronously and waits — leaves
-// headroom for storage download, DB writes, and the Telegram round-trip.
+// 2026-09-08: tried raising 40s -> 55s but reverted — confirmed via
+// analysis that it leaves only ~5s combined budget for storage_download +
+// prep + DB writes within the 60s maxDuration shared by this route AND
+// the Telegram webhook that calls it synchronously (whose own clock starts
+// even earlier). Too risky: a slow write or network blip could get the
+// whole function SIGKILLed before reaching the catch block — the exact
+// failure mode this timeout exists to prevent. Real fix is decoupling
+// long Gemini calls from the synchronous webhook request (see diagnóstico
+// 2026-09-08) rather than stretching this timeout further.
 const GEMINI_FETCH_TIMEOUT_MS = 40_000;
 
 /**
@@ -623,10 +732,22 @@ export function isGeminiTimeoutError(err: unknown): boolean {
   return err instanceof Error && err.message.startsWith(GEMINI_TIMEOUT_MARKER);
 }
 
+// Marker for a truncated response (finishReason=MAX_TOKENS) — the JSON was
+// cut off mid-generation, guaranteed unparseable/incomplete. Distinct from
+// timeout/billing so extractWithGeminiAdaptive can detect specifically this
+// case and fall back to LARGE_INVOICE mode (2026-09-08) instead of just
+// failing the document.
+export const GEMINI_MAX_TOKENS_MARKER = 'Gemini:MAX_TOKENS:';
+
+export function isMaxTokensGeminiError(err: unknown): boolean {
+  return err instanceof Error && err.message.startsWith(GEMINI_MAX_TOKENS_MARKER);
+}
+
 async function extractWithGemini(
   fileBase64: string,
   mimeType: string,
   companyContext?: CompanyContext,
+  documentId?: string,
 ): Promise<InvoiceExtraction> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
@@ -649,7 +770,9 @@ async function extractWithGemini(
   const thinkingBudget = 1024;
 
   const fileSizeKb = Math.round((fileBase64.length * 3) / 4 / 1024);
-  console.log(`[gemini:diag] provider=gemini model=${model} mimeType=${mimeType} base64Length=${fileBase64.length} estimatedSizeKb=${fileSizeKb} maxOutputTokens=${maxOutputTokens} thinkingBudget=${thinkingBudget} hasCompanyCtx=${!!companyContext}`);
+  console.log(`[gemini:mode] normal documentId=${documentId ?? 'n/a'}`);
+  console.log(`[gemini:diag] documentId=${documentId ?? 'n/a'} provider=gemini model=${model} mimeType=${mimeType} base64Length=${fileBase64.length} estimatedSizeKb=${fileSizeKb} maxOutputTokens=${maxOutputTokens} thinkingBudget=${thinkingBudget} hasCompanyCtx=${!!companyContext}`);
+  const callStartedAt = Date.now();
 
   const prompt = buildExtractionPrompt(companyContext);
 
@@ -707,20 +830,22 @@ async function extractWithGemini(
     const data = await response.json();
     const finishReason: string = data?.candidates?.[0]?.finishReason ?? 'UNKNOWN';
     const usageMetadata = data?.usageMetadata ?? null;
-    console.log(`[gemini:diag] candidates=${data?.candidates?.length} finishReason=${finishReason} usage=${JSON.stringify(usageMetadata)}`);
+    const latencyMs = Date.now() - callStartedAt;
+    console.log(`[gemini:diag] documentId=${documentId ?? 'n/a'} mode=normal candidates=${data?.candidates?.length} finishReason=${finishReason} latencyMs=${latencyMs} promptTokenCount=${usageMetadata?.promptTokenCount ?? 'n/a'} candidatesTokenCount=${usageMetadata?.candidatesTokenCount ?? 'n/a'} thoughtsTokenCount=${usageMetadata?.thoughtsTokenCount ?? 'n/a'} totalTokenCount=${usageMetadata?.totalTokenCount ?? 'n/a'}`);
 
     if (finishReason === 'MAX_TOKENS') {
       const inputTokens = usageMetadata?.promptTokenCount ?? 'unknown';
       const outputTokens = usageMetadata?.candidatesTokenCount ?? 'unknown';
       console.error(
         `[gemini:diag] ⚠️ finishReason=MAX_TOKENS — output truncated`,
+        `documentId=${documentId ?? 'n/a'}`,
         `model=${model}`,
         `maxOutputTokens=${maxOutputTokens}`,
         `mimeType=${mimeType}`,
         `inputTokens=${inputTokens}`,
         `outputTokens=${outputTokens}`,
       );
-      throw new Error('Gemini:MAX_TOKENS: La factura tiene demasiadas líneas para el límite actual de extracción.');
+      throw new Error(`${GEMINI_MAX_TOKENS_MARKER} La factura tiene demasiadas líneas para el límite actual de extracción.`);
     }
 
     if (finishReason === 'SAFETY') {
@@ -757,6 +882,271 @@ async function extractWithGemini(
   }
 
   throw lastError;
+}
+
+// ---------------------------------------------------------------------------
+// LARGE_INVOICE mode — header-only and lines-only Gemini calls, plus the
+// adaptive wrapper that decides between NORMAL and LARGE_INVOICE.
+// ---------------------------------------------------------------------------
+
+// Deliberately tight, single-attempt, no internal retry (see
+// extractWithGeminiAdaptive doc comment for why): a document that already
+// overflowed NORMAL's 16000-token budget is on a best-effort fallback path
+// within whatever's left of the route's 60s maxDuration, not a path that
+// should spend time retrying.
+const LARGE_INVOICE_HEADER_TIMEOUT_MS = 20_000;
+const LARGE_INVOICE_LINES_TIMEOUT_MS = 25_000;
+
+// Header pass: ~20 short fields, no lines — real successful NORMAL calls
+// produced 483-1066 output tokens INCLUDING up to 8 lines, so header alone
+// should need a small fraction of that. 2048 gives 2-4x headroom.
+// thinkingBudget halved vs NORMAL's 1024: this pass is a strict subset of
+// NORMAL's complexity (same role-identification reasoning, no per-line
+// reasoning), so some reduction is defensible; not cut further since role
+// identification is still real reasoning work.
+const LARGE_INVOICE_HEADER_MAX_OUTPUT_TOKENS = 2048;
+const LARGE_INVOICE_HEADER_THINKING_BUDGET = 512;
+
+// Lines pass: the two real MAX_TOKENS documents got cut off at 7193/7201
+// combined header+lines tokens with only ~790 of that spent on thinking —
+// meaning ~6400+ tokens were lines alone, truncated mid-way (true total
+// unknown). 12000 dedicated entirely to lines is ~1.7x that already-large
+// truncation point, while staying 25% below the global 16000 ceiling and
+// far below the old 32000. thinkingBudget kept at the full 1024 (not
+// reduced like the header pass) because matching many rows of
+// description/quantity/price/tax accurately is the most error-prone part
+// of the whole pipeline — not the place to cut reasoning budget.
+const LARGE_INVOICE_LINES_MAX_OUTPUT_TOKENS = 12000;
+const LARGE_INVOICE_LINES_THINKING_BUDGET = 1024;
+
+/**
+ * PASADA 1 (LARGE_INVOICE): header/summary fields only, no line_items.
+ * Reuses validateExtraction() unchanged — omitting line_items from the raw
+ * JSON is already handled gracefully there (defaults to []).
+ */
+async function extractInvoiceHeaderOnly(
+  fileBase64: string,
+  mimeType: string,
+  companyContext?: CompanyContext,
+  documentId?: string,
+): Promise<InvoiceExtraction> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
+
+  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash-preview-04-17';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const prompt = buildHeaderOnlyPrompt(companyContext);
+
+  const body = {
+    contents: [{ parts: [{ inlineData: { mimeType, data: fileBase64 } }, { text: prompt }] }],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      maxOutputTokens: LARGE_INVOICE_HEADER_MAX_OUTPUT_TOKENS,
+      thinkingConfig: { thinkingBudget: LARGE_INVOICE_HEADER_THINKING_BUDGET },
+    },
+  };
+
+  console.log(`[gemini:mode] large_invoice_header documentId=${documentId ?? 'n/a'}`);
+  const callStartedAt = Date.now();
+
+  const response = await fetchGeminiWithTimeout(url, body, LARGE_INVOICE_HEADER_TIMEOUT_MS);
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => response.statusText);
+    if (isBillingExhaustedError(response.status, errorText)) {
+      throw new Error(`${GEMINI_BILLING_EXHAUSTED_MARKER} ${errorText.slice(0, 300)}`);
+    }
+    throw new Error(`Gemini API error (${response.status}): ${errorText.slice(0, 300)}`);
+  }
+
+  const data = await response.json();
+  const finishReason: string = data?.candidates?.[0]?.finishReason ?? 'UNKNOWN';
+  const usageMetadata = data?.usageMetadata ?? null;
+  const latencyMs = Date.now() - callStartedAt;
+  console.log(`[gemini:diag] documentId=${documentId ?? 'n/a'} mode=large_invoice_header candidates=${data?.candidates?.length} finishReason=${finishReason} latencyMs=${latencyMs} promptTokenCount=${usageMetadata?.promptTokenCount ?? 'n/a'} candidatesTokenCount=${usageMetadata?.candidatesTokenCount ?? 'n/a'} thoughtsTokenCount=${usageMetadata?.thoughtsTokenCount ?? 'n/a'} totalTokenCount=${usageMetadata?.totalTokenCount ?? 'n/a'}`);
+
+  if (finishReason === 'MAX_TOKENS') {
+    // Header alone should never realistically hit 2048 — if it does, this
+    // document is too anomalous for the fallback too. Fail cleanly, no
+    // further fallback (see Fase 4: never loop).
+    throw new Error(`${GEMINI_MAX_TOKENS_MARKER} La cabecera de la factura excede el límite de la pasada de cabecera.`);
+  }
+  if (finishReason === 'SAFETY' || finishReason === 'RECITATION') {
+    throw new Error(`Gemini API error (${finishReason}): response blocked`);
+  }
+
+  const content = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!content) throw new Error(`No content in Gemini response (finishReason=${finishReason})`);
+
+  let rawJson: any;
+  try {
+    rawJson = JSON.parse(content);
+  } catch {
+    throw new Error('Gemini response is not valid JSON');
+  }
+
+  return validateExtraction(rawJson);
+}
+
+/**
+ * PASADA 2 (LARGE_INVOICE): line_items only. Returns InvoiceLineItem[]
+ * directly (not a full InvoiceExtraction) — merged with the header result
+ * by mergeLargeInvoiceResult().
+ */
+async function extractInvoiceLinesOnly(
+  fileBase64: string,
+  mimeType: string,
+  documentId?: string,
+): Promise<InvoiceLineItem[]> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
+
+  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash-preview-04-17';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+  const body = {
+    contents: [{ parts: [{ inlineData: { mimeType, data: fileBase64 } }, { text: LARGE_INVOICE_LINES_PROMPT }] }],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      maxOutputTokens: LARGE_INVOICE_LINES_MAX_OUTPUT_TOKENS,
+      thinkingConfig: { thinkingBudget: LARGE_INVOICE_LINES_THINKING_BUDGET },
+    },
+  };
+
+  console.log(`[gemini:mode] large_invoice_lines documentId=${documentId ?? 'n/a'}`);
+  const callStartedAt = Date.now();
+
+  const response = await fetchGeminiWithTimeout(url, body, LARGE_INVOICE_LINES_TIMEOUT_MS);
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => response.statusText);
+    if (isBillingExhaustedError(response.status, errorText)) {
+      throw new Error(`${GEMINI_BILLING_EXHAUSTED_MARKER} ${errorText.slice(0, 300)}`);
+    }
+    throw new Error(`Gemini API error (${response.status}): ${errorText.slice(0, 300)}`);
+  }
+
+  const data = await response.json();
+  const finishReason: string = data?.candidates?.[0]?.finishReason ?? 'UNKNOWN';
+  const usageMetadata = data?.usageMetadata ?? null;
+  const latencyMs = Date.now() - callStartedAt;
+  console.log(`[gemini:diag] documentId=${documentId ?? 'n/a'} mode=large_invoice_lines candidates=${data?.candidates?.length} finishReason=${finishReason} latencyMs=${latencyMs} promptTokenCount=${usageMetadata?.promptTokenCount ?? 'n/a'} candidatesTokenCount=${usageMetadata?.candidatesTokenCount ?? 'n/a'} thoughtsTokenCount=${usageMetadata?.thoughtsTokenCount ?? 'n/a'} totalTokenCount=${usageMetadata?.totalTokenCount ?? 'n/a'}`);
+
+  if (finishReason === 'MAX_TOKENS') {
+    // Even the dedicated 12000-token lines pass overflowed — a genuinely
+    // extreme document. Fail cleanly rather than attempting a 3rd pass
+    // (Fase 4: bounded to exactly one LARGE_INVOICE attempt).
+    throw new Error(`${GEMINI_MAX_TOKENS_MARKER} Las líneas de la factura exceden el límite de la pasada de líneas.`);
+  }
+  if (finishReason === 'SAFETY' || finishReason === 'RECITATION') {
+    throw new Error(`Gemini API error (${finishReason}): response blocked`);
+  }
+
+  const content = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!content) throw new Error(`No content in Gemini response (finishReason=${finishReason})`);
+
+  let rawJson: any;
+  try {
+    rawJson = JSON.parse(content);
+  } catch {
+    throw new Error('Gemini response is not valid JSON');
+  }
+
+  return validateLineItems(rawJson.line_items);
+}
+
+/**
+ * FASE 5 — merge: combines the header pass result with the lines pass
+ * result into a standard InvoiceExtraction, indistinguishable downstream
+ * from a NORMAL-mode result. This is what lets process/route.ts (Invoice
+ * creation, classification, duplicate detection, fiscal status, audit
+ * logging) stay completely untouched by LARGE_INVOICE mode.
+ */
+export function mergeLargeInvoiceResult(
+  header: InvoiceExtraction,
+  lineItems: InvoiceLineItem[],
+): InvoiceExtraction {
+  const merged: InvoiceExtraction = { ...header, line_items: lineItems };
+  // Re-run the same review-trigger logic NORMAL mode uses — header alone
+  // already covers every field it checks (line_items isn't one of them),
+  // but re-running keeps this merge point the single source of truth
+  // rather than trusting the header pass's own needs_review in isolation.
+  merged.needs_review = shouldRequireReview(merged) || header.needs_review;
+  return merged;
+}
+
+/**
+ * FASE 3 — adaptive mode selection. Always tries NORMAL first (single
+ * Gemini call, unchanged behavior/config from before this feature). Falls
+ * back to LARGE_INVOICE — exactly once, never looping — ONLY when NORMAL's
+ * failure is specifically MAX_TOKENS.
+ *
+ * No pre-Gemini signal (page count, file size) is used to pick
+ * LARGE_INVOICE upfront: file size does NOT correlate with complexity in
+ * the real data we have (the two documents that hit MAX_TOKENS were
+ * 148-151KB, squarely inside the 118-205KB range of documents that
+ * succeeded normally), and this project has no PDF-parsing dependency to
+ * get a real page count. Inventing a KB threshold anyway would be exactly
+ * the "umbral arbitrario sin explicar por qué" this was told not to do.
+ * MAX_TOKENS-triggered fallback is the only signal we actually have
+ * evidence for.
+ *
+ * All other error types (timeout, billing exhausted, 429/503, safety,
+ * invalid JSON, storage) propagate unchanged — this function does not
+ * touch that policy at all, satisfying Fase 4's "no mezcles MAX_TOKENS con
+ * errores transitorios."
+ */
+async function extractWithGeminiAdaptive(
+  fileBase64: string,
+  mimeType: string,
+  companyContext?: CompanyContext,
+  documentId?: string,
+): Promise<InvoiceExtraction> {
+  try {
+    return await extractWithGemini(fileBase64, mimeType, companyContext, documentId);
+  } catch (err) {
+    if (!isMaxTokensGeminiError(err)) {
+      throw err; // timeout/billing/429/503/safety/invalid-json — unchanged policy
+    }
+
+    console.warn(`[gemini:mode] documentId=${documentId ?? 'n/a'} NORMAL hit MAX_TOKENS — falling back to LARGE_INVOICE (one attempt, no further fallback)`);
+
+    // Never retries NORMAL again — this is the only place LARGE_INVOICE is
+    // triggered, and it always originates from a NORMAL attempt above.
+    const header = await extractInvoiceHeaderOnly(fileBase64, mimeType, companyContext, documentId);
+    const lineItems = await extractInvoiceLinesOnly(fileBase64, mimeType, documentId);
+    return mergeLargeInvoiceResult(header, lineItems);
+  }
+}
+
+/**
+ * Validates/sanitizes a raw line_items array from any Gemini response —
+ * shared by validateExtraction() (NORMAL mode, embedded in the full JSON)
+ * and the LARGE_INVOICE lines-only pass (its own dedicated JSON shape).
+ * Keeping this in one place is what lets the two modes merge into an
+ * identical InvoiceLineItem[] shape without duplicating validation logic.
+ */
+export function validateLineItems(rawLineItems: any): InvoiceLineItem[] {
+  const safeNumber = (v: any, fallback = 0): number => {
+    if (v === null || v === undefined) return fallback;
+    const n = Number(v);
+    return isNaN(n) ? fallback : n;
+  };
+  const safeString = (v: any, fallback = ''): string => {
+    if (v === null || v === undefined) return fallback;
+    return String(v).trim();
+  };
+
+  const items: any[] = Array.isArray(rawLineItems) ? rawLineItems : [];
+  return items
+    .filter((item: any) => item && typeof item.description === 'string' && item.description.trim())
+    .map((item: any) => ({
+      description: safeString(item.description),
+      quantity: item.quantity !== null && item.quantity !== undefined ? safeNumber(item.quantity) : null,
+      unit_price: item.unit_price !== null && item.unit_price !== undefined ? safeNumber(item.unit_price) : null,
+      tax_rate: item.tax_rate !== null && item.tax_rate !== undefined ? safeNumber(item.tax_rate) : null,
+      total_amount: item.total_amount !== null && item.total_amount !== undefined ? safeNumber(item.total_amount) : null,
+    }));
 }
 
 /**
@@ -807,16 +1197,7 @@ export function validateExtraction(raw: any): InvoiceExtraction {
     ? safeString(raw.invoice_type)
     : 'received';
 
-  const rawLineItems: any[] = Array.isArray(raw.line_items) ? raw.line_items : [];
-  const line_items: InvoiceLineItem[] = rawLineItems
-    .filter((item: any) => item && typeof item.description === 'string' && item.description.trim())
-    .map((item: any) => ({
-      description: safeString(item.description),
-      quantity: item.quantity !== null && item.quantity !== undefined ? safeNumber(item.quantity) : null,
-      unit_price: item.unit_price !== null && item.unit_price !== undefined ? safeNumber(item.unit_price) : null,
-      tax_rate: item.tax_rate !== null && item.tax_rate !== undefined ? safeNumber(item.tax_rate) : null,
-      total_amount: item.total_amount !== null && item.total_amount !== undefined ? safeNumber(item.total_amount) : null,
-    }));
+  const line_items: InvoiceLineItem[] = validateLineItems(raw.line_items);
 
   const extraction: InvoiceExtraction = {
     document_type: documentType,
@@ -875,9 +1256,10 @@ export async function extractInvoiceData(
   filename: string,
   providerConfig?: AIProviderConfig,
   companyContext?: CompanyContext,
+  documentId?: string,
 ): Promise<InvoiceExtraction> {
   if (isGeminiProvider(providerConfig)) {
-    return extractWithGemini(fileBase64, mimeType, companyContext);
+    return extractWithGeminiAdaptive(fileBase64, mimeType, companyContext, documentId);
   }
 
   // Fallback: OpenAI-compatible (Ollama or external)

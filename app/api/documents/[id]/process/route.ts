@@ -199,6 +199,7 @@ export async function POST(
       document.original_filename,
       aiConfig,
       companyContext,
+      documentId,
     );
 
     console.log(`[TELEGRAM-DOC-TYPE] documentId=${documentId} detected=${extraction.document_type} confidence=${extraction.extraction_confidence}`);
