@@ -56,7 +56,6 @@ export interface InvoiceExtraction {
   issuer_tax_id: string | null;
   recipient_name: string | null;
   recipient_tax_id: string | null;
-  role_reasoning_summary: string | null;
 }
 
 export interface AIProviderConfig {
@@ -123,7 +122,6 @@ Rules:
 - issuer_tax_id: tax ID (CIF/NIF) of the issuer, or null
 - recipient_name: the exact company name found inside a Cliente/Centro/Destinatario block (receptor real)
 - recipient_tax_id: tax ID (CIF/NIF) of the recipient, or null
-- role_reasoning_summary: one sentence explaining how you identified the issuer vs recipient
 
 Respond with raw JSON only (no markdown, no code blocks). Use this exact structure:
 {
@@ -151,7 +149,6 @@ Respond with raw JSON only (no markdown, no code blocks). Use this exact structu
   "issuer_tax_id": null,
   "recipient_name": "company name found in Cliente/Centro/Destinatario block",
   "recipient_tax_id": null,
-  "role_reasoning_summary": "brief explanation of how issuer vs recipient was determined",
   "line_items": [
     {
       "description": "Product or service name as shown on the document",
@@ -642,11 +639,13 @@ async function extractWithGemini(
   // without ever checking usageMetadata.thoughtsTokenCount. Real samples
   // captured 2026-09-08 show thinking alone reached 5411 tokens on an
   // ordinary 8-line invoice (67% of total tokens) — far more than the
-  // visible JSON output (483–1066 tokens across 6 successful calls, n=6).
-  // With thinkingBudget capped below, 8000 gives ~7x headroom over the
-  // highest observed thinking+output total (6424) while staying 4x below
-  // the old ceiling — see diagnóstico 2026-09-08 for the full token study.
-  const maxOutputTokens = 8000;
+  // visible JSON output. thinkingBudget below fixes that (validated:
+  // thinking dropped 83%, latency 48%, quality unchanged on 2 real docs).
+  // 8000 was too tight for dense multi-line invoices (2 real documents hit
+  // MAX_TOKENS, both cut off mechanically right at the ceiling — 16000
+  // gives ~2x headroom over that cut-off point while staying 2x below the
+  // old 32000 ceiling. See diagnóstico 2026-09-08 for the full token study.
+  const maxOutputTokens = 16000;
   const thinkingBudget = 1024;
 
   const fileSizeKb = Math.round((fileBase64.length * 3) / 4 / 1024);
@@ -846,7 +845,6 @@ export function validateExtraction(raw: any): InvoiceExtraction {
     issuer_tax_id: safeNullString(raw.issuer_tax_id),
     recipient_name: safeNullString(raw.recipient_name),
     recipient_tax_id: safeNullString(raw.recipient_tax_id),
-    role_reasoning_summary: safeNullString(raw.role_reasoning_summary),
   };
 
   extraction.needs_review = shouldRequireReview(extraction);

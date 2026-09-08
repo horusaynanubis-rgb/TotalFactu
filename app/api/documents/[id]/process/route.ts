@@ -202,7 +202,7 @@ export async function POST(
     );
 
     console.log(`[TELEGRAM-DOC-TYPE] documentId=${documentId} detected=${extraction.document_type} confidence=${extraction.extraction_confidence}`);
-    console.log(`[process:roles] issuer="${extraction.issuer_name ?? 'n/a'}" recipient="${extraction.recipient_name ?? 'n/a'}" reasoning="${extraction.role_reasoning_summary ?? 'n/a'}"`);
+    console.log(`[process:roles] issuer="${extraction.issuer_name ?? 'n/a'}" recipient="${extraction.recipient_name ?? 'n/a'}"`);
     console.log(`[process:roles] supplier_name="${extraction.supplier_name}" customer_name="${extraction.customer_name}" invoice_type=${extraction.invoice_type}`);
 
     // ── CASH REGISTER path (Cierre TPV / Cierre Caja) ─────────────────────
