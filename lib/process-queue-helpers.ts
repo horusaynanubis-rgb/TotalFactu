@@ -31,6 +31,18 @@ export function isAuthorized(request: NextRequest): boolean {
   return Boolean(provided && expected && provided === expected);
 }
 
+// Guards the GET entry point used by Vercel Cron Jobs (see vercel.json).
+// Separate secret/header from isAuthorized() above because Vercel Cron
+// cannot be configured to send a custom header — it only ever sends
+// `Authorization: Bearer <CRON_SECRET>`, automatically, when a CRON_SECRET
+// env var exists on the project. See
+// https://vercel.com/docs/cron-jobs/manage-cron-jobs#securing-cron-jobs.
+export function isAuthorizedCron(request: NextRequest): boolean {
+  const provided = request.headers.get('authorization');
+  const expected = process.env.CRON_SECRET;
+  return Boolean(expected && provided === `Bearer ${expected}`);
+}
+
 // Single decision point for the Telegram webhook's sync/async fork — pulled
 // out as a pure function (instead of an inline `=== 'async'` check) so the
 // "async never processes synchronously" contract in the webhook is
