@@ -118,6 +118,7 @@ model Company {
   payment_records       PaymentRecord[]
   payment_alerts        PaymentAlertLog[]
   processing_jobs       ProcessingJob[]
+  invoice_decisions     InvoiceDecision[]
 
   @@index([tax_id])
   @@index([company_type])
@@ -371,6 +372,7 @@ model Invoice {
   gestoria_reviewer      User?                       @relation("GestoriaReviewer", fields: [gestoria_reviewed_by], references: [id])
   review_logs            InvoiceReviewLog[]
   correction_proposals   InvoiceCorrectionProposal[]
+  decisions              InvoiceDecision[]
 
   @@index([company_id])
   @@index([invoice_type])
@@ -731,4 +733,38 @@ model ExportLog {
 
   @@index([company_id])
   @@index([company_id, created_at])
+}
+
+// --- Exception-based review: shadow decision audit trail ---
+// Append-only — one row per (invoice, engine_version, mode) evaluation, never
+// updated in place except to converge duplicate writes to the same identity
+// (see lib/invoice-decision.ts upsert). Re-evaluating with a new
+// engine_version creates a NEW row instead of overwriting history, by design
+// (see @@unique below). SHADOW MODE ONLY as of engine v1: `mode` is always
+// 'shadow' — this table is purely observational and is never read by the
+// real gestoria/fiscal/processing workflow. JSON-as-String follows the same
+// convention already used by AuditLog.old_values/new_values,
+// InvoiceReviewLog.issue_types and InvoiceCorrectionProposal.field_changes —
+// no Json column type is introduced.
+model InvoiceDecision {
+  id              String    @id @default(cuid())
+  invoice_id      String
+  company_id      String    // denormalized, same pattern as AuditLog.company_id
+  mode            String    @default("shadow") // shadow | live (engine v1 only ever writes 'shadow')
+  engine_version  String    // e.g. "v1" — see lib/exception-engine.ts ENGINE_VERSION
+  decision        String    // AUTO_APPROVED | REVIEW_REQUIRED
+  rules_evaluated String    // JSON string[] of gate names evaluated
+  rules_passed    String    // JSON string[] of gate names that passed
+  rules_failed    String    // JSON [{gate, reason}] of gate names that failed
+  signals         String    // JSON snapshot of raw signal values used, for reproducibility
+  engine_error    String?   // non-null only if the engine itself threw (decision still conservative)
+  evaluated_at    DateTime  @default(now())
+
+  invoice Invoice @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [company_id], references: [id], onDelete: Cascade)
+
+  @@unique([invoice_id, engine_version, mode])
+  @@index([company_id])
+  @@index([decision])
+  @@index([evaluated_at])
 }

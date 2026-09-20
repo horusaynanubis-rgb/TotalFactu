@@ -32,6 +32,7 @@ import { classifyInvoiceRate, IvaLineInput } from '@/lib/iva-classification';
 import { computeFiscalStatus } from '@/lib/fiscal-status';
 import { checkDuplicate, candidateLookupWindow, DuplicateInvoiceRef } from '@/lib/duplicate-detection';
 import { computeContentHash, evaluateDuplicate, DUPLICATE_USER_MESSAGES, DUPLICATE_STATUS_BY_VERDICT } from '@/lib/document-dedup';
+import { recordShadowDecision } from '@/lib/invoice-decision';
 
 export interface ProcessDocumentOptions {
   hint?: string; // 'cash_closeout' from Telegram caption pre-screening — same as today's ?hint= query param
@@ -647,6 +648,13 @@ export async function processDocument(
     }
 
     // Fiscal VAT-classification status — unchanged, local-only, no AI call.
+    // fiscal_status/fiscal_status_reason are hoisted above the try (defaulted
+    // to whatever prisma.invoice.create() already defaulted them to) so the
+    // shadow-engine call below can reuse the computed value without a second
+    // query. This is a scoping change only — the write to Invoice and its
+    // error handling are byte-for-byte the same as before.
+    let fiscal_status = invoice.fiscal_status;
+    let fiscal_status_reason: string | null = invoice.fiscal_status_reason;
     try {
       const linesForClassification: IvaLineInput[] = finalType === 'received'
         ? extraction.line_items.map((item) => ({ tax_rate: item.tax_rate, total_amount: item.total_amount }))
@@ -657,13 +665,52 @@ export async function processDocument(
         invoice.subtotal,
         invoice.tax_amount,
       );
-      const { fiscal_status, fiscal_status_reason } = computeFiscalStatus(classificationResult);
+      ({ fiscal_status, fiscal_status_reason } = computeFiscalStatus(classificationResult));
       await prisma.invoice.update({
         where: { id: invoice.id },
         data: { fiscal_status, fiscal_status_reason },
       });
     } catch (fiscalStatusErr: any) {
       console.error('[process] fiscal_status classification error (non-fatal):', fiscalStatusErr?.message);
+    }
+
+    // Exception-based review — SHADOW MODE ONLY (Fase 1+2, see approved
+    // implementation plan). Evaluates a hypothetical AUTO_APPROVED /
+    // REVIEW_REQUIRED decision from signals already computed above and
+    // persists it to InvoiceDecision, purely for later comparison against
+    // real gestoria outcomes. No-op unless EXCEPTION_REVIEW_SHADOW_ENABLED
+    // is exactly 'true' (default OFF). Never mutates processingStatus,
+    // invoice, gestoria_review_status, fiscal_status, or the response body.
+    // recordShadowDecision() already swallows its own errors internally;
+    // this try/catch is a second, redundant safety layer so a future change
+    // to that internal contract can never regress the real pipeline.
+    try {
+      await recordShadowDecision(prisma, {
+        invoiceId: invoice.id,
+        companyId: document.company_id,
+        engineInput: {
+          extraction: {
+            invoice_number: extraction.invoice_number,
+            issue_date: extraction.issue_date,
+            supplier_name: extraction.supplier_name,
+            customer_name: extraction.customer_name,
+            total_amount: extraction.total_amount,
+            extraction_confidence: extraction.extraction_confidence,
+          },
+          invoice: {
+            subtotal: invoice.subtotal,
+            tax_amount: invoice.tax_amount,
+            total_amount: invoice.total_amount,
+            invoice_type: finalType,
+            supplier_tax_id: invoice.supplier_tax_id,
+          },
+          fiscalStatus: fiscal_status,
+          duplicateProbableMatchCount: dupResult.probableMatches.length,
+          invoiceTypeConfirmed: !classification.needs_review,
+        },
+      });
+    } catch (shadowErr: any) {
+      console.error('[shadow-engine] call failed (non-fatal):', shadowErr?.message);
     }
 
     console.log(`[process] ✅ Invoice created. id=${invoice.id} type=${finalType} corrected=${classification.was_corrected} status=${processingStatus} confidence=${extraction.extraction_confidence}`);
