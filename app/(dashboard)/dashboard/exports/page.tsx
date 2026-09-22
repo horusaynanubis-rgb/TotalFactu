@@ -13,9 +13,9 @@ import {
 } from '@/components/ui/select';
 import {
   Download, FileText, Mail, CheckCircle, CalendarClock, SlidersHorizontal, FileStack,
-  Calculator, Landmark, Wallet, Loader2, Package, History, AlertCircle,
+  Calculator, Landmark, Wallet, Loader2, Package, History, AlertCircle, TrendingUp, Info,
 } from 'lucide-react';
-import { formatDate, formatDateTime } from '@/lib/utils';
+import { formatDate, formatDateTime, formatCurrency } from '@/lib/utils';
 import { getCurrentFiscalQuarter, formatFiscalDate, FiscalQuarter } from '@/lib/fiscal-calendar';
 import toast from 'react-hot-toast';
 import { useTranslation } from '@/lib/i18n/context';
@@ -56,6 +56,27 @@ interface ExportLogRow {
   status: string;
   created_at: string;
   user: { name: string | null; email: string } | null;
+}
+
+interface EconomicSummaryResponse {
+  periodLabel: string;
+  incomeSource: 'tpv' | 'invoices';
+  dataStatus: 'available' | 'no_data' | 'insufficient';
+  ingresos: number;
+  ingresosLabel: string;
+  gastos: number;
+  gastosLabel: string;
+  resultado: number | null;
+  margen: number | null;
+  facturasEmitidasInformativas: { total: number; count: number } | null;
+  counts: {
+    ingresosCount: number;
+    gastosCount: number;
+    unconfirmedByGestoria: number;
+    pendingCashRegisters: number;
+    excluded: { manualReview: number; gestoriaIssue: number; nonEur: number };
+  };
+  disclaimer: string;
 }
 
 const EXPORT_TYPE_LABELS: Record<string, string> = {
@@ -205,6 +226,31 @@ export default function ExportsPage() {
   const [fiscalQuarterSel, setFiscalQuarterSel] = useState<number>(fiscalQuarter.quarter);
   const [downloadingFiscalSummary, setDownloadingFiscalSummary] = useState(false);
   const [downloadingIvaDetalle, setDownloadingIvaDetalle] = useState(false);
+
+  // ── Resumen económico (Ingresos/Gastos/Resultado estimado) ───────────────
+  const [ecoPeriodType, setEcoPeriodType] = useState<'month' | 'quarter' | 'year'>('quarter');
+  const [ecoYear, setEcoYear] = useState<number>(fiscalQuarter.year);
+  const [ecoMonth, setEcoMonth] = useState<number>(new Date().getMonth() + 1);
+  const [ecoQuarter, setEcoQuarter] = useState<number>(fiscalQuarter.quarter);
+  const [ecoSummary, setEcoSummary] = useState<EconomicSummaryResponse | null>(null);
+  const [ecoLoading, setEcoLoading] = useState(false);
+  const [ecoError, setEcoError] = useState<string | null>(null);
+  const [ecoDetailsOpen, setEcoDetailsOpen] = useState(false);
+
+  useEffect(() => {
+    if (!fiscalOpen) return;
+    setEcoLoading(true);
+    setEcoError(null);
+    const params = new URLSearchParams({ year: String(ecoYear) });
+    if (ecoPeriodType === 'month') params.set('month', String(ecoMonth));
+    else if (ecoPeriodType === 'quarter') params.set('quarter', String(ecoQuarter));
+    else params.set('annual', 'true');
+    fetch(`/api/fiscal-summary/economic?${params.toString()}`)
+      .then((r) => { if (!r.ok) throw new Error('No se pudo cargar el resumen económico'); return r.json(); })
+      .then((data) => setEcoSummary(data))
+      .catch((err) => setEcoError(err?.message || 'No se pudo cargar el resumen económico'))
+      .finally(() => setEcoLoading(false));
+  }, [fiscalOpen, ecoPeriodType, ecoYear, ecoMonth, ecoQuarter]);
 
   const handleDownloadFiscalSummary = async () => {
     setDownloadingFiscalSummary(true);
@@ -547,6 +593,122 @@ export default function ExportsPage() {
               Descargar detalle de IVA por operación
             </Button>
           </DialogFooter>
+
+          {/* Resumen económico — ver lib/economic-summary.ts para las reglas */}
+          <div className="border-t pt-4 space-y-3">
+            <p className="text-sm font-medium flex items-center gap-1.5">
+              <TrendingUp className="h-4 w-4 text-primary" /> Resumen económico
+            </p>
+
+            <div className="grid grid-cols-3 gap-2">
+              <Select value={ecoPeriodType} onValueChange={(v) => setEcoPeriodType(v as 'month' | 'quarter' | 'year')}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="month">Mes</SelectItem>
+                  <SelectItem value="quarter">Trimestre</SelectItem>
+                  <SelectItem value="year">Año</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={String(ecoYear)} onValueChange={(v) => setEcoYear(Number(v))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>{yearOptions.map((y) => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
+              </Select>
+              {ecoPeriodType === 'month' && (
+                <Select value={String(ecoMonth)} onValueChange={(v) => setEcoMonth(Number(v))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                      <SelectItem key={m} value={String(m)}>{String(m).padStart(2, '0')}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              {ecoPeriodType === 'quarter' && (
+                <Select value={String(ecoQuarter)} onValueChange={(v) => setEcoQuarter(Number(v))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>{[1, 2, 3, 4].map((q) => <SelectItem key={q} value={String(q)}>Q{q}</SelectItem>)}</SelectContent>
+                </Select>
+              )}
+            </div>
+
+            {ecoLoading && <p className="text-sm text-muted-foreground">Calculando…</p>}
+            {ecoError && <p className="text-sm text-destructive">{ecoError}</p>}
+
+            {ecoSummary && !ecoLoading && !ecoError && (
+              <>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-md border p-2.5">
+                    <p className="text-xs text-muted-foreground">{ecoSummary.ingresosLabel}</p>
+                    <p className="text-lg font-semibold">{formatCurrency(ecoSummary.ingresos)}</p>
+                  </div>
+                  <div className="rounded-md border p-2.5">
+                    <p className="text-xs text-muted-foreground">{ecoSummary.gastosLabel}</p>
+                    <p className="text-lg font-semibold">{formatCurrency(ecoSummary.gastos)}</p>
+                  </div>
+                  <div className="rounded-md border p-2.5">
+                    <p className="text-xs text-muted-foreground">Resultado estimado</p>
+                    <p className="text-lg font-semibold">
+                      {ecoSummary.resultado === null
+                        ? <span className="text-sm font-normal text-muted-foreground">No disponible</span>
+                        : formatCurrency(ecoSummary.resultado)}
+                    </p>
+                  </div>
+                  <div className="rounded-md border p-2.5">
+                    <p className="text-xs text-muted-foreground">Margen estimado</p>
+                    <p className="text-lg font-semibold">
+                      {ecoSummary.margen === null
+                        ? <span className="text-sm font-normal text-muted-foreground">No disponible</span>
+                        : `${ecoSummary.margen.toFixed(1)}%`}
+                    </p>
+                  </div>
+                </div>
+
+                {ecoSummary.dataStatus !== 'available' && (
+                  <p className="text-xs text-amber-600">
+                    {ecoSummary.dataStatus === 'no_data'
+                      ? 'Sin datos registrados en este periodo.'
+                      : 'Datos insuficientes en este periodo para confiar en la cifra de ingresos.'}
+                  </p>
+                )}
+
+                <p className="text-xs text-muted-foreground flex items-start gap-1.5">
+                  <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                  {ecoSummary.disclaimer}
+                </p>
+
+                {ecoSummary.facturasEmitidasInformativas && (
+                  <div className="rounded-md border border-dashed p-2.5 text-xs text-muted-foreground">
+                    Facturas emitidas del periodo:{' '}
+                    <strong className="text-gray-700">
+                      {formatCurrency(ecoSummary.facturasEmitidasInformativas.total)}
+                    </strong>{' '}
+                    ({ecoSummary.facturasEmitidasInformativas.count}) — informativo, no incluidas en
+                    Ventas registradas para evitar una posible doble contabilización con Caja/TPV.
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  className="text-xs text-primary underline"
+                  onClick={() => setEcoDetailsOpen((v) => !v)}
+                >
+                  {ecoDetailsOpen ? 'Ocultar detalle de calidad de datos' : 'Ver detalle de calidad de datos'}
+                </button>
+
+                {ecoDetailsOpen && (
+                  <div className="rounded-md bg-gray-50 p-2.5 text-xs text-gray-600 space-y-1">
+                    <p>Facturas sin confirmar por gestoría (incluidas igualmente): {ecoSummary.counts.unconfirmedByGestoria}</p>
+                    <p>Excluidas — pendientes de revisión manual fiscal: {ecoSummary.counts.excluded.manualReview}</p>
+                    <p>Excluidas — incidencia detectada por gestoría: {ecoSummary.counts.excluded.gestoriaIssue}</p>
+                    <p>Excluidas — moneda distinta de EUR: {ecoSummary.counts.excluded.nonEur}</p>
+                    {ecoSummary.counts.pendingCashRegisters > 0 && (
+                      <p>Cierres de Caja/TPV pendientes de confirmar: {ecoSummary.counts.pendingCashRegisters}</p>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
 
