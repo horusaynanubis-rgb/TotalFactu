@@ -22,6 +22,7 @@ export async function GET() {
 
   const gestoriaCompanyId = membership.company_id;
 
+  // LEGACY: License-based clients (pack/seat model).
   const licenses = await prisma.license.findMany({
     where: {
       pack: { gestoria_company_id: gestoriaCompanyId },
@@ -37,9 +38,30 @@ export async function GET() {
     orderBy: { assigned_at: 'desc' },
   });
 
-  const clientIds = licenses
-    .map((l) => l.client_company_id)
-    .filter(Boolean) as string[];
+  // NEW MODEL: GestoriaClientRelation-based clients — additive, empty for
+  // any firm that has never used the new model (i.e. every legacy firm
+  // today), so this changes nothing for existing gestorías. See
+  // lib/gestoria-eligibility.ts.
+  const relations = await prisma.gestoriaClientRelation.findMany({
+    where: { gestoria_company_id: gestoriaCompanyId, status: 'active' },
+    include: {
+      client_company: {
+        select: { id: true, name: true, tax_id: true, created_at: true, export_email: true },
+      },
+    },
+    orderBy: { accepted_at: 'desc' },
+  });
+
+  const licenseClientIds = new Set(licenses.map((l) => l.client_company_id).filter(Boolean) as string[]);
+  // Defensive de-dup: a company should never be reachable via both models at
+  // once, but if it somehow were, prefer the license-based (billing-bearing)
+  // entry rather than showing the same company twice.
+  const dedupedRelations = relations.filter((r) => !licenseClientIds.has(r.client_company_id));
+
+  const clientIds = [
+    ...licenses.map((l) => l.client_company_id).filter(Boolean) as string[],
+    ...dedupedRelations.map((r) => r.client_company_id),
+  ];
 
   if (clientIds.length === 0) {
     return NextResponse.json({ clients: [] });
@@ -92,10 +114,12 @@ export async function GET() {
   const lastDocMap = new Map(lastDocuments.map((d) => [d.company_id, d]));
   const lastExportMap = new Map(lastExports.map((e) => [e.company_id, e]));
 
-  const clients = licenses.map((license) => {
+  const licenseClients = licenses.map((license) => {
     const cid = license.client_company_id!;
     return {
+      source: 'license' as const,
       licenseId: license.id,
+      relationId: null,
       licenseStatus: license.status,
       assignedAt: license.assigned_at,
       company: license.client_company,
@@ -109,5 +133,24 @@ export async function GET() {
     };
   });
 
-  return NextResponse.json({ clients });
+  const relationClients = dedupedRelations.map((relation) => {
+    const cid = relation.client_company_id;
+    return {
+      source: 'relation' as const,
+      licenseId: null,
+      relationId: relation.id,
+      licenseStatus: 'assigned',
+      assignedAt: relation.accepted_at,
+      company: relation.client_company,
+      email: relation.client_company.export_email,
+      acceptedAt: relation.accepted_at,
+      telegramLinked: telegramSet.has(cid),
+      invoicesThisMonth: invoicesMap.get(cid) ?? 0,
+      pendingReviews: pendingMap.get(cid) ?? 0,
+      lastActivity: lastDocMap.get(cid)?.upload_timestamp ?? null,
+      lastExport: lastExportMap.get(cid) ?? null,
+    };
+  });
+
+  return NextResponse.json({ clients: [...licenseClients, ...relationClients] });
 }

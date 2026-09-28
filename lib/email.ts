@@ -152,6 +152,76 @@ export async function sendCorrectionNotificationEmail({
   }
 }
 
+/**
+ * Sends the NEW MODEL company-invitation link directly to the invited
+ * email address (see app/api/gestoria/company-invitations/route.ts).
+ *
+ * Why this exists: before this, the invitation flow only returned the
+ * activation_url in the API response for the gestoria to copy/paste and
+ * send themselves — identical to the LEGACY InviteClientModal pattern. That
+ * gives no guarantee the link ever reaches the actual inbox it was meant
+ * for; anyone holding the URL text could use it. Having TotalFactu's own
+ * backend deliver it is a real (if modest) "control of the email" signal
+ * using infrastructure that already exists here (Resend via this file) —
+ * not a new verification system. The UI still also shows the link as a
+ * copyable fallback for resending/manual sharing, unchanged.
+ *
+ * This does NOT make email ownership airtight (no click-to-verify step,
+ * consistent with the rest of this app, which has no email verification
+ * flow at all) — it raises the bar from "string match only" to "only
+ * whoever controls that inbox receives the actionable link," which is the
+ * same bar Stripe/most SaaS invitation flows rely on for this exact case.
+ */
+export async function sendGestoriaCompanyInvitationEmail({
+  toEmail,
+  gestoriaName,
+  activationUrl,
+  mode,
+}: {
+  toEmail: string;
+  gestoriaName: string;
+  activationUrl: string;
+  mode: 'new_company' | 'existing_company';
+}): Promise<boolean> {
+  const resend = getResend();
+  if (!resend) {
+    console.log(`[email] RESEND_API_KEY not configured — gestoria invitation email skipped (would send to ${toEmail})`);
+    return false;
+  }
+
+  const intro = mode === 'existing_company'
+    ? `<strong>${gestoriaName}</strong> quiere gestionar una de tus empresas en TotalFactu. Si ya tienes cuenta, inicia sesión y elige cuál.`
+    : `<strong>${gestoriaName}</strong> te ha invitado a gestionar tu facturación con TotalFactu. Tu empresa mantiene su propia suscripción — la gestoría solo la administra.`;
+
+  try {
+    await resend.emails.send({
+      from: FROM_ADDRESS,
+      to: toEmail,
+      subject: `[TotalFactu] Invitación de ${gestoriaName}`,
+      html: `
+        <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
+          <h2 style="margin-bottom:8px">📩 Invitación de ${gestoriaName}</h2>
+          <p style="color:#555">${intro}</p>
+          <p style="margin-top:24px">
+            <a href="${activationUrl}"
+               style="background:#2563eb;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block">
+              Ver invitación
+            </a>
+          </p>
+          <p style="color:#9ca3af;font-size:12px;margin-top:16px">
+            Este enlace caduca en 7 días. Si no esperabas esta invitación, ignora este correo — no se
+            asociará ninguna empresa sin tu confirmación.
+          </p>
+        </div>
+      `,
+    });
+    return true;
+  } catch (err) {
+    console.error('[email] sendGestoriaCompanyInvitationEmail failed:', err);
+    return false;
+  }
+}
+
 export async function sendGestoriaMessageEmail({
   toEmail,
   gestoriaName,

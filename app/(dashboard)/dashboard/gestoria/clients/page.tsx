@@ -35,7 +35,9 @@ import toast from 'react-hot-toast';
 import { SendMessageModal } from '@/components/gestoria/send-message-modal';
 
 interface ClientRow {
-  licenseId: string;
+  source: 'license' | 'relation';
+  licenseId: string | null;
+  relationId: string | null;
   licenseStatus: string;
   assignedAt: string | null;
   company: {
@@ -159,6 +161,24 @@ export default function GestoriaClientsPage() {
     }
   };
 
+  // NEW MODEL equivalent — ends the management relation. No license/seat
+  // involved, and the client company's own subscription is never touched.
+  const handleRemoveRelation = async (relationId: string) => {
+    if (!confirm('¿Quitar esta empresa de tu cartera? Podrás volver a invitarla más adelante.')) return;
+    try {
+      const res = await fetch(`/api/gestoria/company-relations/${relationId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const data = await res.json();
+        toast.error(data.error || 'Error al quitar la empresa');
+        return;
+      }
+      toast.success('Empresa quitada de tu cartera');
+      setClients((prev) => prev.filter((c) => c.relationId !== relationId));
+    } catch {
+      toast.error('Error inesperado');
+    }
+  };
+
   if (status === 'loading' || (status === 'authenticated' && companyType !== 'gestoria')) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -271,7 +291,7 @@ export default function GestoriaClientsPage() {
               </TableHeader>
               <TableBody>
                 {visible.map((client) => (
-                  <TableRow key={client.licenseId}>
+                  <TableRow key={client.licenseId ?? client.relationId}>
                     <TableCell>
                       <div>
                         <p className="font-medium">{client.company?.name ?? '—'}</p>
@@ -372,14 +392,26 @@ export default function GestoriaClientsPage() {
                             <RotateCcw className="h-3.5 w-3.5" />
                           </Button>
                         )}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-destructive hover:text-destructive"
-                          onClick={() => handleRevoke(client.licenseId)}
-                        >
-                          Revocar
-                        </Button>
+                        {client.source === 'license' && client.licenseId && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-destructive hover:text-destructive"
+                            onClick={() => handleRevoke(client.licenseId!)}
+                          >
+                            Revocar
+                          </Button>
+                        )}
+                        {client.source === 'relation' && client.relationId && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-destructive hover:text-destructive"
+                            onClick={() => handleRemoveRelation(client.relationId!)}
+                          >
+                            Quitar
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>

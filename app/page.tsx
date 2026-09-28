@@ -302,24 +302,24 @@ export default function LandingPage() {
               </CardContent>
             </Card>
 
-            {/* Gestoria */}
+            {/* Gestoria — free with 5 active companies */}
             <Card className="relative border-2 border-border hover:shadow-lg transition-all">
               <CardHeader className="text-center pb-6">
                 <div className="inline-flex items-center justify-center bg-blue-50 text-primary text-xs font-medium px-3 py-1 rounded-full mb-3 mx-auto gap-1.5">
                   <Building2 className="h-3.5 w-3.5" /> Gestorías
                 </div>
                 <CardTitle className="text-2xl mb-1">Gestoría</CardTitle>
-                <CardDescription className="text-sm">Para despachos y gestorías con múltiples clientes</CardDescription>
-                <div className="mt-3 mb-1 flex justify-center">
+                <CardDescription className="text-sm">{t.landing.gestoriaFreeSubtitle}</CardDescription>
+                <div className="mt-3">
+                  <span className="text-3xl font-bold text-primary">{t.landing.gestoriaFreeBadge}</span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">{t.landing.gestoriaFreeCondition}</p>
+                <div className="mt-2 flex justify-center">
                   <span className="inline-flex items-center gap-1.5 bg-blue-50 text-blue-700 border border-blue-200 text-xs font-bold px-3 py-1 rounded-full">
                     <Rocket className="h-3.5 w-3.5" />
-                    60 días GRATIS
+                    {t.landing.gestoriaFreeTrialBadge}
                   </span>
                 </div>
-                <div className="mt-2">
-                  <span className="text-2xl font-bold text-primary">Packs de licencias</span>
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">10 · 30 · 50 clientes</p>
               </CardHeader>
               <CardContent>
                 <ul className="space-y-3 mb-8">
@@ -330,14 +330,14 @@ export default function LandingPage() {
                     </li>
                   ))}
                 </ul>
-                <Button
-                  className="w-full"
-                  variant="outline"
-                  onClick={() => setGestoriaPopupOpen(true)}
-                >
-                  <Building2 className="h-4 w-4 mr-2" />
-                  Ver packs y precios
-                </Button>
+                <Link href="/signup?plan=gestoria">
+                  <Button className="w-full">
+                    {t.landing.gestoriaFreeCta} <ArrowRight className="ml-1.5 h-4 w-4" />
+                  </Button>
+                </Link>
+                <p className="text-[11px] text-muted-foreground mt-3 text-center leading-snug">
+                  {t.landing.gestoriaFreeFootnote}
+                </p>
               </CardContent>
             </Card>
 

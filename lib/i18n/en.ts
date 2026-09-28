@@ -83,7 +83,15 @@ export const en: Translations = {
     ctaTitle: 'Stop wasting time on invoices',
     ctaSubtitle: 'Send them via Telegram. Let AI do the rest.',
     allRightsReserved: 'All rights reserved.',
-    // Gestoria popup
+    // Gestoria card — NEW MODEL (free with 5 active companies)
+    gestoriaFreeBadge: 'FREE*',
+    gestoriaFreeSubtitle: 'For accounting firms managing multiple clients',
+    gestoriaFreeCondition: 'with 5 active companies on TotalFactu',
+    gestoriaFreeTrialBadge: '60 days free to get started',
+    gestoriaFreeCta: 'Start for free',
+    gestoriaFreeFootnote:
+      '* After the first 60 days, keep at least 5 companies with an active Professional subscription to keep full free access.',
+    // Gestoria popup — LEGACY pack purchase
     gestoriaPopupTitle: 'Gestoria Plans',
     gestoriaPopupSubtitle: 'Choose a license pack and start managing your clients\' invoices with AI. Pay per pack — assign licenses as needed.',
     gestoriaPackBasic: 'Basic Pack',
@@ -459,10 +467,11 @@ export const en: Translations = {
       'Telegram & Email integration',
     ],
     gestoria: [
-      'License packs: 10, 30 or 50 clients',
-      'Dedicated management portal',
-      'Custom export schedules',
-      '24/7 priority support',
+      'Full Gestoria portal',
+      'Centralized client management',
+      'Invoice review and validation',
+      'Tax reports and exports',
+      'Priority support',
     ],
     beta: [
       'Unlimited invoices',

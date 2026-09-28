@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/auth-options';
 import { getStripeKeys, isStripeConfigured, GESTORIA_PACKS, SUBSCRIPTION_PLANS } from '@/lib/stripe-helpers';
 import { prisma } from '@/lib/prisma';
+import { isLegacyGestoria } from '@/lib/gestoria-eligibility';
 
 export async function POST(request: NextRequest) {
   try {
@@ -46,6 +47,32 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         );
       }
+      // NEW MODEL cutover: pack checkout is LEGACY-only from here on. A firm
+      // only passes this gate if it has purchased at least one pack before
+      // (see lib/gestoria-eligibility.ts#isLegacyGestoria, the same check
+      // the eligibility engine uses to classify LEGACY vs new-model firms).
+      // Brand-new gestorias use the free-with-5-companies model instead —
+      // app/api/gestoria/company-invitations + /dashboard/gestoria.
+      let legacyCheckCompanyId: string | null = companyId || null;
+      if (!legacyCheckCompanyId && contact?.email) {
+        const emailUser = await prisma.user.findUnique({
+          where: { email: contact.email },
+          select: { memberships: { take: 1, select: { company_id: true } } },
+        });
+        legacyCheckCompanyId = emailUser?.memberships?.[0]?.company_id ?? null;
+      }
+      const isLegacyFirm = legacyCheckCompanyId ? await isLegacyGestoria(legacyCheckCompanyId) : false;
+      if (!isLegacyFirm) {
+        console.log(`[stripe/checkout] gestoria_pack blocked — not a legacy firm (companyId=${legacyCheckCompanyId ?? 'unresolved'})`);
+        return NextResponse.json(
+          {
+            error:
+              'Los packs de licencias ya no están disponibles para gestorías nuevas. Tu cuenta Gestoría es gratuita manteniendo 5 empresas con Profesional activo — consulta el Portal Gestoría.',
+          },
+          { status: 403 },
+        );
+      }
+
       lineItems = [{
         price_data: {
           currency: 'eur',

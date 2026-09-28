@@ -8,31 +8,27 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Users, Shield, RotateCcw, ChevronRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-interface License {
-  id: string;
-  status: string;
-  assigned_at: string | null;
-  client_company: { id: string; name: string; tax_id: string } | null;
-  invitation: { email: string; accepted_at?: string | null } | null;
-}
-
-interface Pack {
-  id: string;
-  pack_size: number;
-  licenses: License[];
+// Fed directly by GET /api/gestoria/clients — the single source that already
+// merges LEGACY (License-based) and NEW MODEL (GestoriaClientRelation-based)
+// clients for a firm, deduplicated. This makes the main dashboard's
+// "Clientes" tab and the dedicated /dashboard/gestoria/clients page share
+// the exact same data shape instead of each deriving their own list.
+export interface ClientRow {
+  source: 'license' | 'relation';
+  licenseId: string | null;
+  relationId: string | null;
+  company: { id: string; name: string; tax_id: string } | null;
+  email: string | undefined;
+  acceptedAt: string | null | undefined;
 }
 
 interface Props {
-  packs: Pack[];
+  clients: ClientRow[];
   onRefresh: () => void;
   onResendInvitation?: (email: string) => void;
 }
 
-export function ClientsTable({ packs, onRefresh, onResendInvitation }: Props) {
-  const clients = packs
-    .flatMap((p) => p.licenses)
-    .filter((l) => l.status === 'assigned' && l.client_company);
-
+export function ClientsTable({ clients, onRefresh, onResendInvitation }: Props) {
   const handleRevoke = async (licenseId: string) => {
     if (!confirm('¿Revocar la licencia de este cliente? Perderá acceso al finalizar el periodo.')) return;
     try {
@@ -43,6 +39,24 @@ export function ClientsTable({ packs, onRefresh, onResendInvitation }: Props) {
         return;
       }
       toast.success('Licencia revocada');
+      onRefresh();
+    } catch {
+      toast.error('Error inesperado');
+    }
+  };
+
+  // NEW MODEL equivalent — ends the management relation, no license/seat
+  // involved. See app/api/gestoria/company-relations/[id]/route.ts.
+  const handleRemoveRelation = async (relationId: string) => {
+    if (!confirm('¿Quitar esta empresa de tu cartera? Podrás volver a invitarla más adelante.')) return;
+    try {
+      const res = await fetch(`/api/gestoria/company-relations/${relationId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const data = await res.json();
+        toast.error(data.error || 'Error al quitar la empresa');
+        return;
+      }
+      toast.success('Empresa quitada de tu cartera');
       onRefresh();
     } catch {
       toast.error('Error inesperado');
@@ -77,12 +91,12 @@ export function ClientsTable({ packs, onRefresh, onResendInvitation }: Props) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {clients.map((license) => (
-              <TableRow key={license.id}>
+            {clients.map((client) => (
+              <TableRow key={client.licenseId ?? client.relationId}>
                 <TableCell>
                   <div>
-                    <p className="font-medium">{license.client_company?.name}</p>
-                    <p className="text-xs text-muted-foreground">{license.client_company?.tax_id}</p>
+                    <p className="font-medium">{client.company?.name}</p>
+                    <p className="text-xs text-muted-foreground">{client.company?.tax_id}</p>
                   </div>
                 </TableCell>
                 <TableCell>
@@ -95,38 +109,48 @@ export function ClientsTable({ packs, onRefresh, onResendInvitation }: Props) {
                 <TableCell className="text-sm text-muted-foreground">—</TableCell>
                 <TableCell className="text-sm text-muted-foreground">—</TableCell>
                 <TableCell className="text-sm text-muted-foreground">
-                  {license.invitation?.accepted_at
-                    ? new Date(license.invitation.accepted_at).toLocaleDateString('es-ES')
-                    : '—'}
+                  {client.acceptedAt ? new Date(client.acceptedAt).toLocaleDateString('es-ES') : '—'}
                 </TableCell>
                 <TableCell className="text-right">
                   <div className="flex items-center justify-end gap-1">
-                    {license.client_company?.id && (
+                    {client.company?.id && (
                       <Button variant="outline" size="sm" asChild>
-                        <Link href={`/dashboard/gestoria/clients/${license.client_company.id}`}>
+                        <Link href={`/dashboard/gestoria/clients/${client.company.id}`}>
                           Ver
                           <ChevronRight className="ml-1 h-3.5 w-3.5" />
                         </Link>
                       </Button>
                     )}
-                    {onResendInvitation && license.invitation?.email && (
+                    {onResendInvitation && client.source === 'license' && client.email && (
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => onResendInvitation(license.invitation!.email)}
+                        onClick={() => onResendInvitation(client.email!)}
                         title="Reenviar invitación"
                       >
                         <RotateCcw className="h-3.5 w-3.5" />
                       </Button>
                     )}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-destructive hover:text-destructive"
-                      onClick={() => handleRevoke(license.id)}
-                    >
-                      Revocar
-                    </Button>
+                    {client.source === 'license' && client.licenseId && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive hover:text-destructive"
+                        onClick={() => handleRevoke(client.licenseId!)}
+                      >
+                        Revocar
+                      </Button>
+                    )}
+                    {client.source === 'relation' && client.relationId && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive hover:text-destructive"
+                        onClick={() => handleRemoveRelation(client.relationId!)}
+                      >
+                        Quitar
+                      </Button>
+                    )}
                   </div>
                 </TableCell>
               </TableRow>

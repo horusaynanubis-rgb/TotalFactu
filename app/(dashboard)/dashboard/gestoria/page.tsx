@@ -14,8 +14,10 @@ import {
   ClipboardCheck, FileWarning, TrendingUp, Activity,
 } from 'lucide-react';
 import { InviteClientModal } from '@/components/gestoria/invite-client-modal';
-import { ClientsTable } from '@/components/gestoria/clients-table';
+import { ClientsTable, type ClientRow } from '@/components/gestoria/clients-table';
 import { InvitationsTable } from '@/components/gestoria/invitations-table';
+import { GestoriaEligibilityBanner } from '@/components/gestoria/eligibility-banner';
+import { AddCompanyModal } from '@/components/gestoria/add-company-modal';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -198,6 +200,8 @@ export default function GestoriaPage() {
   const [loadingDashboard, setLoadingDashboard] = useState(true);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [resendEmail, setResendEmail] = useState<string | undefined>(undefined);
+  const [showAddCompanyModal, setShowAddCompanyModal] = useState(false);
+  const [clients, setClients] = useState<ClientRow[]>([]);
 
   const companyType = (session?.user as any)?.companyType;
 
@@ -231,10 +235,27 @@ export default function GestoriaPage() {
     }
   };
 
+  // Single source for the "Clientes" experience — already merges LEGACY
+  // (License-based) and NEW MODEL (GestoriaClientRelation-based) clients,
+  // deduplicated. See app/api/gestoria/clients/route.ts. Kept separate from
+  // loadPacks() (packs/licenses/invitations remain LEGACY-only state).
+  const loadClients = async () => {
+    try {
+      const res = await fetch('/api/gestoria/clients');
+      if (res.ok) {
+        const data = await res.json();
+        setClients(data.clients ?? []);
+      }
+    } catch {
+      // non-fatal — KPIs/table just show stale/empty state
+    }
+  };
+
   useEffect(() => {
     if (companyType === 'gestoria') {
       loadPacks();
       loadDashboard();
+      loadClients();
     }
   }, [companyType]);
 
@@ -243,9 +264,16 @@ export default function GestoriaPage() {
   const availableLicenses = totalLicenses - usedLicenses;
   const activePacks = packs.filter((p) => p.status === 'active');
 
+  // Pending invitations stay LEGACY-only (LicenseInvitation) for now — the
+  // new model's GestoriaCompanyInvitation isn't surfaced in this tab yet,
+  // flagged as a known follow-up rather than expanded here.
   const allLicenses = packs.flatMap((p) => p.licenses);
-  const assignedClients = allLicenses.filter((l) => l.status === 'assigned' && l.client_company);
   const pendingInvitations = allLicenses.filter((l) => l.invitation?.status === 'pending');
+
+  const refreshClientData = () => {
+    loadPacks();
+    loadClients();
+  };
 
   const handleResendInvitation = (email: string) => {
     setResendEmail(email);
@@ -294,6 +322,8 @@ export default function GestoriaPage() {
         </div>
       </div>
 
+      <GestoriaEligibilityBanner onAddCompany={() => setShowAddCompanyModal(true)} />
+
       {/* KPIs — fila 1: licencias */}
       <div className="grid gap-4 md:grid-cols-4">
         <Card>
@@ -327,8 +357,8 @@ export default function GestoriaPage() {
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{assignedClients.length}</div>
-            <p className="text-xs text-muted-foreground">Con licencia asignada</p>
+            <div className="text-2xl font-bold">{clients.length}</div>
+            <p className="text-xs text-muted-foreground">Empresas gestionadas</p>
           </CardContent>
         </Card>
         <Card>
@@ -675,7 +705,7 @@ export default function GestoriaPage() {
           <TabsList>
             <TabsTrigger value="clients">
               <Users className="mr-2 h-4 w-4" />
-              Clientes ({assignedClients.length})
+              Clientes ({clients.length})
             </TabsTrigger>
             <TabsTrigger value="invitations">
               <Mail className="mr-2 h-4 w-4" />
@@ -688,7 +718,7 @@ export default function GestoriaPage() {
           </TabsList>
 
           <TabsContent value="clients" className="mt-4">
-            <ClientsTable packs={packs} onRefresh={loadPacks} onResendInvitation={handleResendInvitation} />
+            <ClientsTable clients={clients} onRefresh={refreshClientData} onResendInvitation={handleResendInvitation} />
           </TabsContent>
 
           <TabsContent value="invitations" className="mt-4">
@@ -738,9 +768,14 @@ export default function GestoriaPage() {
       <InviteClientModal
         open={showInviteModal}
         onClose={() => { setShowInviteModal(false); setResendEmail(undefined); }}
-        onSuccess={loadPacks}
+        onSuccess={refreshClientData}
         availableLicenses={availableLicenses}
         defaultEmail={resendEmail}
+      />
+      <AddCompanyModal
+        open={showAddCompanyModal}
+        onClose={() => setShowAddCompanyModal(false)}
+        onSuccess={() => {}}
       />
     </div>
   );

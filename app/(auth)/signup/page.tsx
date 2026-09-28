@@ -92,6 +92,8 @@ export default function SignupPage() {
           // If Stripe fails, go to billing page so they can retry
         }
         router.push('/dashboard/billing?checkout=true');
+      } else if (plan === 'gestoria') {
+        router.push('/dashboard/gestoria');
       } else {
         router.push('/dashboard');
       }
@@ -120,6 +122,12 @@ export default function SignupPage() {
             <div className="mt-3 flex items-center gap-2 bg-primary/10 text-primary rounded-lg px-3 py-2 text-sm font-medium">
               <Zap className="h-4 w-4 flex-shrink-0" />
               Plan Profesional — €14,99/mes · Se requiere pago tras el registro
+            </div>
+          )}
+          {plan === 'gestoria' && (
+            <div className="mt-3 flex items-center gap-2 bg-blue-50 text-blue-700 rounded-lg px-3 py-2 text-sm font-medium">
+              <Zap className="h-4 w-4 flex-shrink-0" />
+              Plan Gestoría — 60 días de acceso completo gratis, sin tarjeta
             </div>
           )}
         </CardHeader>

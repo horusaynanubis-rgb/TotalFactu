@@ -85,7 +85,15 @@ export interface Translations {
     ctaTitle: string;
     ctaSubtitle: string;
     allRightsReserved: string;
-    // Gestoria popup
+    // Gestoria card — NEW MODEL (free with 5 active companies)
+    gestoriaFreeBadge: string;
+    gestoriaFreeSubtitle: string;
+    gestoriaFreeCondition: string;
+    gestoriaFreeTrialBadge: string;
+    gestoriaFreeCta: string;
+    gestoriaFreeFootnote: string;
+    // Gestoria popup — LEGACY pack purchase (kept for gestorías already on
+    // the pack model; no longer linked from the main pricing card)
     gestoriaPopupTitle: string;
     gestoriaPopupSubtitle: string;
     gestoriaPackBasic: string;

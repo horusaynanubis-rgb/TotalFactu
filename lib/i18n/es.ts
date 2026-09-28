@@ -83,7 +83,15 @@ export const es: Translations = {
     ctaTitle: 'Deja de perder tiempo con facturas',
     ctaSubtitle: 'Envíalas por Telegram. La IA hace el resto.',
     allRightsReserved: 'Todos los derechos reservados.',
-    // Gestoria popup
+    // Gestoria card — NEW MODEL (free with 5 active companies)
+    gestoriaFreeBadge: 'GRATIS*',
+    gestoriaFreeSubtitle: 'Para despachos y gestorías con múltiples clientes',
+    gestoriaFreeCondition: 'con 5 empresas activas en TotalFactu',
+    gestoriaFreeTrialBadge: '60 días gratis para empezar',
+    gestoriaFreeCta: 'Empezar gratis',
+    gestoriaFreeFootnote:
+      '* Después de los primeros 60 días, mantén al menos 5 empresas con una suscripción Profesional activa para conservar el acceso completo gratuito.',
+    // Gestoria popup — LEGACY pack purchase
     gestoriaPopupTitle: 'Planes para Gestorías',
     gestoriaPopupSubtitle: 'Elige un pack de licencias y empieza a gestionar las facturas de tus clientes con IA. Pagas por pack y asignas licencias según necesites.',
     gestoriaPackBasic: 'Pack Básico',
@@ -459,10 +467,11 @@ export const es: Translations = {
       'Integración con Telegram y correo',
     ],
     gestoria: [
-      'Packs de licencias: 10, 30 o 50 clientes',
-      'Portal de gestión dedicado',
-      'Programación de exportaciones personalizada',
-      'Soporte prioritario 24/7',
+      'Portal de gestoría completo',
+      'Gestión centralizada de clientes',
+      'Revisión y validación de facturas',
+      'Informes fiscales y exportaciones',
+      'Soporte prioritario',
     ],
     beta: [
       'Facturas ilimitadas',

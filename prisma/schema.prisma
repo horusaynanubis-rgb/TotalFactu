@@ -101,8 +101,12 @@ model Company {
   audit_logs            AuditLog[]
   telegram_links        TelegramLink[]
   telegram_link_codes   TelegramLinkCode[]
-  license_packs         LicensePack[]       // gestoria only
-  assigned_licenses     License[]           // licenses assigned to this company (client side)
+  license_packs         LicensePack[]       // gestoria only — LEGACY pack-purchase model, see GestoriaClientRelation for the new model
+  assigned_licenses     License[]           // licenses assigned to this company (client side) — LEGACY
+  gestoria_client_relations_as_firm    GestoriaClientRelation[]    @relation("GestoriaRelationFirm")   // NEW MODEL: companies this gestoria manages
+  gestoria_client_relations_as_client  GestoriaClientRelation[]    @relation("GestoriaRelationClient")  // NEW MODEL: gestoria(s) managing this company
+  gestoria_company_invitations_sent    GestoriaCompanyInvitation[] @relation("GestoriaCompanyInvitationFirm") // NEW MODEL
+  gestoria_eligibility_grace           GestoriaEligibilityGrace?   // NEW MODEL: grace-period state, gestoria side only
   suppliers             Supplier[]
   invoice_lines         InvoiceLine[]
   sent_messages         GestoriaMessage[]   @relation("SentMessages")
@@ -549,6 +553,89 @@ model LicenseInvitation {
   @@index([token])
   @@index([email])
   @@index([status])
+}
+
+// --- Gestoria NEW MODEL: management relation, decoupled from billing ---
+//
+// LicensePack/License/LicenseInvitation above are the LEGACY model: a
+// gestoria buys a pack of seats and assigns them to clients, and the
+// gestoria's own access is gated by that purchase. The new model (free
+// Gestoria portal once a firm has >=5 eligible client companies) never
+// touches License/LicensePack at all — deliberately, so legacy accounts are
+// completely unaffected. A firm is LEGACY if it has ever had a LicensePack
+// row (see lib/gestoria-eligibility.ts#isLegacyGestoria); everyone else uses
+// GestoriaClientRelation/GestoriaCompanyInvitation instead.
+//
+// Economic relationship (Company <-> Subscription, Stripe) is untouched —
+// this table only carries the MANAGEMENT relationship. A client company
+// pays TotalFactu directly and independently of who manages it.
+
+model GestoriaClientRelation {
+  id                  String    @id @default(cuid())
+  gestoria_company_id String
+  client_company_id   String
+  status              String    @default("active") // active, ended
+  source              String    // invitation | transfer
+  created_at          DateTime  @default(now())
+  accepted_at         DateTime?
+  ended_at            DateTime?
+  ended_reason        String?   // transferred | removed_by_firm | company_requested
+
+  gestoria_company Company @relation("GestoriaRelationFirm",   fields: [gestoria_company_id], references: [id], onDelete: Cascade)
+  client_company   Company @relation("GestoriaRelationClient", fields: [client_company_id],   references: [id], onDelete: Cascade)
+
+  @@index([gestoria_company_id])
+  @@index([client_company_id])
+  @@index([status])
+  // NOTE: a partial unique index enforcing "at most one status='active' row
+  // per client_company_id" is added in
+  // prisma/migrations/add_gestoria_new_model.sql (Prisma's schema language
+  // has no WHERE-clause unique index support without preview features this
+  // project doesn't otherwise use). The application layer must also enforce
+  // this at write time — see lib/gestoria-eligibility.ts and the
+  // company-invitations accept routes — the DB constraint is the backstop,
+  // not the only guard.
+}
+
+// Invitation token for the new model — mirrors LicenseInvitation's proven
+// token/expiry/status shape but is intentionally NOT tied to a License, so
+// it never touches the legacy pack/seat accounting.
+model GestoriaCompanyInvitation {
+  id                  String    @id @default(cuid())
+  gestoria_company_id String
+  target_email        String
+  target_company_id   String?   // optional metadata only when mode = existing_company; NOT authoritative for acceptance
+  mode                String    // new_company | existing_company
+  token               String    @unique
+  status              String    @default("pending") // pending, accepted, rejected, expired, revoked
+  expires_at          DateTime
+  created_by_user_id  String?
+  accepted_by_user_id String?
+  created_at          DateTime  @default(now())
+  accepted_at         DateTime?
+
+  gestoria_company Company @relation("GestoriaCompanyInvitationFirm", fields: [gestoria_company_id], references: [id], onDelete: Cascade)
+
+  @@index([gestoria_company_id])
+  @@index([token])
+  @@index([status])
+  @@index([target_email])
+}
+
+// One row per gestoria firm, only present once the firm has ever entered
+// GRACE. Absence of a row (or null fields) means "not currently in grace" —
+// this is the one piece of new-model state that genuinely cannot be derived
+// on the fly (see lib/gestoria-eligibility.ts), because "when did eligibility
+// drop below 5" is a historical fact, not something re-derivable from the
+// live company count alone.
+model GestoriaEligibilityGrace {
+  id                   String    @id @default(cuid())
+  gestoria_company_id  String    @unique
+  eligibility_lost_at  DateTime?
+  grace_ends_at        DateTime?
+  updated_at           DateTime  @updatedAt
+
+  gestoria_company Company @relation(fields: [gestoria_company_id], references: [id], onDelete: Cascade)
 }
 
 // --- Gestoria → Client messaging ---
