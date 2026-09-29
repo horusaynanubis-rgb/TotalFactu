@@ -146,7 +146,10 @@ function escapeCSV(value: string): string {
   return s;
 }
 
-export function getDateRange(type: 'monthly' | 'quarterly', date: Date = new Date()): { start: Date; end: Date } {
+export function getDateRange(
+  type: 'monthly' | 'quarterly',
+  date: Date = new Date(),
+): { start: Date; end: Date; year?: number; quarter?: number } {
   const year = date.getFullYear();
   const month = date.getMonth();
 
@@ -159,11 +162,20 @@ export function getDateRange(type: 'monthly' | 'quarterly', date: Date = new Dat
     // always done in the days right after a quarter closes (e.g. Jul 1-20
     // covers Q2/Apr-Jun) — so this must target the last COMPLETED quarter,
     // not the in-progress current one. JS Date normalizes negative months,
-    // so quarter=-1 correctly rolls back to Q4 of the previous year.
+    // so quarter=-1 correctly rolls back to Q4 of the previous year, and the
+    // resolved year below (via `start`) follows that same rollback.
     const currentQuarter = Math.floor(month / 3);
-    const quarter = currentQuarter - 1;
-    const start = new Date(year, quarter * 3, 1);
-    const end = new Date(year, quarter * 3 + 3, 0, 23, 59, 59, 999);
-    return { start, end };
+    const quarterIndex = currentQuarter - 1;
+    const start = new Date(year, quarterIndex * 3, 1);
+    const end = new Date(year, quarterIndex * 3 + 3, 0, 23, 59, 59, 999);
+    // Fase Gascón, 2026-09: also return the resolved (year, quarter) pair —
+    // not just start/end — so callers can apply the same
+    // invoiceEffectivePeriodWhere() fiscal_period-aware selection the
+    // explicit-quarter export path already uses (see
+    // app/api/exports/generate/route.ts). Resolved from `start` itself so it
+    // always agrees with the actual returned range, including the Q4
+    // year-rollback case.
+    const resolvedQuarter = (Math.floor(start.getMonth() / 3) + 1) as 1 | 2 | 3 | 4;
+    return { start, end, year: start.getFullYear(), quarter: resolvedQuarter };
   }
 }

@@ -4,6 +4,11 @@ import { authOptions } from '@/app/api/auth/[...nextauth]/auth-options';
 import { prisma } from '@/lib/prisma';
 import { sendMessage } from '@/lib/telegram';
 import { sendGestoriaMessageEmail } from '@/lib/email';
+import {
+  isValidDocumentTypeValue,
+  isValidFiscalPeriodValue,
+  buildFiscalOverrideUpdate,
+} from '@/lib/invoice-fiscal-override';
 
 export const dynamic = 'force-dynamic';
 
@@ -199,6 +204,88 @@ export async function POST(
   }
 
   return NextResponse.json({ ok: true, logId: log.id });
+}
+
+// PATCH — gestoría confirms/overrides document_type and/or fiscal_period
+// (Fase Gascón, 2026-09). Separate from the POST review-workflow above (that
+// tracks gestoria_review_status; this tracks fiscal classification/period —
+// two independent concerns, see lib/invoice-fiscal-treatment.ts). Reuses the
+// same access resolution and cross-company scoping as GET/POST in this file.
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: { clientCompanyId: string; invoiceId: string } },
+) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const access = await resolveGestoriaAccess(session.user.id, params.clientCompanyId);
+  if (!access) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+  if (access.role === 'viewer') {
+    return NextResponse.json({ error: 'Forbidden: viewers cannot review' }, { status: 403 });
+  }
+
+  const invoice = await prisma.invoice.findFirst({
+    where: { id: params.invoiceId, company_id: params.clientCompanyId },
+    select: { id: true, document_type: true, fiscal_period_year: true, fiscal_period_quarter: true },
+  });
+  if (!invoice) {
+    return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
+  }
+
+  let body: { document_type?: string | null; fiscal_period_year?: number | null; fiscal_period_quarter?: number | null };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+  }
+
+  if ('document_type' in body && !isValidDocumentTypeValue(body.document_type)) {
+    return NextResponse.json({ error: 'Invalid document_type' }, { status: 400 });
+  }
+  if (
+    ('fiscal_period_year' in body || 'fiscal_period_quarter' in body) &&
+    !isValidFiscalPeriodValue(body.fiscal_period_year ?? null, body.fiscal_period_quarter ?? null)
+  ) {
+    return NextResponse.json({ error: 'Invalid fiscal_period_year/fiscal_period_quarter' }, { status: 400 });
+  }
+
+  const { updateData, auditEntries } = buildFiscalOverrideUpdate(
+    invoice,
+    {
+      ...('document_type' in body ? { document_type: (body.document_type ?? null) as 'FULL_INVOICE' | 'SIMPLIFIED_INVOICE' | null } : {}),
+      ...('fiscal_period_year' in body || 'fiscal_period_quarter' in body
+        ? { fiscal_period_year: body.fiscal_period_year ?? null, fiscal_period_quarter: body.fiscal_period_quarter ?? null }
+        : {}),
+    },
+    session.user.id,
+  );
+
+  if (Object.keys(updateData).length === 0) {
+    return NextResponse.json({ ok: true, invoice, changed: false });
+  }
+
+  const [updatedInvoice] = await prisma.$transaction([
+    prisma.invoice.update({ where: { id: params.invoiceId }, data: updateData }),
+    ...auditEntries.map((entry) =>
+      prisma.auditLog.create({
+        data: {
+          company_id: params.clientCompanyId,
+          user_id: session.user.id,
+          entity_type: 'invoice',
+          entity_id: params.invoiceId,
+          action: entry.action,
+          old_values: entry.old_values,
+          new_values: entry.new_values,
+        },
+      }),
+    ),
+  ]);
+
+  return NextResponse.json({ ok: true, invoice: updatedInvoice, changed: true });
 }
 
 // GET — review history for an invoice

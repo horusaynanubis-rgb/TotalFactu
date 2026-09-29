@@ -35,6 +35,10 @@ export async function GET(request: NextRequest) {
   let from: Date;
   let to: Date;
   let periodLabel: string;
+  // fiscal_period override only has meaning at quarter granularity — month
+  // and annual views keep using the plain issue_date range, same as before
+  // this feature.
+  let periodYearQuarter: { year: number; quarter: number } | undefined;
 
   if (monthParam) {
     const month = parseInt(monthParam, 10);
@@ -57,10 +61,11 @@ export async function GET(request: NextRequest) {
     from = info.period_start;
     to = info.period_end;
     periodLabel = `Q${quarter} ${year}`;
+    periodYearQuarter = { year, quarter };
   } else {
     return NextResponse.json({ message: 'one of month, quarter or annual is required' }, { status: 400 });
   }
 
-  const summary = await buildEconomicSummary(companyId, from, to, periodLabel);
+  const summary = await buildEconomicSummary(companyId, from, to, periodLabel, periodYearQuarter);
   return NextResponse.json(summary);
 }

@@ -20,6 +20,7 @@
 // a DB, mirrors lib/fiscal-breakdown.ts's style) and a thin Prisma-backed
 // wrapper — same separation as lib/fiscal-summary.ts.
 import { prisma } from './prisma';
+import { getExpenseAmount, invoiceEffectivePeriodWhere } from './invoice-fiscal-treatment';
 
 export type IncomeSource = 'tpv' | 'invoices';
 
@@ -35,9 +36,11 @@ export type DataStatus = 'available' | 'no_data' | 'insufficient';
 export interface EconomicInvoiceInput {
   invoice_type: string; // 'issued' | 'received'
   subtotal: number;
+  total_amount: number;
   currency: string;
   fiscal_status: string; // 'classified' | 'pending_classification' | 'mixed_vat' | 'manual_review'
   gestoria_review_status: string | null;
+  document_type: string | null; // NULL | 'FULL_INVOICE' | 'SIMPLIFIED_INVOICE' — see lib/invoice-fiscal-treatment.ts
 }
 
 export interface EconomicCashRegisterInput {
@@ -142,7 +145,11 @@ export function buildEconomicSummaryFromData(input: EconomicSummaryInput): Econo
   }
 
   const issuedTotal = round2(eligibleIssued.reduce((s, i) => s + i.subtotal, 0));
-  const receivedTotal = round2(eligibleReceived.reduce((s, i) => s + i.subtotal, 0));
+  // Received total is per-invoice: SIMPLIFIED_INVOICE (human-confirmed) uses
+  // total_amount (VAT folded into the real cost, not deductible); FULL_INVOICE
+  // or NULL (legacy/unconfirmed) uses subtotal — identical to today for every
+  // invoice that hasn't been reclassified. See lib/invoice-fiscal-treatment.ts.
+  const receivedTotal = round2(eligibleReceived.reduce((s, i) => s + getExpenseAmount(i), 0));
   const tpvTotal = round2(confirmedRegisters.reduce((s, r) => s + r.total_amount, 0));
 
   const gastos = receivedTotal;
@@ -227,16 +234,26 @@ export async function buildEconomicSummary(
   from: Date,
   to: Date,
   periodLabel: string,
+  // Optional: pass when the caller knows this is a genuine calendar quarter
+  // (see buildFiscalSummary's identical parameter for the rationale) so a
+  // confirmed fiscal_period override is respected instead of raw issue_date.
+  periodYearQuarter?: { year: number; quarter: number },
 ): Promise<EconomicSummary> {
+  const periodWhere = periodYearQuarter
+    ? invoiceEffectivePeriodWhere(periodYearQuarter.year, periodYearQuarter.quarter, from, to)
+    : { issue_date: { gte: from, lte: to } };
+
   const [invoices, cashRegisters] = await Promise.all([
     prisma.invoice.findMany({
-      where: { company_id: companyId, issue_date: { gte: from, lte: to } },
+      where: { company_id: companyId, ...periodWhere },
       select: {
         invoice_type: true,
         subtotal: true,
+        total_amount: true,
         currency: true,
         fiscal_status: true,
         gestoria_review_status: true,
+        document_type: true,
       },
     }),
     prisma.dailyCashRegister.findMany({

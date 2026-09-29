@@ -3,6 +3,12 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/auth-options';
 import { prisma } from '@/lib/prisma';
 import { deleteFile } from '@/lib/storage';
+import { getDeductibleInputVat, getExpenseAmount, getEffectiveFiscalPeriod } from '@/lib/invoice-fiscal-treatment';
+import {
+  isValidDocumentTypeValue,
+  isValidFiscalPeriodValue,
+  buildFiscalOverrideUpdate,
+} from '@/lib/invoice-fiscal-override';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,7 +41,24 @@ export async function GET(
       return NextResponse.json({ message: 'Unauthorized' }, { status: 403 });
     }
 
-    return NextResponse.json({ invoice });
+    // Fiscal treatment resulting from document_type/fiscal_period today —
+    // computed via the same central helpers fiscal-summary.ts/economic-summary.ts
+    // use, so the UI never re-derives this logic independently. NULL
+    // document_type (legacy/unconfirmed) resolves exactly like FULL_INVOICE.
+    const effectivePeriod = getEffectiveFiscalPeriod({
+      fiscal_period_year: invoice.fiscal_period_year,
+      fiscal_period_quarter: invoice.fiscal_period_quarter,
+      issue_date: invoice.issue_date,
+    });
+    const fiscalTreatment = invoice.invoice_type === 'received'
+      ? {
+          deductible_input_vat: getDeductibleInputVat(invoice),
+          expense_amount: getExpenseAmount(invoice),
+          effective_fiscal_period: effectivePeriod,
+        }
+      : { effective_fiscal_period: effectivePeriod };
+
+    return NextResponse.json({ invoice, fiscal_treatment: fiscalTreatment });
   } catch (error: any) {
     console.error('Get invoice error:', error);
     return NextResponse.json(
@@ -105,27 +128,75 @@ export async function PATCH(
       }
     }
 
+    // document_type / fiscal_period_year / fiscal_period_quarter (Fase
+    // Gascón, 2026-09) are handled separately from the whitelist above —
+    // never trust a client-supplied document_type_classified_by/at or
+    // fiscal_period_set_by/at; those are always server-derived here. Kept
+    // out of `updateData`'s generic audit diff so each gets its own
+    // dedicated, more specific AuditLog action instead of being folded into
+    // the generic 'update' entry. See lib/invoice-fiscal-override.ts.
+    if ('document_type' in body && !isValidDocumentTypeValue(body.document_type)) {
+      return NextResponse.json({ message: 'Invalid document_type' }, { status: 400 });
+    }
+    if (
+      ('fiscal_period_year' in body || 'fiscal_period_quarter' in body) &&
+      !isValidFiscalPeriodValue(body.fiscal_period_year ?? null, body.fiscal_period_quarter ?? null)
+    ) {
+      return NextResponse.json({ message: 'Invalid fiscal_period_year/fiscal_period_quarter' }, { status: 400 });
+    }
+
+    const { updateData: fiscalOverrideUpdate, auditEntries: fiscalAuditEntries } = buildFiscalOverrideUpdate(
+      {
+        document_type: existingInvoice.document_type,
+        fiscal_period_year: existingInvoice.fiscal_period_year,
+        fiscal_period_quarter: existingInvoice.fiscal_period_quarter,
+      },
+      {
+        ...('document_type' in body ? { document_type: body.document_type } : {}),
+        ...('fiscal_period_year' in body || 'fiscal_period_quarter' in body
+          ? { fiscal_period_year: body.fiscal_period_year ?? null, fiscal_period_quarter: body.fiscal_period_quarter ?? null }
+          : {}),
+      },
+      session.user.id,
+    );
+
     const invoice = await prisma.invoice.update({
       where: { id: params.id },
-      data: updateData,
+      data: { ...updateData, ...fiscalOverrideUpdate },
     });
 
     // Log audit trail for all edits
-    await prisma.auditLog.create({
-      data: {
-        company_id: membership.company_id,
-        user_id: session.user.id,
-        entity_type: 'invoice',
-        entity_id: params.id,
-        action: 'update',
-        old_values: JSON.stringify(
-          Object.fromEntries(
-            Object.keys(updateData).map((k) => [k, (existingInvoice as any)[k]])
-          )
-        ),
-        new_values: JSON.stringify(updateData),
-      },
-    });
+    if (Object.keys(updateData).length > 0) {
+      await prisma.auditLog.create({
+        data: {
+          company_id: membership.company_id,
+          user_id: session.user.id,
+          entity_type: 'invoice',
+          entity_id: params.id,
+          action: 'update',
+          old_values: JSON.stringify(
+            Object.fromEntries(
+              Object.keys(updateData).map((k) => [k, (existingInvoice as any)[k]])
+            )
+          ),
+          new_values: JSON.stringify(updateData),
+        },
+      });
+    }
+
+    for (const entry of fiscalAuditEntries) {
+      await prisma.auditLog.create({
+        data: {
+          company_id: membership.company_id,
+          user_id: session.user.id,
+          entity_type: 'invoice',
+          entity_id: params.id,
+          action: entry.action,
+          old_values: entry.old_values,
+          new_values: entry.new_values,
+        },
+      });
+    }
 
     return NextResponse.json({ invoice });
   } catch (error: any) {

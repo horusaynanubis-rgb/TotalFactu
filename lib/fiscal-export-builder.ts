@@ -11,6 +11,7 @@ import { createFiscalExportBatchToken, FiscalExportBatchPayload } from './batch-
 import { getFiscalQuarterInfo, FiscalQuarter } from './fiscal-calendar';
 import { getSignedDownloadUrl } from './storage';
 import { buildFiscalSummary, generateResumenCSV } from './fiscal-summary';
+import { invoiceEffectivePeriodWhere } from './invoice-fiscal-treatment';
 import { buildSpecialExpensesSummary } from './special-expenses';
 import { buildTpvControlReport, generateTpvControlCSV } from './tpv-control';
 import { generateCajaCSV } from './caja-csv';
@@ -157,6 +158,15 @@ export async function buildFiscalExportZipFiles(
   const { mode, year, quarter, batchIndex, offset, count } = payload;
   const { start, end, label } = getPeriodRange(year, quarter);
 
+  // fiscal_period override only has meaning at quarter granularity —
+  // "annual" keeps the plain issue_date range everywhere below, same as
+  // before this feature. Hoisted here (not just inside the 'csv'/'complete'
+  // block) so every CSV this function builds — resumen, facturas, and (mode
+  // 'complete') detalle_iva + manual_review — agrees on the exact same
+  // fiscal-period selection. See lib/invoice-fiscal-treatment.ts.
+  const periodYearQuarter = quarter === 'annual' ? undefined : { year, quarter: quarter as number };
+  const fiscalPeriodTag = quarter === 'annual' ? 'annual' : `Q${quarter}`;
+
   const files: Record<string, [Uint8Array, { level: 0 }]> = {};
   const errors: string[] = [];
   let recordCount = 0;
@@ -166,15 +176,17 @@ export async function buildFiscalExportZipFiles(
   // like the document ZIPs do.
   if (batchIndex === 0) {
     if (mode === 'csv' || mode === 'complete') {
-      const fiscalPeriodTag = quarter === 'annual' ? 'annual' : `Q${quarter}`;
       const [summary, specialExpenses] = await Promise.all([
-        buildFiscalSummary(companyId, start, end, label),
+        buildFiscalSummary(companyId, start, end, label, periodYearQuarter),
         buildSpecialExpensesSummary(companyId, year, fiscalPeriodTag),
       ]);
       files['resumen_fiscal.csv'] = [new TextEncoder().encode(generateResumenCSV(summary, specialExpenses)), { level: 0 }];
 
+      const invoicePeriodWhere = periodYearQuarter
+        ? invoiceEffectivePeriodWhere(periodYearQuarter.year, periodYearQuarter.quarter, start, end)
+        : { issue_date: { gte: start, lte: end } };
       const invoices = await prisma.invoice.findMany({
-        where: { company_id: companyId, issue_date: { gte: start, lte: end } },
+        where: { company_id: companyId, ...invoicePeriodWhere },
         include: { document: true, invoice_lines: true },
         orderBy: { issue_date: 'asc' },
       });
@@ -190,8 +202,8 @@ export async function buildFiscalExportZipFiles(
           include: { document: { select: { source_channel: true } } },
         }),
         buildTpvControlReport(companyId, start, end, label),
-        buildIvaDetalle(companyId, start, end),
-        buildManualReviewList(companyId, start, end),
+        buildIvaDetalle(companyId, start, end, periodYearQuarter),
+        buildManualReviewList(companyId, start, end, periodYearQuarter),
       ]);
       files['caja_tpv.csv'] = [new TextEncoder().encode(generateCajaCSV(registers)), { level: 0 }];
       files['control_tpv_vs_facturacion.csv'] = [new TextEncoder().encode(generateTpvControlCSV(tpvReport)), { level: 0 }];

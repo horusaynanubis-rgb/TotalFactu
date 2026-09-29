@@ -7,6 +7,7 @@ import { getFiscalQuarterInfo, FiscalQuarter } from '@/lib/fiscal-calendar';
 import { resolveActiveCompanyId } from '@/lib/active-company';
 import { uploadFile, buildExportPath } from '@/lib/storage';
 import { sendMessage } from '@/lib/telegram';
+import { invoiceEffectivePeriodWhere } from '@/lib/invoice-fiscal-treatment';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,20 +34,42 @@ export async function POST(request: NextRequest) {
 
     let start: Date;
     let end: Date;
+    // Resolved (year, quarter) for THIS export, regardless of which path
+    // produced start/end — explicit custom quarter, or the automatic "last
+    // completed quarter" — so both apply the exact same fiscal_period-aware
+    // selection below. undefined only for 'monthly' (fiscal_period is only
+    // ever expressed in quarter granularity, see lib/invoice-fiscal-treatment.ts).
+    let periodYearQuarter: { year: number; quarter: number } | undefined;
     if (isCustomQuarter) {
       const info = getFiscalQuarterInfo(year, quarter as FiscalQuarter);
       start = info.period_start;
       end = info.period_end;
+      periodYearQuarter = { year, quarter };
     } else {
-      ({ start, end } = getDateRange(exportType as any));
+      const range = getDateRange(exportType as any);
+      start = range.start;
+      end = range.end;
+      periodYearQuarter = range.year != null && range.quarter != null
+        ? { year: range.year, quarter: range.quarter }
+        : undefined;
     }
 
     const resolvedExportType = isCustomQuarter ? 'quarterly' : exportType;
 
+    // fiscal_period override only has meaning for a genuine (year, quarter)
+    // request — a plain 'monthly' export keeps using the raw issue_date
+    // range, same as before this feature. Both the explicit-quarter path and
+    // the automatic "last completed quarter" path now go through the exact
+    // same helper, so they can never disagree on which invoices belong to a
+    // given quarter — see lib/invoice-fiscal-treatment.ts.
+    const invoicePeriodWhere = periodYearQuarter
+      ? invoiceEffectivePeriodWhere(periodYearQuarter.year, periodYearQuarter.quarter, start, end)
+      : { issue_date: { gte: start, lte: end } };
+
     const invoices = await prisma.invoice.findMany({
       where: {
         company_id: companyId,
-        issue_date: { gte: start, lte: end },
+        ...invoicePeriodWhere,
       },
       include: { document: true, invoice_lines: true },
       orderBy: { issue_date: 'desc' },

@@ -80,6 +80,17 @@ export function getCurrentFiscalQuarter(date: Date = new Date()): FiscalQuarterW
   return { ...info, status };
 }
 
+/**
+ * Inverse of getFiscalQuarterInfo: the natural (year, quarter) a date falls
+ * into. Pure date math, no "today" dependency — used to compute the DEFAULT
+ * fiscal_period_year/quarter for a new Invoice (Fase Gascón, 2026-09), before
+ * any human override. See lib/invoice-fiscal-treatment.ts.
+ */
+export function quarterOfDate(date: Date): { year: number; quarter: FiscalQuarter } {
+  const quarter = (Math.floor(date.getMonth() / 3) + 1) as FiscalQuarter;
+  return { year: date.getFullYear(), quarter };
+}
+
 /** DD/MM/YYYY formatting used for fiscal dates (Modelo 303 style), locale-independent. */
 export function formatFiscalDate(date: Date): string {
   const d = String(date.getDate()).padStart(2, '0');

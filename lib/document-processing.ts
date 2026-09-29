@@ -33,6 +33,9 @@ import { computeFiscalStatus } from '@/lib/fiscal-status';
 import { checkDuplicate, candidateLookupWindow, DuplicateInvoiceRef } from '@/lib/duplicate-detection';
 import { computeContentHash, evaluateDuplicate, DUPLICATE_USER_MESSAGES, DUPLICATE_STATUS_BY_VERDICT } from '@/lib/document-dedup';
 import { recordShadowDecision } from '@/lib/invoice-decision';
+import { extractPreservedFiscalFields } from '@/lib/invoice-fiscal-preservation';
+import { quarterOfDate } from '@/lib/fiscal-calendar';
+import { suggestDocumentType } from '@/lib/document-type-classifier';
 
 export interface ProcessDocumentOptions {
   hint?: string; // 'cash_closeout' from Telegram caption pre-screening — same as today's ?hint= query param
@@ -219,6 +222,14 @@ export async function processDocument(
     if (!document) {
       return { status: 404, body: { message: 'Document not found' } };
     }
+
+    // Reprocessing must not erase human fiscal decisions (Fase Gascón,
+    // 2026-09): capture any human-confirmed document_type/fiscal_period from
+    // the Invoice about to be deleted below, so it can be restored onto the
+    // freshly recreated Invoice further down. See lib/invoice-fiscal-preservation.ts.
+    const preservedFiscalFields = document.invoice
+      ? extractPreservedFiscalFields(document.invoice)
+      : {};
 
     // If retrying, delete existing records first
     if (document.invoice) {
@@ -570,10 +581,44 @@ export async function processDocument(
     });
 
     processingPhase = 'db_insert';
-    const invoiceData = {
+    const baseInvoiceData = {
       ...mapExtractionToInvoice(extraction, documentId, document.company_id),
       invoice_type: finalType,
       review_status: needsReview ? 'pending' : 'approved',
+    };
+
+    // Default fiscal_period_year/quarter = the quarter issue_date naturally
+    // falls into (fiscal_period_set_by stays null — this is a default, not a
+    // human override; see lib/invoice-fiscal-treatment.ts). Only computed for
+    // brand-new invoices — a reprocess with a human override present below
+    // overwrites this via preservedFiscalFields regardless.
+    const { year: defaultFiscalYear, quarter: defaultFiscalQuarter } = quarterOfDate(baseInvoiceData.issue_date);
+
+    // Advisory-only suggestion (Fase Gascón, 2026-09) — never written to
+    // document_type. Only meaningful for received invoices (the simplified-
+    // invoice concept applies to expenses BYOU receives, not to invoices it issues).
+    // See lib/document-type-classifier.ts.
+    const suggestedDocumentType = finalType === 'received'
+      ? suggestDocumentType({
+          recipient_tax_id: extraction.recipient_tax_id,
+          customer_tax_id: extraction.customer_tax_id,
+          total_amount: extraction.total_amount,
+          category: extraction.category,
+          notes: extraction.notes,
+          invoice_number: extraction.invoice_number,
+        })
+      : null;
+
+    const invoiceData = {
+      ...baseInvoiceData,
+      suggested_document_type: suggestedDocumentType,
+      fiscal_period_year: defaultFiscalYear,
+      fiscal_period_quarter: defaultFiscalQuarter,
+      // Restore any human-confirmed document_type/fiscal_period captured
+      // above, before the old Invoice was deleted — must win over both the
+      // fresh extraction AND the defaults just computed.
+      // See lib/invoice-fiscal-preservation.ts.
+      ...preservedFiscalFields,
     };
     const invoice = await prisma.invoice.create({ data: invoiceData });
 

@@ -4,6 +4,7 @@ import { authOptions } from '@/app/api/auth/[...nextauth]/auth-options';
 import { prisma } from '@/lib/prisma';
 import { resolveActiveCompanyId } from '@/lib/active-company';
 import { getFiscalQuarterInfo, FiscalQuarter } from '@/lib/fiscal-calendar';
+import { invoiceEffectivePeriodWhere } from '@/lib/invoice-fiscal-treatment';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,9 +39,15 @@ export async function GET(request: NextRequest) {
         return { start: info.period_start, end: info.period_end };
       })();
 
+  // fiscal_period override only has meaning at quarter granularity — "annual"
+  // keeps the plain issue_date range, same as before this feature.
+  const periodWhere = quarter === 'annual'
+    ? { issue_date: { gte: start, lte: end } }
+    : invoiceEffectivePeriodWhere(year, quarter as number, start, end);
+
   const grouped = await prisma.invoice.groupBy({
     by: ['fiscal_status'],
-    where: { company_id: companyId, issue_date: { gte: start, lte: end } },
+    where: { company_id: companyId, ...periodWhere },
     _count: true,
   });
 

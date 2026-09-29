@@ -31,9 +31,11 @@ function invoice(overrides: Partial<EconomicInvoiceInput>): EconomicInvoiceInput
   return {
     invoice_type: 'received',
     subtotal: 100,
+    total_amount: 100, // legacy default: same as subtotal unless a case explicitly sets it — document_type=null means getExpenseAmount() ignores it anyway
     currency: 'EUR',
     fiscal_status: 'classified',
     gestoria_review_status: 'reviewed_ok',
+    document_type: null, // legacy/unconfirmed — must behave exactly as before this field existed
     ...overrides,
   };
 }

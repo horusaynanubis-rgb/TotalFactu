@@ -39,8 +39,11 @@ export async function GET(request: NextRequest) {
       })();
 
   const fiscalPeriodTag = quarter === 'annual' ? 'annual' : `Q${quarter}`;
+  // fiscal_period override only has meaning at quarter granularity — "annual"
+  // keeps using the plain issue_date range, same as before this feature.
+  const periodYearQuarter = quarter === 'annual' ? undefined : { year, quarter: quarter as number };
   const [summary, specialExpenses] = await Promise.all([
-    buildFiscalSummary(companyId, start, end, label),
+    buildFiscalSummary(companyId, start, end, label, periodYearQuarter),
     buildSpecialExpensesSummary(companyId, year, fiscalPeriodTag),
   ]);
   const csv = generateResumenCSV(summary, specialExpenses);

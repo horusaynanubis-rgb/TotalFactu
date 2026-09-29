@@ -4,6 +4,7 @@
 // lib/csv-generator.ts only emits a flat per-invoice CSV.
 import { prisma } from './prisma';
 import { getInvoiceFiscalBreakdown } from './fiscal-breakdown';
+import { getDeductibleInputVat, invoiceEffectivePeriodWhere } from './invoice-fiscal-treatment';
 
 const CSV_DELIMITER = ';';
 // Sentinel for "rate outside 0/4/10/21" (IGIC/IPSI, OCR artifact) — distinct
@@ -84,10 +85,20 @@ export async function buildFiscalSummary(
   from: Date,
   to: Date,
   periodLabel: string,
+  // Optional: when the caller knows this is a genuine calendar quarter (every
+  // known caller does, via getFiscalQuarterInfo — see app/api/fiscal-summary/csv/route.ts
+  // and lib/fiscal-export-builder.ts), pass it so invoices with a confirmed
+  // fiscal_period override are matched on that instead of raw issue_date.
+  // Omitted (or a non-quarter range) → identical to today's issue_date-only behavior.
+  periodYearQuarter?: { year: number; quarter: number },
 ): Promise<FiscalSummary> {
+  const periodWhere = periodYearQuarter
+    ? invoiceEffectivePeriodWhere(periodYearQuarter.year, periodYearQuarter.quarter, from, to)
+    : { issue_date: { gte: from, lte: to } };
+
   const [invoices, cajaRegisters] = await Promise.all([
     prisma.invoice.findMany({
-      where: { company_id: companyId, issue_date: { gte: from, lte: to } },
+      where: { company_id: companyId, ...periodWhere },
       select: {
         invoice_type: true,
         issue_date: true,
@@ -95,6 +106,7 @@ export async function buildFiscalSummary(
         tax_amount: true,
         total_amount: true,
         tax_rate: true,
+        document_type: true,
         ai_vat_breakdown: true,
         vat_reclassification_attempted: true,
         invoice_lines: { select: { tax_rate: true, total_amount: true } },
@@ -181,7 +193,14 @@ export async function buildFiscalSummary(
     // IVA repercutido/soportado and base imponible totals always come from
     // the (trusted) header amounts, once per invoice — independent of how
     // many rate rows the breakdown above touched.
-    if (isVenta) ivaRepercutido += inv.tax_amount; else ivaSoportado += inv.tax_amount;
+    // ivaSoportado (deductible input VAT) is gated by document_type: a
+    // human-confirmed SIMPLIFIED_INVOICE contributes 0 here — no recipient
+    // tax-id identification, printed VAT not legally deductible — while the
+    // per-rate breakdown table above still shows the real printed tax_amount
+    // as documental record. NULL/FULL_INVOICE (legacy/unconfirmed) is
+    // unaffected, identical to today. See lib/invoice-fiscal-treatment.ts.
+    if (isVenta) ivaRepercutido += inv.tax_amount;
+    else ivaSoportado += getDeductibleInputVat({ document_type: inv.document_type, tax_amount: inv.tax_amount });
     totalBaseImponible += inv.subtotal;
   }
 

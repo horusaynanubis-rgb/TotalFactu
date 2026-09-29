@@ -59,6 +59,10 @@ interface ReviewInvoice {
   notes: string | null;
   extraction_confidence: number;
   review_status: string;
+  document_type: string | null;
+  suggested_document_type: string | null;
+  fiscal_period_year: number | null;
+  fiscal_period_quarter: number | null;
 }
 
 interface ReviewDocument {
@@ -118,7 +122,23 @@ function buildEditForm(inv: ReviewInvoice) {
     payment_method: inv.payment_method || '',
     category: inv.category || '',
     notes: inv.notes || '',
+    // Defaults to the CURRENT confirmed value (may be null) — never the
+    // suggestion. Saving an unrelated field (e.g. fixing a typo) must never
+    // silently confirm a classification the human never looked at; the PATCH
+    // endpoint treats an unchanged value as a no-op (no audit entry either).
+    document_type: inv.document_type,
+    fiscal_period_year: inv.fiscal_period_year,
+    fiscal_period_quarter: inv.fiscal_period_quarter,
   };
+}
+
+// Natural quarter issue_date falls into — pure display helper, mirrors
+// lib/fiscal-calendar.ts#quarterOfDate() math. Only used to compare against
+// the persisted fiscal_period for the "factura de un periodo anterior" banner;
+// the authoritative computation stays server-side (lib/invoice-fiscal-treatment.ts).
+function quarterOfIssueDate(isoDate: string): { year: number; quarter: number } {
+  const d = new Date(isoDate);
+  return { year: d.getFullYear(), quarter: Math.floor(d.getMonth() / 3) + 1 };
 }
 
 // ---------------------------------------------------------------------------
@@ -873,6 +893,85 @@ export default function ReviewQueuePage() {
                   />
                 </div>
               </div>
+
+              {/* Tipo de documento (Fase Gascón) — solo aplica a facturas recibidas */}
+              {editForm.invoice_type === 'received' && (
+                <div className="border rounded-md p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label>Tipo de documento</Label>
+                    {editInvoice.suggested_document_type && !editForm.document_type && (
+                      <span className="text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">
+                        Sugerencia: {editInvoice.suggested_document_type === 'SIMPLIFIED_INVOICE' ? 'Factura simplificada' : 'Factura completa'} — a confirmar
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEditForm({ ...editForm, document_type: 'FULL_INVOICE' })}
+                      className={`px-3 py-1.5 rounded-md text-xs font-medium border ${editForm.document_type === 'FULL_INVOICE' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
+                    >
+                      Factura completa
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditForm({ ...editForm, document_type: 'SIMPLIFIED_INVOICE' })}
+                      className={`px-3 py-1.5 rounded-md text-xs font-medium border ${editForm.document_type === 'SIMPLIFIED_INVOICE' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
+                    >
+                      Factura simplificada
+                    </button>
+                  </div>
+                  {editForm.document_type === 'SIMPLIFIED_INVOICE' && (() => {
+                    const taxAmount = Number(editForm.tax_amount) || 0;
+                    const totalAmount = Number(editForm.total_amount) || 0;
+                    return (
+                      <div className="text-xs text-gray-600 bg-gray-50 rounded-md p-2 space-y-0.5">
+                        <div>IVA documento: {formatCurrency(taxAmount, editForm.currency)}</div>
+                        <div className="font-medium text-gray-900">IVA deducible: {formatCurrency(0, editForm.currency)}</div>
+                        <div className="font-medium text-gray-900">Gasto computable: {formatCurrency(totalAmount, editForm.currency)}</div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {/* Periodo fiscal (Fase Gascón) */}
+              {(() => {
+                const naturalPeriod = quarterOfIssueDate(editForm.issue_date);
+                const todayPeriod = quarterOfIssueDate(new Date().toISOString());
+                const isLate = naturalPeriod.year !== todayPeriod.year || naturalPeriod.quarter !== todayPeriod.quarter;
+                const selectedYear = editForm.fiscal_period_year ?? naturalPeriod.year;
+                const selectedQuarter = editForm.fiscal_period_quarter ?? naturalPeriod.quarter;
+                return (
+                  <div className="border rounded-md p-3 space-y-2">
+                    <div className="flex items-center justify-between text-xs text-gray-600">
+                      <span>Fecha factura: {editForm.issue_date ? formatDate(editForm.issue_date) : '—'}</span>
+                      <span className="font-medium text-gray-900">Periodo fiscal: Q{selectedQuarter} {selectedYear}</span>
+                    </div>
+                    {isLate && (
+                      <div className="bg-amber-50 border border-amber-200 rounded-md p-2 space-y-1.5">
+                        <p className="text-xs text-amber-700">⚠️ Factura de un periodo anterior</p>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setEditForm({ ...editForm, fiscal_period_year: naturalPeriod.year, fiscal_period_quarter: naturalPeriod.quarter })}
+                            className={`px-2.5 py-1 rounded-md text-xs font-medium border ${selectedYear === naturalPeriod.year && selectedQuarter === naturalPeriod.quarter ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
+                          >
+                            Q{naturalPeriod.quarter} {naturalPeriod.year} (original)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditForm({ ...editForm, fiscal_period_year: todayPeriod.year, fiscal_period_quarter: todayPeriod.quarter })}
+                            className={`px-2.5 py-1 rounded-md text-xs font-medium border ${selectedYear === todayPeriod.year && selectedQuarter === todayPeriod.quarter ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
+                          >
+                            Q{todayPeriod.quarter} {todayPeriod.year} (actual)
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Confidence indicator */}
               <div className="bg-gray-50 rounded-md px-3 py-2 text-xs text-gray-500">

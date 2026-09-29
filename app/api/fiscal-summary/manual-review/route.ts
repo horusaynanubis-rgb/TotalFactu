@@ -37,7 +37,10 @@ export async function GET(request: NextRequest) {
       })();
 
   const fiscalPeriodTag = quarter === 'annual' ? 'annual' : `Q${quarter}`;
-  const rows = await buildManualReviewList(companyId, start, end);
+  // fiscal_period override only has meaning at quarter granularity — "annual"
+  // keeps the plain issue_date range, same as before this feature.
+  const periodYearQuarter = quarter === 'annual' ? undefined : { year, quarter: quarter as number };
+  const rows = await buildManualReviewList(companyId, start, end, periodYearQuarter);
   const csv = generateManualReviewCSV(rows);
 
   return new Response(csv, {

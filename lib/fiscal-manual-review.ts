@@ -5,6 +5,7 @@
 // to open the document — the regular resumen/detalle CSVs never guess a
 // rate for them.
 import { prisma } from './prisma';
+import { invoiceEffectivePeriodWhere } from './invoice-fiscal-treatment';
 
 const CSV_DELIMITER = ';';
 
@@ -25,9 +26,18 @@ const REASON_LABELS: Record<string, string> = {
   'ai-unresolved-error': 'Fallo técnico al intentar la verificación con IA',
 };
 
-export async function buildManualReviewList(companyId: string, from: Date, to: Date): Promise<ManualReviewRow[]> {
+export async function buildManualReviewList(
+  companyId: string,
+  from: Date,
+  to: Date,
+  periodYearQuarter?: { year: number; quarter: number },
+): Promise<ManualReviewRow[]> {
+  const periodWhere = periodYearQuarter
+    ? invoiceEffectivePeriodWhere(periodYearQuarter.year, periodYearQuarter.quarter, from, to)
+    : { issue_date: { gte: from, lte: to } };
+
   const invoices = await prisma.invoice.findMany({
-    where: { company_id: companyId, issue_date: { gte: from, lte: to }, fiscal_status: 'manual_review' },
+    where: { company_id: companyId, ...periodWhere, fiscal_status: 'manual_review' },
     select: {
       invoice_number: true,
       issue_date: true,

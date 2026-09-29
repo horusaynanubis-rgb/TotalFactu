@@ -365,6 +365,39 @@ model Invoice {
   ai_vat_breakdown                String?   // JSON [{rate,base,iva}] — result of the one-shot VAT-only Gemini pass; set once, never overwritten
   vat_reclassification_attempted  Boolean   @default(false) // true once the VAT-only micro pass has been tried (resolved or not) — never retried automatically after this
   vat_reclassified_at             DateTime?
+
+  // Simplified-invoice classification (Fase Gascón, 2026-09) — separate from
+  // fiscal_status (VAT-rate resolution) and from the raw extracted fields
+  // (subtotal/tax_amount/total_amount/tax_rate, never mutated by this).
+  // NULL = untouched — treated exactly as FULL_INVOICE by every calculation
+  // (lib/fiscal-summary.ts, lib/economic-summary.ts), for BOTH historical
+  // rows and brand-new documents pending human confirmation. There is no
+  // backfill and no auto-classification: only a human PATCH via
+  // app/api/invoices/[id]/route.ts ever sets `document_type`. String, not a
+  // Prisma enum — matches every other closed-value status field on this model
+  // (invoice_type, review_status, fiscal_status, gestoria_review_status),
+  // none of which use a DB enum anywhere in this schema; Postgres enum
+  // ALTER TYPE churn is not worth it for a value set still expected to
+  // evolve (see design doc open questions).
+  document_type                   String?   // NULL | FULL_INVOICE | SIMPLIFIED_INVOICE — CONFIRMED, the only one calculations read
+  suggested_document_type         String?   // NULL | FULL_INVOICE | SIMPLIFIED_INVOICE — advisory only, recomputed every processing attempt, never read by calculations
+  document_type_classified_by     String?   // User.id who confirmed — null while only auto-suggested
+  document_type_classified_at     DateTime?
+
+  // Fiscal period imputation, independent of issue_date (Fase Gascón) — a
+  // late-received invoice can keep its real issue_date while being declared
+  // in a later quarter. NULL = untouched, every consumer falls back to
+  // issue_date exactly as today. Two ints (not a "YYYY-Qn" string) to match
+  // lib/fiscal-calendar.ts#getFiscalQuarterInfo(year, quarter) verbatim and
+  // allow indexed range-free equality lookups. `fiscal_period_source` is
+  // intentionally NOT a stored column — it is fully derivable as
+  // `fiscal_period_set_by == null ? 'default' : 'manual_override'`, storing
+  // it separately would be redundant and could drift from set_by.
+  fiscal_period_year              Int?
+  fiscal_period_quarter           Int?      // 1-4
+  fiscal_period_set_by            String?   // User.id who confirmed/overrode — null if never touched by a human
+  fiscal_period_set_at            DateTime?
+
   created_at             DateTime @default(now())
   updated_at             DateTime @updatedAt
 
@@ -385,6 +418,8 @@ model Invoice {
   @@index([supplier_id])
   @@index([invoice_number, supplier_name, issue_date]) // For duplicate detection
   @@index([fiscal_status])
+  @@index([document_type])
+  @@index([company_id, fiscal_period_year, fiscal_period_quarter])
 }
 
 model DeliveryNote {
