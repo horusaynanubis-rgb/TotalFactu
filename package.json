@@ -7,7 +7,7 @@
     "start": "next start",
     "lint": "next lint",
     "postinstall": "prisma generate",
-    "test": "tsx scripts/test-csv-encoding.ts && tsx scripts/test-fiscal-breakdown.ts && tsx scripts/test-duplicate-detection.ts && tsx scripts/test-stuck-documents.ts && tsx scripts/test-resolve-duplicates-safety.ts && tsx scripts/test-billing.ts && tsx scripts/test-gemini-error-classification.ts && tsx scripts/test-gemini-timeout.ts && tsx scripts/test-storage-timeout.ts && tsx scripts/test-document-dedup.ts && tsx scripts/test-telegram-webhook-fallback.ts && tsx scripts/test-gemini-adaptive-mode.ts && tsx scripts/test-processing-job.ts && tsx scripts/test-process-queue-worker.ts && tsx scripts/test-exception-engine.ts && tsx scripts/test-issued-received-gate.ts && tsx scripts/test-human-outcome.ts && tsx scripts/test-shadow-integration.ts && tsx scripts/test-economic-summary.ts && tsx scripts/test-invoice-fiscal-preservation.ts && tsx scripts/test-fiscal-classification-and-period.ts && tsx scripts/test-fiscal-export-consistency.ts"
+    "test": "tsx scripts/test-csv-encoding.ts && tsx scripts/test-fiscal-breakdown.ts && tsx scripts/test-duplicate-detection.ts && tsx scripts/test-stuck-documents.ts && tsx scripts/test-resolve-duplicates-safety.ts && tsx scripts/test-billing.ts && tsx scripts/test-gemini-error-classification.ts && tsx scripts/test-gemini-timeout.ts && tsx scripts/test-storage-timeout.ts && tsx scripts/test-document-dedup.ts && tsx scripts/test-telegram-webhook-fallback.ts && tsx scripts/test-gemini-adaptive-mode.ts && tsx scripts/test-processing-job.ts && tsx scripts/test-process-queue-worker.ts && tsx scripts/test-exception-engine.ts && tsx scripts/test-issued-received-gate.ts && tsx scripts/test-human-outcome.ts && tsx scripts/test-shadow-integration.ts && tsx scripts/test-economic-summary.ts && tsx scripts/test-invoice-fiscal-preservation.ts && tsx scripts/test-fiscal-classification-and-period.ts && tsx scripts/test-fiscal-export-consistency.ts && tsx scripts/test-a3-export-pdf-conversion.ts"
   },
   "prisma": {
     "seed": "tsx --require dotenv/config scripts/safe-seed.ts"
@@ -97,6 +97,7 @@
     "next": "14.2.28",
     "next-auth": "4.24.11",
     "next-themes": "0.3.0",
+    "pdf-lib": "^1.17.1",
     "plotly.js": "2.35.3",
     "react": "18.2.0",
     "react-chartjs-2": "5.3.0",

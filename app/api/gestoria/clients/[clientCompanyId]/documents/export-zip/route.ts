@@ -6,6 +6,8 @@ import { verifyBatchToken } from '@/lib/batch-token';
 import { getSignedDownloadUrl } from '@/lib/storage';
 import { zipSync } from 'fflate';
 import { buildDocumentWhere } from '@/lib/gestoria-document-where';
+import { sniffFileMime, convertImageToPdf, ImageConversionError } from '@/lib/image-to-pdf';
+import { buildZipEntryName } from '@/lib/a3-export-naming';
 
 // Allow up to 60 s on Vercel Pro for large batches
 export const maxDuration = 60;
@@ -28,69 +30,6 @@ async function resolveGestoriaAccess(userId: string, clientCompanyId: string) {
   if (!license) return null;
 
   return { gestoriaCompanyId: membership.company_id };
-}
-
-/** Strip diacritics, keep alphanumeric + safe chars, uppercase, max 40 chars */
-function sanitizePart(s: string, maxLen = 40): string {
-  return s
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/[^a-zA-Z0-9\-]/g, '_')
-    .replace(/_+/g, '_')
-    .replace(/^_|_$/g, '')
-    .toUpperCase()
-    .slice(0, maxLen) || 'DESCONOCIDO';
-}
-
-function buildZipEntryName(
-  doc: {
-    original_filename: string;
-    upload_timestamp: Date;
-    invoice?: {
-      invoice_type: string;
-      invoice_number: string | null;
-      issue_date: Date | null;
-      supplier_name: string | null;
-      total_amount: number | null;
-    } | null;
-  },
-  usedNames: Set<string>,
-): string {
-  const folder =
-    doc.invoice?.invoice_type === 'received' ? 'recibidas' :
-    doc.invoice?.invoice_type === 'issued'   ? 'emitidas' :
-    'sin_clasificar';
-
-  const refDate = doc.invoice?.issue_date ?? doc.upload_timestamp;
-  const date = new Date(refDate).toISOString().slice(0, 10);
-
-  const ext = doc.original_filename.includes('.')
-    ? doc.original_filename.slice(doc.original_filename.lastIndexOf('.')).toLowerCase()
-    : '.pdf';
-
-  let name: string;
-  if (doc.invoice) {
-    const supplier  = sanitizePart(doc.invoice.supplier_name ?? 'DESCONOCIDO', 30);
-    const invoiceNo = sanitizePart(doc.invoice.invoice_number ?? 'SN', 30);
-    const total     = (doc.invoice.total_amount ?? 0).toFixed(2).replace('.', '-');
-    name = `${folder}/${date}_${supplier}_${invoiceNo}_${total}${ext}`;
-  } else {
-    const base = sanitizePart(
-      doc.original_filename.slice(0, doc.original_filename.lastIndexOf('.')), 40,
-    );
-    name = `${folder}/${date}_${base}${ext}`;
-  }
-
-  // Deduplicate
-  if (usedNames.has(name)) {
-    const base = name.slice(0, name.lastIndexOf('.'));
-    const xExt = name.slice(name.lastIndexOf('.'));
-    let n = 2;
-    while (usedNames.has(`${base}_${n}${xExt}`)) n++;
-    name = `${base}_${n}${xExt}`;
-  }
-  usedNames.add(name);
-  return name;
 }
 
 export async function GET(
@@ -163,12 +102,38 @@ export async function GET(
       const signedUrl = await getSignedDownloadUrl(doc.cloud_storage_path, 180);
       const res = await fetch(signedUrl);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const buf = await res.arrayBuffer();
+      const buf = Buffer.from(await res.arrayBuffer());
+
+      // A3 export (2026-09): decide PDF-passthrough vs. image→PDF conversion
+      // by the REAL file content (magic bytes), never by Document.mime_type
+      // or the filename extension — a document's stored/declared type can be
+      // stale or wrong. Document itself is never written to here.
+      const sniffed = sniffFileMime(buf);
+      if (sniffed !== doc.mime_type) {
+        // Safe, non-sensitive diagnostic only — no invoice/document content,
+        // just the type mismatch. Never persisted, never modifies Document.
+        console.warn(
+          `[a3-export] MIME mismatch documentId=${doc.id} db_mime_type=${doc.mime_type} sniffed=${sniffed}`,
+        );
+      }
+
+      let pdfBytes: Buffer;
+      if (sniffed === 'application/pdf') {
+        pdfBytes = buf; // byte-for-byte passthrough
+      } else if (sniffed === 'image/jpeg' || sniffed === 'image/png') {
+        pdfBytes = await convertImageToPdf(buf, sniffed);
+      } else {
+        throw new Error('Formato de archivo no reconocido (no es PDF, JPEG ni PNG) — no se puede generar un PDF para A3');
+      }
+
       const entryName = buildZipEntryName(doc, usedNames);
-      // level: 0 = store (no re-compression) — PDFs are already compressed
-      files[entryName] = [new Uint8Array(buf), { level: 0 }];
+      // level: 0 = store (no re-compression) — these are already PDFs (original or just-generated)
+      files[entryName] = [new Uint8Array(pdfBytes), { level: 0 }];
     } catch (err: any) {
-      errors.push(`${doc.original_filename}: ${err?.message ?? 'error desconocido'}`);
+      const reason = err instanceof ImageConversionError
+        ? err.message
+        : (err?.message ?? 'error desconocido');
+      errors.push(`${doc.original_filename}: ${reason}`);
     }
   }
 
