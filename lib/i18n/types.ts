@@ -443,6 +443,7 @@ export interface Translations {
     reasonMissingAmount: string;
     reasonTypeUncertain: string;
     confidence: string;
+    fiscalClassificationPending: string;
   };
 
   // Status badges (legacy — internal/technical labels)

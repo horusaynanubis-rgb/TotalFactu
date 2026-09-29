@@ -428,6 +428,7 @@ export const es: Translations = {
     reasonMissingAmount: 'Importe total no detectado',
     reasonTypeUncertain: 'Tipo de factura sin confirmar',
     confidence: 'Confianza',
+    fiscalClassificationPending: 'Clasificación fiscal pendiente',
   },
 
   statusBadges: {

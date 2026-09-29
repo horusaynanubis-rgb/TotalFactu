@@ -15,6 +15,7 @@ import {
   FileText, ClipboardCheck, X, Loader2, PenLine, MessageSquare,
 } from 'lucide-react';
 import { DocumentTimeline } from '@/components/document-timeline';
+import { isFiscalClassificationPending } from '@/lib/review-queue';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -553,6 +554,12 @@ export default function ReviewQueuePage() {
                             }`}>
                               {confidencePct}%
                             </span>
+                            {isFiscalClassificationPending(inv) && (
+                              <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium bg-indigo-50 text-indigo-700 ring-1 ring-inset ring-indigo-600/20">
+                                <FileText className="h-3 w-3" />
+                                {t.review.fiscalClassificationPending}
+                              </span>
+                            )}
                           </div>
                           <span className="text-sm font-semibold text-gray-900">
                             {formatCurrency(inv.total_amount ?? 0, inv.currency)}
@@ -608,7 +615,7 @@ export default function ReviewQueuePage() {
                           <button
                             onClick={() => openEdit(inv)}
                             className={`inline-flex items-center gap-1.5 px-3 h-8 rounded-md text-xs font-medium transition-colors ${
-                              reasons.length > 0
+                              reasons.length > 0 || isFiscalClassificationPending(inv)
                                 ? 'bg-indigo-600 text-white hover:bg-indigo-700'
                                 : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                             }`}

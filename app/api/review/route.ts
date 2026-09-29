@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/auth-options";
 import { prisma } from "@/lib/prisma";
 import { resolveActiveCompanyId } from "@/lib/active-company";
+import { reviewQueueInvoiceWhere } from "@/lib/review-queue";
 
 export const dynamic = "force-dynamic";
 
@@ -43,7 +44,7 @@ export async function GET() {
 
     const [pendingInvoices, pendingDocuments] = await Promise.all([
       prisma.invoice.findMany({
-        where: { company_id: companyId, review_status: "pending" },
+        where: reviewQueueInvoiceWhere(companyId),
         select: {
           id: true,
           document_id: true,

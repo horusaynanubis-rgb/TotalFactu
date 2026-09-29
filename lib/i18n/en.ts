@@ -428,6 +428,7 @@ export const en: Translations = {
     reasonMissingAmount: 'Total amount not detected',
     reasonTypeUncertain: 'Invoice type unconfirmed',
     confidence: 'Confidence',
+    fiscalClassificationPending: 'Fiscal classification pending',
   },
 
   statusBadges: {
