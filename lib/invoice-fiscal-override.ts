@@ -1,20 +1,29 @@
-// Shared, pure builder for human-confirmed document_type / fiscal_period
-// changes on Invoice (Fase Gascón, 2026-09). Used by BOTH
+// Shared, pure builder for human-confirmed document_type / fiscal_period /
+// vat_treatment_override changes on Invoice (Fase Gascón, 2026-09; extended
+// 2026-09-30 for the vat_treatment_override "AIGÜES" case). Used by BOTH
 // app/api/invoices/[id]/route.ts (company-owner side, e.g. Bárbara) and
 // app/api/gestoria/clients/[clientCompanyId]/invoices/[invoiceId]/review/route.ts
 // (gestoría side, e.g. Jesús Gascón) so neither route re-derives validation
 // or AuditLog shape independently — see lib/invoice-fiscal-treatment.ts for
-// the read-time fiscal consequences once these fields are set.
+// the read-time fiscal consequences once these fields are set (that file
+// owns VAT_TREATMENT_OVERRIDE_CODES; this one only imports it to validate).
 //
 // Deliberately does NOT touch Prisma — callers run the update() + auditLog
 // writes themselves (ideally in a $transaction, matching the existing
 // gestoria review route's pattern).
+import { VAT_TREATMENT_OVERRIDE_CODES, VatTreatmentOverrideCode } from './invoice-fiscal-treatment';
 
 export const VALID_DOCUMENT_TYPES = ['FULL_INVOICE', 'SIMPLIFIED_INVOICE'] as const;
 export type DocumentTypeValue = (typeof VALID_DOCUMENT_TYPES)[number] | null;
 
 export function isValidDocumentTypeValue(value: unknown): value is DocumentTypeValue {
   return value === null || (VALID_DOCUMENT_TYPES as readonly unknown[]).includes(value);
+}
+
+export type VatTreatmentOverrideValue = VatTreatmentOverrideCode | null;
+
+export function isValidVatTreatmentOverrideValue(value: unknown): value is VatTreatmentOverrideValue {
+  return value === null || (VAT_TREATMENT_OVERRIDE_CODES as readonly unknown[]).includes(value);
 }
 
 /** Both null (clearing an override) or both a valid (year, quarter) pair — never one without the other. */
@@ -34,18 +43,38 @@ export interface CurrentFiscalFields {
   document_type: string | null;
   fiscal_period_year: number | null;
   fiscal_period_quarter: number | null;
+  vat_treatment_override: string | null;
+  vat_treatment_override_note: string | null;
 }
 
 export interface RequestedFiscalOverride {
   document_type?: DocumentTypeValue;
   fiscal_period_year?: number | null;
   fiscal_period_quarter?: number | null;
+  vat_treatment_override?: VatTreatmentOverrideValue;
+  vat_treatment_override_note?: string | null;
 }
 
 export interface FiscalAuditLogEntry {
-  action: 'document_type_reclassified' | 'fiscal_period_overridden';
+  action: 'document_type_reclassified' | 'fiscal_period_overridden' | 'vat_treatment_overridden';
   old_values: string; // JSON
   new_values: string; // JSON
+}
+
+/**
+ * vat_treatment_override is only meaningful for a FULL_INVOICE — combining it
+ * with SIMPLIFIED_INVOICE would express two conflicting non-deductibility
+ * reasons on the same invoice at once. `resolvedDocumentType` is whatever
+ * document_type the invoice will actually have AFTER this request (the
+ * requested value if the caller is changing it, otherwise the current one) —
+ * callers compute that themselves since only they know whether
+ * 'document_type' was present in the request body.
+ */
+export function isVatTreatmentOverrideConsistentWithDocumentType(
+  resolvedDocumentType: DocumentTypeValue,
+  vatTreatmentOverride: VatTreatmentOverrideValue,
+): boolean {
+  return vatTreatmentOverride === null || resolvedDocumentType !== 'SIMPLIFIED_INVOICE';
 }
 
 export interface BuildFiscalOverrideResult {
@@ -99,6 +128,25 @@ export function buildFiscalOverrideUpdate(
           fiscal_period_quarter: current.fiscal_period_quarter,
         }),
         new_values: JSON.stringify({ fiscal_period_year: newYear, fiscal_period_quarter: newQuarter }),
+      });
+    }
+  }
+
+  if ('vat_treatment_override' in requested) {
+    const newOverride = requested.vat_treatment_override ?? null;
+    const newNote = requested.vat_treatment_override_note ?? null;
+    if (newOverride !== current.vat_treatment_override || newNote !== current.vat_treatment_override_note) {
+      updateData.vat_treatment_override = newOverride;
+      updateData.vat_treatment_override_note = newNote;
+      updateData.vat_treatment_override_set_by = userId;
+      updateData.vat_treatment_override_set_at = now;
+      auditEntries.push({
+        action: 'vat_treatment_overridden',
+        old_values: JSON.stringify({
+          vat_treatment_override: current.vat_treatment_override,
+          vat_treatment_override_note: current.vat_treatment_override_note,
+        }),
+        new_values: JSON.stringify({ vat_treatment_override: newOverride, vat_treatment_override_note: newNote }),
       });
     }
   }

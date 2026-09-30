@@ -41,6 +41,7 @@ export interface EconomicInvoiceInput {
   fiscal_status: string; // 'classified' | 'pending_classification' | 'mixed_vat' | 'manual_review'
   gestoria_review_status: string | null;
   document_type: string | null; // NULL | 'FULL_INVOICE' | 'SIMPLIFIED_INVOICE' — see lib/invoice-fiscal-treatment.ts
+  vat_treatment_override: string | null; // NULL | 'THIRD_PARTY_RECIPIENT' — see lib/invoice-fiscal-treatment.ts
 }
 
 export interface EconomicCashRegisterInput {
@@ -254,6 +255,7 @@ export async function buildEconomicSummary(
         fiscal_status: true,
         gestoria_review_status: true,
         document_type: true,
+        vat_treatment_override: true,
       },
     }),
     prisma.dailyCashRegister.findMany({

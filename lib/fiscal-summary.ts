@@ -107,6 +107,7 @@ export async function buildFiscalSummary(
         total_amount: true,
         tax_rate: true,
         document_type: true,
+        vat_treatment_override: true,
         ai_vat_breakdown: true,
         vat_reclassification_attempted: true,
         invoice_lines: { select: { tax_rate: true, total_amount: true } },
@@ -200,7 +201,7 @@ export async function buildFiscalSummary(
     // as documental record. NULL/FULL_INVOICE (legacy/unconfirmed) is
     // unaffected, identical to today. See lib/invoice-fiscal-treatment.ts.
     if (isVenta) ivaRepercutido += inv.tax_amount;
-    else ivaSoportado += getDeductibleInputVat({ document_type: inv.document_type, tax_amount: inv.tax_amount });
+    else ivaSoportado += getDeductibleInputVat({ document_type: inv.document_type, tax_amount: inv.tax_amount, vat_treatment_override: inv.vat_treatment_override });
     totalBaseImponible += inv.subtotal;
   }
 

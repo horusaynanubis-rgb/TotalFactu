@@ -70,6 +70,8 @@ export async function GET() {
           suggested_document_type: true,
           fiscal_period_year: true,
           fiscal_period_quarter: true,
+          vat_treatment_override: true,
+          vat_treatment_override_note: true,
         },
         orderBy: { issue_date: "desc" },
         take: 100,

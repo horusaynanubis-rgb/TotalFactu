@@ -16,6 +16,15 @@ import {
 } from 'lucide-react';
 import { DocumentTimeline } from '@/components/document-timeline';
 import { isFiscalClassificationPending } from '@/lib/review-queue';
+import { VAT_TREATMENT_THIRD_PARTY_RECIPIENT } from '@/lib/invoice-fiscal-treatment';
+
+// Human-readable label for each stable vat_treatment_override code — mirrors
+// the label-map pattern used elsewhere in this codebase (e.g.
+// FISCAL_DOCUMENT_TYPE_LABELS_ES) rather than hardcoding the Spanish text
+// next to every place the code is displayed.
+const VAT_TREATMENT_OVERRIDE_LABELS_ES: Record<string, string> = {
+  [VAT_TREATMENT_THIRD_PARTY_RECIPIENT]: 'Factura emitida a un tercero',
+};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -64,6 +73,8 @@ interface ReviewInvoice {
   suggested_document_type: string | null;
   fiscal_period_year: number | null;
   fiscal_period_quarter: number | null;
+  vat_treatment_override: string | null;
+  vat_treatment_override_note: string | null;
 }
 
 interface ReviewDocument {
@@ -130,6 +141,11 @@ function buildEditForm(inv: ReviewInvoice) {
     document_type: inv.document_type,
     fiscal_period_year: inv.fiscal_period_year,
     fiscal_period_quarter: inv.fiscal_period_quarter,
+    // Same "defaults to current confirmed value, never a suggestion" rule as
+    // document_type above — there is no suggested_vat_treatment_override,
+    // this is always an explicit human decision.
+    vat_treatment_override: inv.vat_treatment_override,
+    vat_treatment_override_note: inv.vat_treatment_override_note,
   };
 }
 
@@ -912,20 +928,32 @@ export default function ReviewQueuePage() {
                       </span>
                     )}
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
-                      onClick={() => setEditForm({ ...editForm, document_type: 'FULL_INVOICE' })}
-                      className={`px-3 py-1.5 rounded-md text-xs font-medium border ${editForm.document_type === 'FULL_INVOICE' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
+                      onClick={() => setEditForm({ ...editForm, document_type: 'FULL_INVOICE', vat_treatment_override: null, vat_treatment_override_note: null })}
+                      className={`px-3 py-1.5 rounded-md text-xs font-medium border ${editForm.document_type === 'FULL_INVOICE' && !editForm.vat_treatment_override ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
                     >
                       Factura completa
                     </button>
                     <button
                       type="button"
-                      onClick={() => setEditForm({ ...editForm, document_type: 'SIMPLIFIED_INVOICE' })}
+                      onClick={() => setEditForm({ ...editForm, document_type: 'SIMPLIFIED_INVOICE', vat_treatment_override: null, vat_treatment_override_note: null })}
                       className={`px-3 py-1.5 rounded-md text-xs font-medium border ${editForm.document_type === 'SIMPLIFIED_INVOICE' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
                     >
                       Factura simplificada
+                    </button>
+                    {/* Full invoice, but the fiscal recipient is a third party (e.g. a
+                        utility bill addressed to the premises' individual owner) — keeps
+                        document_type = FULL_INVOICE (documentally correct) and only sets
+                        vat_treatment_override, a separate, independent axis. Never reuses
+                        SIMPLIFIED_INVOICE for this. See lib/invoice-fiscal-treatment.ts. */}
+                    <button
+                      type="button"
+                      onClick={() => setEditForm({ ...editForm, document_type: 'FULL_INVOICE', vat_treatment_override: VAT_TREATMENT_THIRD_PARTY_RECIPIENT })}
+                      className={`px-3 py-1.5 rounded-md text-xs font-medium border ${editForm.vat_treatment_override === VAT_TREATMENT_THIRD_PARTY_RECIPIENT ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
+                    >
+                      Factura completa — IVA no deducible
                     </button>
                   </div>
                   {editForm.document_type === 'SIMPLIFIED_INVOICE' && (() => {
@@ -936,6 +964,28 @@ export default function ReviewQueuePage() {
                         <div>IVA documento: {formatCurrency(taxAmount, editForm.currency)}</div>
                         <div className="font-medium text-gray-900">IVA deducible: {formatCurrency(0, editForm.currency)}</div>
                         <div className="font-medium text-gray-900">Gasto computable: {formatCurrency(totalAmount, editForm.currency)}</div>
+                      </div>
+                    );
+                  })()}
+                  {editForm.vat_treatment_override === VAT_TREATMENT_THIRD_PARTY_RECIPIENT && (() => {
+                    const taxAmount = Number(editForm.tax_amount) || 0;
+                    const totalAmount = Number(editForm.total_amount) || 0;
+                    return (
+                      <div className="space-y-2">
+                        <div className="text-xs text-gray-600 bg-gray-50 rounded-md p-2 space-y-0.5">
+                          <div>Motivo: {VAT_TREATMENT_OVERRIDE_LABELS_ES[VAT_TREATMENT_THIRD_PARTY_RECIPIENT]}</div>
+                          <div>IVA del documento: {formatCurrency(taxAmount, editForm.currency)}</div>
+                          <div className="font-medium text-gray-900">IVA deducible: {formatCurrency(0, editForm.currency)}</div>
+                          <div className="font-medium text-gray-900">Gasto: {formatCurrency(totalAmount, editForm.currency)}</div>
+                        </div>
+                        <div className="space-y-1">
+                          <Label>Nota (opcional)</Label>
+                          <Input
+                            value={editForm.vat_treatment_override_note ?? ''}
+                            onChange={(e: any) => setEditForm({ ...editForm, vat_treatment_override_note: e.target.value })}
+                            placeholder="Ej. Factura de suministros del local, emitida a la propietaria"
+                          />
+                        </div>
                       </div>
                     );
                   })()}

@@ -27,6 +27,10 @@ function invoice(overrides: Partial<PreservableFiscalFields>): PreservableFiscal
     fiscal_period_quarter: null,
     fiscal_period_set_by: null,
     fiscal_period_set_at: null,
+    vat_treatment_override: null,
+    vat_treatment_override_note: null,
+    vat_treatment_override_set_by: null,
+    vat_treatment_override_set_at: null,
     ...overrides,
   };
 }

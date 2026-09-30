@@ -7,6 +7,8 @@ import { getDeductibleInputVat, getExpenseAmount, getEffectiveFiscalPeriod } fro
 import {
   isValidDocumentTypeValue,
   isValidFiscalPeriodValue,
+  isValidVatTreatmentOverrideValue,
+  isVatTreatmentOverrideConsistentWithDocumentType,
   buildFiscalOverrideUpdate,
 } from '@/lib/invoice-fiscal-override';
 
@@ -144,17 +146,34 @@ export async function PATCH(
     ) {
       return NextResponse.json({ message: 'Invalid fiscal_period_year/fiscal_period_quarter' }, { status: 400 });
     }
+    if ('vat_treatment_override' in body && !isValidVatTreatmentOverrideValue(body.vat_treatment_override)) {
+      return NextResponse.json({ message: 'Invalid vat_treatment_override' }, { status: 400 });
+    }
+    if ('vat_treatment_override' in body) {
+      const resolvedDocumentType = 'document_type' in body ? (body.document_type ?? null) : existingInvoice.document_type;
+      if (!isVatTreatmentOverrideConsistentWithDocumentType(resolvedDocumentType, body.vat_treatment_override ?? null)) {
+        return NextResponse.json(
+          { message: 'vat_treatment_override cannot be combined with document_type = SIMPLIFIED_INVOICE' },
+          { status: 400 },
+        );
+      }
+    }
 
     const { updateData: fiscalOverrideUpdate, auditEntries: fiscalAuditEntries } = buildFiscalOverrideUpdate(
       {
         document_type: existingInvoice.document_type,
         fiscal_period_year: existingInvoice.fiscal_period_year,
         fiscal_period_quarter: existingInvoice.fiscal_period_quarter,
+        vat_treatment_override: existingInvoice.vat_treatment_override,
+        vat_treatment_override_note: existingInvoice.vat_treatment_override_note,
       },
       {
         ...('document_type' in body ? { document_type: body.document_type } : {}),
         ...('fiscal_period_year' in body || 'fiscal_period_quarter' in body
           ? { fiscal_period_year: body.fiscal_period_year ?? null, fiscal_period_quarter: body.fiscal_period_quarter ?? null }
+          : {}),
+        ...('vat_treatment_override' in body
+          ? { vat_treatment_override: body.vat_treatment_override ?? null, vat_treatment_override_note: body.vat_treatment_override_note ?? null }
           : {}),
       },
       session.user.id,

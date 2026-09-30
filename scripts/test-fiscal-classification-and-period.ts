@@ -71,7 +71,7 @@ console.log('\nCase 5: explicit fiscal_period overrides ONLY the fiscal period, 
 console.log('\nCase 6: buildFiscalOverrideUpdate never touches issue_date, even when overriding fiscal_period\n');
 {
   const { updateData } = buildFiscalOverrideUpdate(
-    { document_type: null, fiscal_period_year: null, fiscal_period_quarter: null },
+    { document_type: null, fiscal_period_year: null, fiscal_period_quarter: null, vat_treatment_override: null, vat_treatment_override_note: null },
     { fiscal_period_year: 2026, fiscal_period_quarter: 3 },
     'user_gascon',
   );
@@ -95,7 +95,7 @@ console.log('\nCase 9: suggested_document_type is never equivalent to a confirme
   // ...but buildFiscalOverrideUpdate only ever acts on an EXPLICIT request —
   // the suggestion by itself never enters the update payload.
   const { updateData, auditEntries } = buildFiscalOverrideUpdate(
-    { document_type: null, fiscal_period_year: null, fiscal_period_quarter: null },
+    { document_type: null, fiscal_period_year: null, fiscal_period_quarter: null, vat_treatment_override: null, vat_treatment_override_note: null },
     {}, // nothing explicitly requested — the suggestion above is NOT passed in
     'user_barbara',
   );
@@ -135,7 +135,7 @@ console.log('\nCase: amount < 400€ alone (recipient unidentified, no text sign
 console.log('\nCase 11: AuditLog entry for a document_type reclassification carries old/new values\n');
 {
   const { updateData, auditEntries } = buildFiscalOverrideUpdate(
-    { document_type: null, fiscal_period_year: null, fiscal_period_quarter: null },
+    { document_type: null, fiscal_period_year: null, fiscal_period_quarter: null, vat_treatment_override: null, vat_treatment_override_note: null },
     { document_type: 'SIMPLIFIED_INVOICE' },
     'user_barbara',
     new Date('2026-09-29T10:00:00Z'),
@@ -151,7 +151,7 @@ console.log('\nCase 11: AuditLog entry for a document_type reclassification carr
 console.log('\nCase 12: AuditLog entry for a fiscal_period override carries old/new values\n');
 {
   const { updateData, auditEntries } = buildFiscalOverrideUpdate(
-    { document_type: null, fiscal_period_year: 2026, fiscal_period_quarter: 2 },
+    { document_type: null, fiscal_period_year: 2026, fiscal_period_quarter: 2, vat_treatment_override: null, vat_treatment_override_note: null },
     { fiscal_period_year: 2026, fiscal_period_quarter: 3 },
     'user_gascon',
     new Date('2026-09-29T11:00:00Z'),
@@ -170,6 +170,7 @@ console.log('\nCase 13: Economic Summary respects SIMPLIFIED_INVOICE (gasto = to
     return {
       invoice_type: 'received', subtotal: 100, total_amount: 100, currency: 'EUR',
       fiscal_status: 'classified', gestoria_review_status: 'reviewed_ok', document_type: null,
+      vat_treatment_override: null,
       ...overrides,
     };
   }

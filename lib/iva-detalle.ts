@@ -64,6 +64,7 @@ export async function buildIvaDetalle(
       total_amount: true,
       tax_rate: true,
       document_type: true,
+      vat_treatment_override: true,
       ai_vat_breakdown: true,
       vat_reclassification_attempted: true,
       invoice_lines: { select: { tax_rate: true, total_amount: true } },

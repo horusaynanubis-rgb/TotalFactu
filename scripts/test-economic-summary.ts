@@ -36,6 +36,7 @@ function invoice(overrides: Partial<EconomicInvoiceInput>): EconomicInvoiceInput
     fiscal_status: 'classified',
     gestoria_review_status: 'reviewed_ok',
     document_type: null, // legacy/unconfirmed — must behave exactly as before this field existed
+    vat_treatment_override: null, // untouched — must behave exactly as before this field existed
     ...overrides,
   };
 }

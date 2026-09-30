@@ -21,6 +21,10 @@ export interface PreservableFiscalFields {
   fiscal_period_quarter: number | null;
   fiscal_period_set_by: string | null;
   fiscal_period_set_at: Date | null;
+  vat_treatment_override: string | null;
+  vat_treatment_override_note: string | null;
+  vat_treatment_override_set_by: string | null;
+  vat_treatment_override_set_at: Date | null;
 }
 
 export type PreservedFiscalFields = Partial<PreservableFiscalFields>;
@@ -38,6 +42,10 @@ export type PreservedFiscalFields = Partial<PreservableFiscalFields>;
  * - fiscal_period_year/quarter is preserved only if a human explicitly set it
  *   (fiscal_period_set_by is set) — i.e. only for manual overrides, never for
  *   a still-untouched NULL.
+ * - vat_treatment_override (+ its note) is preserved only if a human
+ *   explicitly set it (vat_treatment_override_set_by is set) — same
+ *   criterion as document_type, kept as its own independent check since the
+ *   two are independent decisions (see lib/invoice-fiscal-treatment.ts).
  */
 export function extractPreservedFiscalFields(
   oldInvoice: PreservableFiscalFields,
@@ -55,6 +63,13 @@ export function extractPreservedFiscalFields(
     preserved.fiscal_period_quarter = oldInvoice.fiscal_period_quarter;
     preserved.fiscal_period_set_by = oldInvoice.fiscal_period_set_by;
     preserved.fiscal_period_set_at = oldInvoice.fiscal_period_set_at;
+  }
+
+  if (oldInvoice.vat_treatment_override_set_by) {
+    preserved.vat_treatment_override = oldInvoice.vat_treatment_override;
+    preserved.vat_treatment_override_note = oldInvoice.vat_treatment_override_note;
+    preserved.vat_treatment_override_set_by = oldInvoice.vat_treatment_override_set_by;
+    preserved.vat_treatment_override_set_at = oldInvoice.vat_treatment_override_set_at;
   }
 
   return preserved;

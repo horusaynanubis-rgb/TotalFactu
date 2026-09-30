@@ -7,6 +7,8 @@ import { sendGestoriaMessageEmail } from '@/lib/email';
 import {
   isValidDocumentTypeValue,
   isValidFiscalPeriodValue,
+  isValidVatTreatmentOverrideValue,
+  isVatTreatmentOverrideConsistentWithDocumentType,
   buildFiscalOverrideUpdate,
 } from '@/lib/invoice-fiscal-override';
 
@@ -230,13 +232,26 @@ export async function PATCH(
 
   const invoice = await prisma.invoice.findFirst({
     where: { id: params.invoiceId, company_id: params.clientCompanyId },
-    select: { id: true, document_type: true, fiscal_period_year: true, fiscal_period_quarter: true },
+    select: {
+      id: true,
+      document_type: true,
+      fiscal_period_year: true,
+      fiscal_period_quarter: true,
+      vat_treatment_override: true,
+      vat_treatment_override_note: true,
+    },
   });
   if (!invoice) {
     return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
   }
 
-  let body: { document_type?: string | null; fiscal_period_year?: number | null; fiscal_period_quarter?: number | null };
+  let body: {
+    document_type?: string | null;
+    fiscal_period_year?: number | null;
+    fiscal_period_quarter?: number | null;
+    vat_treatment_override?: string | null;
+    vat_treatment_override_note?: string | null;
+  };
   try {
     body = await request.json();
   } catch {
@@ -252,6 +267,18 @@ export async function PATCH(
   ) {
     return NextResponse.json({ error: 'Invalid fiscal_period_year/fiscal_period_quarter' }, { status: 400 });
   }
+  if ('vat_treatment_override' in body && !isValidVatTreatmentOverrideValue(body.vat_treatment_override)) {
+    return NextResponse.json({ error: 'Invalid vat_treatment_override' }, { status: 400 });
+  }
+  if ('vat_treatment_override' in body) {
+    const resolvedDocumentType = 'document_type' in body ? (body.document_type ?? null) : invoice.document_type;
+    if (!isVatTreatmentOverrideConsistentWithDocumentType(resolvedDocumentType as any, (body.vat_treatment_override ?? null) as any)) {
+      return NextResponse.json(
+        { error: 'vat_treatment_override cannot be combined with document_type = SIMPLIFIED_INVOICE' },
+        { status: 400 },
+      );
+    }
+  }
 
   const { updateData, auditEntries } = buildFiscalOverrideUpdate(
     invoice,
@@ -259,6 +286,9 @@ export async function PATCH(
       ...('document_type' in body ? { document_type: (body.document_type ?? null) as 'FULL_INVOICE' | 'SIMPLIFIED_INVOICE' | null } : {}),
       ...('fiscal_period_year' in body || 'fiscal_period_quarter' in body
         ? { fiscal_period_year: body.fiscal_period_year ?? null, fiscal_period_quarter: body.fiscal_period_quarter ?? null }
+        : {}),
+      ...('vat_treatment_override' in body
+        ? { vat_treatment_override: (body.vat_treatment_override ?? null) as any, vat_treatment_override_note: body.vat_treatment_override_note ?? null }
         : {}),
     },
     session.user.id,

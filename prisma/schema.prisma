@@ -398,6 +398,25 @@ model Invoice {
   fiscal_period_set_by            String?   // User.id who confirmed/overrode — null if never touched by a human
   fiscal_period_set_at            DateTime?
 
+  // VAT-deductibility override, independent of document_type (2026-09-30,
+  // Marc/Gascón "AIGÜES" case). document_type answers "what kind of document
+  // is this" (legal/documental classification); vat_treatment_override
+  // answers "why is the deductible VAT 0 even though this IS a full invoice"
+  // — the two axes are deliberately kept separate so a FULL_INVOICE issued to
+  // a third party is never misrepresented as a SIMPLIFIED_INVOICE. NULL =
+  // today's behavior, unchanged. 'THIRD_PARTY_RECIPIENT' = confirmed full
+  // invoice whose fiscal recipient is not this company (e.g. a utility bill
+  // addressed to the premises' individual owner, repercuted to the company).
+  // Stable string code (not free text) so lib/invoice-fiscal-treatment.ts's
+  // VAT_TREATMENT_OVERRIDE_EFFECTS table — the single point of truth for what
+  // each code means — can key off it; only a human PATCH sets this, exactly
+  // like document_type. String, not a Prisma enum, for the same reason
+  // document_type isn't one (see comment above document_type).
+  vat_treatment_override          String?   // NULL | THIRD_PARTY_RECIPIENT
+  vat_treatment_override_note     String?   // optional free-text human context, alongside the stable code
+  vat_treatment_override_set_by   String?   // User.id who confirmed — null if never touched by a human
+  vat_treatment_override_set_at   DateTime?
+
   created_at             DateTime @default(now())
   updated_at             DateTime @updatedAt
 
@@ -420,6 +439,7 @@ model Invoice {
   @@index([fiscal_status])
   @@index([document_type])
   @@index([company_id, fiscal_period_year, fiscal_period_quarter])
+  @@index([vat_treatment_override])
 }
 
 model DeliveryNote {
