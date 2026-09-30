@@ -45,6 +45,13 @@ import {
   PenLine,
   Filter,
   RefreshCw,
+  Wallet,
+  Banknote,
+  CreditCard,
+  Smartphone,
+  ArrowLeftRight,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { getUnifiedStatus } from '@/lib/unified-status';
 import { StatusBadge } from '@/components/status-badge';
@@ -194,7 +201,67 @@ interface FiscalDocRow {
   created_at: string;
 }
 
+// Caja y cobros — read-only mirror of the company page's row shape
+// (app/(dashboard)/dashboard/caja-cobros/page.tsx). One row = one calendar
+// day (DailyCashRegister), never an individual payment/ticket.
+interface CajaRegisterRow {
+  id: string;
+  date: string;
+  cash_amount: string | number;
+  card_amount: string | number;
+  bizum_amount: string | number;
+  transfer_amount: string | number;
+  other_amount: string | number;
+  total_amount: string | number;
+  notes: string | null;
+  source: 'manual' | 'ai' | 'excel_import';
+  status: 'confirmed' | 'pending_review';
+}
+
+interface CajaSummary {
+  cash_amount: number;
+  card_amount: number;
+  bizum_amount: number;
+  transfer_amount: number;
+  other_amount: number;
+  total_amount: number;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function fmtCajaAmount(value: string | number): string {
+  return `${Number(value).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+}
+
+function fmtCajaDate(dateStr: string): string {
+  return new Date(dateStr).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+function cajaOrigenLabel(source: string): string {
+  if (source === 'manual') return 'Manual';
+  if (source === 'excel_import') return 'Excel';
+  if (source === 'ai') return 'IA';
+  return source;
+}
+
+function downloadFile(url: string, fallbackName: string) {
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fallbackName;
+  a.click();
+}
+
+async function downloadBlobFrom(url: string, fallbackName: string): Promise<void> {
+  const res = await fetch(url, { credentials: 'include' });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(text || `Error ${res.status}`);
+  }
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  downloadFile(objectUrl, fallbackName);
+  URL.revokeObjectURL(objectUrl);
+}
 
 function docStatusBadge(status: string) {
   if (status === 'completed')
@@ -379,6 +446,15 @@ export default function ClientDetailPage() {
   // Per-document action loading
   const [actionDocId, setActionDocId] = useState<string | null>(null);
   const [downloadingExportId, setDownloadingExportId] = useState<string | null>(null);
+
+  // Caja y cobros (lazy — loaded on first activation of that tab)
+  const [cajaRegisters, setCajaRegisters] = useState<CajaRegisterRow[]>([]);
+  const [cajaSummary, setCajaSummary] = useState<CajaSummary | null>(null);
+  const [loadingCaja, setLoadingCaja] = useState(false);
+  const cajaTabActivated = useRef(false);
+  const [cajaYear, setCajaYear] = useState(new Date().getFullYear());
+  const [cajaMonth, setCajaMonth] = useState(new Date().getMonth() + 1);
+  const [downloadingCajaCsv, setDownloadingCajaCsv] = useState(false);
 
   // A3 document export
   const [exportFrom, setExportFrom] = useState('');
@@ -923,8 +999,53 @@ export default function ClientDetailPage() {
     }
   };
 
+  const loadCaja = (year = cajaYear, month = cajaMonth) => {
+    setLoadingCaja(true);
+    fetch(`/api/gestoria/clients/${params.clientCompanyId}/caja-cobros?year=${year}&month=${month}`)
+      .then((r) => {
+        if (!r.ok) throw new Error();
+        return r.json();
+      })
+      .then((data) => {
+        setCajaRegisters(data.registers ?? []);
+        setCajaSummary(data.summary ?? null);
+      })
+      .catch(() => toast.error('Error al cargar caja y cobros'))
+      .finally(() => setLoadingCaja(false));
+  };
+
+  const navCajaMonth = (delta: number) => {
+    let m = cajaMonth + delta;
+    let y = cajaYear;
+    if (m > 12) { m = 1; y++; }
+    if (m < 1) { m = 12; y--; }
+    setCajaMonth(m);
+    setCajaYear(y);
+    loadCaja(y, m);
+  };
+
+  const handleDownloadCajaCsv = async () => {
+    setDownloadingCajaCsv(true);
+    try {
+      const params2 = new URLSearchParams({ scope: 'monthly', year: String(cajaYear), month: String(cajaMonth) });
+      await downloadBlobFrom(
+        `/api/gestoria/clients/${params.clientCompanyId}/caja-cobros/export?${params2}`,
+        `caja_cobros_${String(cajaMonth).padStart(2, '0')}_${cajaYear}.csv`,
+      );
+      toast.success('Caja y cobros (CSV) descargado');
+    } catch (err: any) {
+      toast.error(err?.message || 'No se pudo generar el CSV de caja y cobros');
+    } finally {
+      setDownloadingCajaCsv(false);
+    }
+  };
+
   const handleTabChange = (tab: string) => {
     if (tab === 'documentos') loadDocuments();
+    if (tab === 'caja-cobros' && !cajaTabActivated.current) {
+      cajaTabActivated.current = true;
+      loadCaja();
+    }
     if (tab === 'facturas' && !invoicesTabActivated.current) {
       invoicesTabActivated.current = true;
       doFetchInvoices(true);
@@ -1062,6 +1183,10 @@ export default function ClientDetailPage() {
           <TabsTrigger value="facturas">
             <Receipt className="h-4 w-4 mr-1.5" />
             Facturas
+          </TabsTrigger>
+          <TabsTrigger value="caja-cobros">
+            <Wallet className="h-4 w-4 mr-1.5" />
+            Caja y cobros
           </TabsTrigger>
           <TabsTrigger value="revision">
             <AlertTriangle className="h-4 w-4 mr-1.5" />
@@ -1835,6 +1960,137 @@ export default function ClientDetailPage() {
           </Card>
         </TabsContent>
 
+        {/* ── CAJA Y COBROS (read-only mirror of the company's own Caja y Cobros — same
+            DailyCashRegister data, same period math and CSV as app/(dashboard)/dashboard/caja-cobros) ── */}
+        <TabsContent value="caja-cobros" className="mt-6 space-y-6">
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Wallet className="h-4 w-4" />
+                  Caja y cobros
+                </CardTitle>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="icon" onClick={() => navCajaMonth(-1)} disabled={loadingCaja}>
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <span className="text-sm font-medium min-w-[110px] text-center">
+                    {new Date(cajaYear, cajaMonth - 1, 1).toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })}
+                  </span>
+                  <Button variant="outline" size="icon" onClick={() => navCajaMonth(1)} disabled={loadingCaja}>
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                  <Button onClick={handleDownloadCajaCsv} disabled={downloadingCajaCsv || loadingCaja}>
+                    {downloadingCajaCsv ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Download className="h-4 w-4 mr-2" />
+                    )}
+                    Caja y cobros (CSV)
+                  </Button>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground pt-1">
+                Cierres de caja confirmados por el cliente para el mes seleccionado. Solo se muestran los días
+                con un cierre registrado — los días sin cierre no aparecen como fila ni se cuentan como 0.
+              </p>
+            </CardHeader>
+            <CardContent>
+              {loadingCaja ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : (
+                <>
+                  {cajaSummary && (
+                    <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-5 mb-6">
+                      <Card>
+                        <CardContent className="pt-5 pb-4">
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
+                            <Banknote className="h-4 w-4" />Efectivo
+                          </div>
+                          <p className="text-lg font-bold">{fmtCajaAmount(cajaSummary.cash_amount)}</p>
+                        </CardContent>
+                      </Card>
+                      <Card>
+                        <CardContent className="pt-5 pb-4">
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
+                            <CreditCard className="h-4 w-4" />Tarjeta
+                          </div>
+                          <p className="text-lg font-bold">{fmtCajaAmount(cajaSummary.card_amount)}</p>
+                        </CardContent>
+                      </Card>
+                      <Card>
+                        <CardContent className="pt-5 pb-4">
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
+                            <Smartphone className="h-4 w-4" />Bizum
+                          </div>
+                          <p className="text-lg font-bold">{fmtCajaAmount(cajaSummary.bizum_amount)}</p>
+                        </CardContent>
+                      </Card>
+                      <Card>
+                        <CardContent className="pt-5 pb-4">
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
+                            <ArrowLeftRight className="h-4 w-4" />Transferencias
+                          </div>
+                          <p className="text-lg font-bold">{fmtCajaAmount(cajaSummary.transfer_amount)}</p>
+                        </CardContent>
+                      </Card>
+                      <Card>
+                        <CardContent className="pt-5 pb-4">
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
+                            <Wallet className="h-4 w-4" />Total mes
+                          </div>
+                          <p className="text-lg font-bold">{fmtCajaAmount(cajaSummary.total_amount)}</p>
+                        </CardContent>
+                      </Card>
+                    </div>
+                  )}
+
+                  {cajaRegisters.length === 0 ? (
+                    <p className="text-center text-muted-foreground py-8">
+                      No hay cierres de caja confirmados para este mes.
+                    </p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Fecha</TableHead>
+                            <TableHead className="text-right">Efectivo</TableHead>
+                            <TableHead className="text-right">Tarjeta</TableHead>
+                            <TableHead className="text-right">Bizum</TableHead>
+                            <TableHead className="text-right">Transferencia</TableHead>
+                            <TableHead className="text-right">Otros</TableHead>
+                            <TableHead className="text-right">Total</TableHead>
+                            <TableHead>Origen</TableHead>
+                            <TableHead>Notas</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {cajaRegisters.map((r) => (
+                            <TableRow key={r.id}>
+                              <TableCell className="whitespace-nowrap">{fmtCajaDate(r.date)}</TableCell>
+                              <TableCell className="text-right">{fmtCajaAmount(r.cash_amount)}</TableCell>
+                              <TableCell className="text-right">{fmtCajaAmount(r.card_amount)}</TableCell>
+                              <TableCell className="text-right">{fmtCajaAmount(r.bizum_amount)}</TableCell>
+                              <TableCell className="text-right">{fmtCajaAmount(r.transfer_amount)}</TableCell>
+                              <TableCell className="text-right">{fmtCajaAmount(r.other_amount)}</TableCell>
+                              <TableCell className="text-right font-medium">{fmtCajaAmount(r.total_amount)}</TableCell>
+                              <TableCell className="text-sm text-muted-foreground">{cajaOrigenLabel(r.source)}</TableCell>
+                              <TableCell className="text-sm text-muted-foreground max-w-[200px] truncate">{r.notes ?? '—'}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         {/* ── REVISIÓN ────────────────────────────────────────────────────── */}
         <TabsContent value="revision" className="mt-6">
           <Card>
@@ -2346,9 +2602,11 @@ export default function ClientDetailPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <p className="text-sm text-muted-foreground">
-                Genera un ZIP con el resumen trimestral, las facturas del periodo y/o la documentación
-                fiscal complementaria (contratos, escrituras, retenciones...), organizados en carpetas
-                separadas. No sustituye a la exportación CSV habitual ni a Exportar A3.
+                Genera un ZIP con el resumen trimestral, las facturas del periodo, la documentación
+                fiscal complementaria (contratos, escrituras, retenciones...) y — en modo "Exportación
+                completa" — la caja y TPV del periodo (<code>caja_tpv.csv</code>), organizados en carpetas
+                separadas. Para descargar solo la caja y cobros, usa la pestaña "Caja y cobros". No sustituye
+                a la exportación CSV habitual ni a Exportar A3.
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -2391,7 +2649,7 @@ export default function ClientDetailPage() {
                   >
                     <option value="csv">Solo CSV (resumen + facturas)</option>
                     <option value="fiscal">Solo documentación fiscal</option>
-                    <option value="complete">Exportación completa</option>
+                    <option value="complete">Exportación completa (incluye caja y TPV)</option>
                   </select>
                 </div>
               </div>

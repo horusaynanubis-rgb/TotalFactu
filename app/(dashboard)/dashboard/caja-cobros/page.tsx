@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { DocumentPreviewModal } from '@/components/document-preview-modal';
+import { buildMonthlyCajaCSV, buildMonthlyCajaXLSXHtml } from '@/lib/caja-monthly-quick-export';
 import {
   Banknote, CreditCard, Smartphone, ArrowLeftRight, PackagePlus,
   Plus, Pencil, Trash2, Loader2, X, ChevronLeft, ChevronRight,
@@ -161,20 +162,7 @@ function getAiRawData(r: DailyCashRegister): Record<string, any> {
 // ---------------------------------------------------------------------------
 
 function exportCSV(registers: DailyCashRegister[], year: number, month: number) {
-  const header = 'Fecha,Efectivo,TPV,Bizum,Transferencias,Otros,Total,Origen,Observaciones';
-  const rows = registers.map((r) => [
-    new Date(r.date).toLocaleDateString('es-ES'),
-    Number(r.cash_amount).toFixed(2),
-    Number(r.card_amount).toFixed(2),
-    Number(r.bizum_amount).toFixed(2),
-    Number(r.transfer_amount).toFixed(2),
-    Number(r.other_amount).toFixed(2),
-    Number(r.total_amount).toFixed(2),
-    r.source === 'ai' ? 'IA' : 'Manual',
-    `"${(r.notes ?? '').replace(/"/g, '""')}"`,
-  ].join(','));
-
-  const csv = [header, ...rows].join('\n');
+  const csv = buildMonthlyCajaCSV(registers);
   const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -185,24 +173,7 @@ function exportCSV(registers: DailyCashRegister[], year: number, month: number) 
 }
 
 function exportXLSX(registers: DailyCashRegister[], year: number, month: number) {
-  const header = ['Fecha','Efectivo','TPV','Bizum','Transferencias','Otros','Total','Origen','Observaciones'];
-  const rows = registers.map((r) => [
-    new Date(r.date).toLocaleDateString('es-ES'),
-    Number(r.cash_amount).toFixed(2),
-    Number(r.card_amount).toFixed(2),
-    Number(r.bizum_amount).toFixed(2),
-    Number(r.transfer_amount).toFixed(2),
-    Number(r.other_amount).toFixed(2),
-    Number(r.total_amount).toFixed(2),
-    r.source === 'ai' ? 'IA' : 'Manual',
-    r.notes ?? '',
-  ]);
-
-  const tableRows = [header, ...rows]
-    .map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join('')}</tr>`)
-    .join('');
-
-  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="UTF-8"/></head><body><table>${tableRows}</table></body></html>`;
+  const html = buildMonthlyCajaXLSXHtml(registers);
   const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

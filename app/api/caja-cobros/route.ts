@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/auth-options';
 import { prisma } from '@/lib/prisma';
+import { getMonthRange } from '@/lib/caja-period';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,8 +29,7 @@ export async function GET(request: NextRequest) {
   const year  = parseInt(searchParams.get('year')  ?? String(new Date().getFullYear()));
   const month = parseInt(searchParams.get('month') ?? String(new Date().getMonth() + 1));
 
-  const from = new Date(year, month - 1, 1);
-  const to   = new Date(year, month, 1); // exclusive upper bound
+  const { from, to } = getMonthRange(year, month);
 
   // Only show confirmed registers in the main list/summary
   const [registers, summary, pendingAI] = await Promise.all([
